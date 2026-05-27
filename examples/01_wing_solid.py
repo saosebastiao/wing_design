@@ -1,4 +1,4 @@
-"""Phase-1 sanity check: build the wingsail outer solid and export STEP + STL."""
+"""Phase-1 sanity check: build the wingsail outer solid, export STEP+STL, view in OCP CAD Viewer."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,6 +6,7 @@ from pathlib import Path
 from build123d import export_step, export_stl
 
 from wing_design.geometry import WingSpec, build_wing_solid
+from wing_design.viz import show_in_viewer
 
 
 def main() -> None:
@@ -18,6 +19,7 @@ def main() -> None:
     print(f"Wrote {out}/wingsail_v0.{{step,stl}}")
     print(f"Solid volume (model units = m): {part.volume:.4g} m^3")
     print(f"Bounding box: {part.bounding_box()}")
+    show_in_viewer(part, names=["wingsail"])
 
 
 if __name__ == "__main__":

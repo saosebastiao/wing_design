@@ -10,6 +10,7 @@ requires-python = ">=3.10,<3.13"
 dependencies = [
     "aerosandbox>=4.2.9",
     "build123d>=0.10.0",
+    "ocp-vscode>=3.4.0",
 ]
 
 [project.scripts]

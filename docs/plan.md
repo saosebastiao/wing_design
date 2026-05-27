@@ -134,6 +134,11 @@ ASB ships `TubeSparBendingStructure` (tapered Euler-Bernoulli cantilever, isotro
 - Add fatigue, dynamic (flutter, vortex shedding), and impact load cases.
 - Hardware bring-up: 1 m test wing, bench loading.
 
+## Tooling
+
+- **Geometry viewer**: examples that produce build123d geometry call `wing_design.show_in_viewer(part)`, which sends to the **OCP CAD Viewer** VS Code extension (by bernhard-42) on port 3939. Install the extension, then run *OCP CAD Viewer: Open Viewer* from the command palette before running examples. If the viewer isn't running, the call is a no-op with a printed hint — `just example 01_wing_solid` still completes and writes STEP/STL.
+- **Python interpreter for VS Code**: select `.venv/bin/python` so basedpyright resolves `build123d`, `aerosandbox`, etc.
+
 ## Module map
 
 ```
