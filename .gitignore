@@ -10,3 +10,6 @@ wheels/
 .venv
 prompts/
 .DS_Store
+
+# Generated artifacts
+exports/
