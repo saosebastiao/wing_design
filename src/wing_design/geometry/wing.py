@@ -47,6 +47,65 @@ class WingSpec:
     n_sections: int = 5                # spanwise airfoil sections (root..tip inclusive)
     n_airfoil_points: int = 160        # polyline resolution on the airfoil
 
+    # Piecewise-linear taper profile: tuple of (z_frac, chord_frac) knots, both
+    # monotonically increasing in z_frac. `chord_frac = chord(z) / root_chord`.
+    # The first knot must be (0.0, 1.0); the last knot's z_frac must be 1.0
+    # and its chord_frac defines the tip. Default `None` means use the legacy
+    # linear interpolation between `root_chord` and `tip_chord`.
+    #
+    # Example — entasis (gentle inboard, sharp outboard):
+    #   taper_profile = ((0.0, 1.0), (0.8, 0.9), (1.0, 0.6))
+    taper_profile: tuple[tuple[float, float], ...] | None = None
+
+    def chord_at_z(self, z: float) -> float:
+        """Piecewise-linear chord(z) through the taper profile (m).
+
+        Below z = 0 we clamp to `root_chord` so the fairing region uses the
+        root cross-section. Above z = span we clamp to the tip chord.
+        """
+        if z <= 0.0:
+            return self.root_chord
+        z_frac = min(z / self.span, 1.0)
+        knots = self.taper_profile
+        if knots is None:
+            # Legacy linear taper: tip_chord / root_chord at z_frac = 1.
+            return self.root_chord + z_frac * (self.tip_chord - self.root_chord)
+        # Find the bracketing knots and interpolate.
+        for i in range(len(knots) - 1):
+            z0, c0 = knots[i]
+            z1, c1 = knots[i + 1]
+            if z_frac <= z1:
+                t = (z_frac - z0) / max(z1 - z0, 1.0e-12)
+                return self.root_chord * (c0 + t * (c1 - c0))
+        return self.root_chord * knots[-1][1]
+
+    @property
+    def section_z_fractions(self) -> tuple[float, ...]:
+        """Spanwise positions (z / span) at which the loft and the ASB wing
+        need cross-sections — every taper-profile knot, padded out to at least
+        `n_sections` total via evenly-spaced fill points.
+        """
+        if self.taper_profile is None:
+            return tuple(i / (self.n_sections - 1) for i in range(self.n_sections))
+        knots = sorted(z for z, _ in self.taper_profile)
+        # Insert evenly-spaced points between knots if n_sections asks for more.
+        extras: list[float] = []
+        n_existing = len(knots)
+        if self.n_sections > n_existing:
+            need = self.n_sections - n_existing
+            # Distribute extras into the longest gaps first.
+            gaps = [(knots[i + 1] - knots[i], i) for i in range(n_existing - 1)]
+            gaps.sort(reverse=True)
+            for k in range(need):
+                gap, i = gaps[k % len(gaps)]
+                # Linear subdivision of that gap.
+                pieces = 2 + (k // len(gaps))
+                step = gap / pieces
+                for p in range(1, pieces):
+                    extras.append(knots[i] + p * step)
+        all_z = sorted(set(round(z, 9) for z in knots + extras))
+        return tuple(all_z)
+
 
 def _airfoil_to_circle_polyline(
     chord: float,
@@ -115,10 +174,12 @@ def build_wing_solid(spec: WingSpec = WingSpec()):
     """
     sections: list = []
 
-    # Wing: tip (high z) down to root (z = 0), pure airfoil at each station
-    for i in range(spec.n_sections - 1, -1, -1):
-        frac = i / (spec.n_sections - 1)
-        chord = spec.root_chord + frac * (spec.tip_chord - spec.root_chord)
+    # Wing: tip (high z) down to root (z = 0), pure airfoil at each station.
+    # Sections are placed at every taper-profile knot so a non-linear taper
+    # is sampled exactly at its corners (no smoothing across the entasis knee).
+    z_fracs = spec.section_z_fractions
+    for frac in reversed(z_fracs):
+        chord = spec.chord_at_z(frac * spec.span)
         face = _section_face(
             chord, spec.thickness, spec.pivot_frac, spec.spar_diameter, blend=0.0,
             n_pts=spec.n_airfoil_points,

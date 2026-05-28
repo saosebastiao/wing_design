@@ -22,27 +22,39 @@ def _naca_00xx_name(thickness: float) -> str:
 
 
 def build_asb_wing(spec: WingSpec) -> asb.Wing:
-    """Two-station tapered ASB wing matching `spec` (linear taper)."""
+    """ASB wing matching `spec` — one WingXSec per taper-profile knot.
+
+    Note the axis swap: structural geometry frame has span in +Z, but ASB's
+    convention puts span in +Y. So a structural z-fraction maps to an ASB
+    y-coordinate of `frac * spec.span`.
+    """
     airfoil = asb.Airfoil(_naca_00xx_name(spec.thickness))
-    root = asb.WingXSec(
-        xyz_le=[-spec.pivot_frac * spec.root_chord, 0.0, 0.0],
-        chord=spec.root_chord,
-        twist=0.0,
-        airfoil=airfoil,
-    )
-    tip = asb.WingXSec(
-        xyz_le=[-spec.pivot_frac * spec.tip_chord, spec.span, 0.0],
-        chord=spec.tip_chord,
-        twist=0.0,
-        airfoil=airfoil,
-    )
-    return asb.Wing(name="wingsail", xsecs=[root, tip], symmetric=False)
+    xsecs = []
+    for frac in spec.section_z_fractions:
+        chord = spec.chord_at_z(frac * spec.span)
+        xsecs.append(asb.WingXSec(
+            xyz_le=[-spec.pivot_frac * chord, frac * spec.span, 0.0],
+            chord=chord,
+            twist=0.0,
+            airfoil=airfoil,
+        ))
+    return asb.Wing(name="wingsail", xsecs=xsecs, symmetric=False)
 
 
 def build_airplane(spec: WingSpec) -> asb.Airplane:
     """ASB Airplane wrapping the wingsail. `xyz_ref` is the pivot at the root."""
     wing = build_asb_wing(spec)
-    mean_chord = 0.5 * (spec.root_chord + spec.tip_chord)
+    # Mean aerodynamic chord ≈ area-weighted average over the span.
+    z_fracs = spec.section_z_fractions
+    chord_samples = [spec.chord_at_z(f * spec.span) for f in z_fracs]
+    if len(z_fracs) >= 2:
+        area = 0.0
+        for i in range(len(z_fracs) - 1):
+            dz = (z_fracs[i + 1] - z_fracs[i]) * spec.span
+            area += 0.5 * (chord_samples[i] + chord_samples[i + 1]) * dz
+        mean_chord = area / spec.span
+    else:
+        mean_chord = chord_samples[0]
     return asb.Airplane(
         name="wingsail",
         xyz_ref=[0.0, 0.0, 0.0],
