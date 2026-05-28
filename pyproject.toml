@@ -11,6 +11,7 @@ dependencies = [
     "aerosandbox>=4.2.9",
     "build123d>=0.10.0",
     "ocp-vscode>=3.4.0",
+    "ortools>=9.15.6755",
 ]
 
 [project.scripts]
