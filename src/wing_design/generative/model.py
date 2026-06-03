@@ -109,3 +109,58 @@ def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     _add_no_intersection(model, menu, sect)
     _add_coverage(model, menu, sect)
     return model, select, sect
+
+
+def _beam_bucket_mass_kg(menu, beam_id, bucket):
+    b = menu.beam_by_id(beam_id)
+    cs = next(c for c in menu.cross_sections if c.bucket == bucket)
+    return b.length_m * cs.area_m2 * menu.rho_kgm3
+
+
+def _set_mass_objective(model, menu, sect):
+    """Minimize total mass, scaled to integer milligrams."""
+    terms = []
+    for (beam_id, bucket), var in sect.items():
+        mass_mg = round(_beam_bucket_mass_kg(menu, beam_id, bucket) * MASS_SCALE)
+        terms.append(mass_mg * var)
+    model.minimize(sum(terms))
+
+
+def _extract_design(solver, menu, select, sect):
+    chosen = []
+    mass_kg = 0.0
+    for b in menu.beams:
+        if solver.value(select[b.id]) != 1:
+            continue
+        for cs in menu.cross_sections:
+            if solver.value(sect[(b.id, cs.bucket)]) == 1:
+                chosen.append((b.id, cs.bucket))
+                mass_kg += _beam_bucket_mass_kg(menu, b.id, cs.bucket)
+    return WingCandidate(beam_sections=tuple(chosen), mass_kg=mass_kg)
+
+
+def solve_designs(menu, params, top_n=1):
+    """Solve the menu and return up to `top_n` distinct designs by ascending mass.
+
+    Each round minimizes mass, records the design, then adds a no-good cut
+    forbidding that exact (beam, bucket) set before re-solving — so successive
+    designs are distinct and non-decreasing in mass.
+    """
+    model, select, sect = build_cp_model(menu, params)
+    _set_mass_objective(model, menu, sect)
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = params.solver_max_time_s
+
+    designs = []
+    for _ in range(top_n):
+        status = solver.solve(model)
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            break
+        designs.append(_extract_design(solver, menu, select, sect))
+        chosen_vars = [
+            var for key, var in sect.items() if solver.value(var) == 1
+        ]
+        # Forbid this exact selection on the next round.
+        model.add(sum(chosen_vars) <= len(chosen_vars) - 1)
+    return designs

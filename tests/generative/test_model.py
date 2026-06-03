@@ -169,3 +169,28 @@ def test_coverage_infeasible_when_no_bucket_is_big_enough():
     model, select, sect = build_cp_model(m, params)
     solver, status = _solve(model)
     assert status == cp_model.INFEASIBLE
+
+
+import math
+
+from wing_design.generative.model import solve_designs
+from wing_design.generative.menu import WingCandidate
+
+
+def test_solve_picks_minimum_mass_design():
+    # Both beams can cover the target at bucket 0 (area 1e-3). Beam 0 is short
+    # (length 1), beam 1 is long (length 10). Minimum mass picks beam 0.
+    m = menu(
+        [beam(0, length=1.0, covers=(5,)), beam(1, length=10.0, covers=(5,))],
+        cross_sections=cs_catalog([1.0e-3, 2.0e-3]),
+        coverage=[target(5, required_min_area_m2=1.0e-3, candidate_beams=[0, 1])],
+        rho=1550.0,
+    )
+    params = _params(n_beams_min=0, n_beams_max=2)
+    designs = solve_designs(m, params, top_n=1)
+    assert len(designs) == 1
+    best = designs[0]
+    assert isinstance(best, WingCandidate)
+    assert best.beam_sections == ((0, 0),)
+    # mass = length * area * rho = 1.0 * 1e-3 * 1550 = 1.55 kg
+    assert math.isclose(best.mass_kg, 1.55, rel_tol=1e-6)
