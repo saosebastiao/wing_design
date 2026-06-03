@@ -20,6 +20,10 @@ from .menu import (
 )
 from .model import build_cp_model, solve_designs
 from .gate import build_frame, solve_frame
+from .build import wing_candidate_to_part
+from .candidates import build_beam_library
+from .loads import lump_spanwise_force_to_nodes
+from .menu import validate_menu
 
 __all__ = [
     "BeamWrap",
@@ -34,8 +38,12 @@ __all__ = [
     "NodeKind",
     "WingCandidate",
     "WingWrap",
+    "build_beam_library",
     "build_cp_model",
     "build_frame",
+    "lump_spanwise_force_to_nodes",
     "solve_designs",
     "solve_frame",
+    "validate_menu",
+    "wing_candidate_to_part",
 ]
