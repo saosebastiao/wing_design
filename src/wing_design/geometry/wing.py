@@ -80,6 +80,26 @@ class WingSpec:
         return self.root_chord * knots[-1][1]
 
     @property
+    def z_wing_root(self) -> float:
+        """Z of the wing root (lowest full-airfoil station)."""
+        return 0.0
+
+    @property
+    def z_wing_tip(self) -> float:
+        """Z of the wing tip."""
+        return self.span
+
+    @property
+    def z_deck_step(self) -> float:
+        """Z of the deck-step (top of the spar / bottom of the transition span)."""
+        return -self.transition_length
+
+    @property
+    def z_keel_step(self) -> float:
+        """Z of the keel-step (base of the cylindrical spar)."""
+        return -(self.transition_length + self.spar_length)
+
+    @property
     def section_z_fractions(self) -> tuple[float, ...]:
         """Spanwise positions (z / span) at which the loft and the ASB wing
         need cross-sections — every taper-profile knot, padded out to at least
