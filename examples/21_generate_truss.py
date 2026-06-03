@@ -20,7 +20,6 @@ from wing_design.generative import (
     solve_frame,
     wing_candidate_to_part,
 )
-from wing_design.generative.gate import tip_node_indices
 
 EXPORT = Path("exports")
 
