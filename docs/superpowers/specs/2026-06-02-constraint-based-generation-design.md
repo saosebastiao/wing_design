@@ -192,6 +192,22 @@ curvature radius (geometric properties — violating beams never enter the menu)
 max area-step ratio (inert with one section per beam; activates with per-segment
 sections).
 
+**Generator contracts the CP-SAT model depends on but does NOT re-validate**
+(the candidate generator, Plan 1C, must guarantee these; add a `validate_menu`
+guard there that asserts them before solving):
+- **Monotonic-increasing z** per beam centerline — so the tip is always a
+  beam's high-z *end*. The reach-tip constraint checks `end_kind == TIP` only;
+  a non-monotonic beam could otherwise escape it.
+- **Acyclic host graph rooted at the keel** — every `host_id` chain terminates
+  at a keel-rooted beam (`start_kind == KEEL_STEP`, `host_id is None`). This is
+  what makes `select[b] ≤ select[host]` *transitively* ground every selected
+  beam. A host cycle would let an ungrounded floating sub-truss pass the solver.
+- **Reciprocal `mirror_id`** — if beam A's mirror is B, then B's mirror is A;
+  relied on by the symmetry tie.
+- **`solve_designs` ordering** is made robust to solver time-outs by a final
+  sort of the harvested designs by mass (a round may return a non-optimal
+  FEASIBLE design under `solver_max_time_s`).
+
 ### 6.3 Objective
 
 Minimize **mass** = `sum_{b,k} sect[b,k] × (length_b × area_k × ρ)`. Linear
