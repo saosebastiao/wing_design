@@ -1,22 +1,22 @@
 import math
 
-from wing_design.generative.menu import CrossSectionOption, CrossSectionShape, NodeKind
-
-
-def test_cross_section_radius_is_equivalent_circle():
-    cs = CrossSectionOption(bucket=0, shape=CrossSectionShape.CIRCLE, area_m2=math.pi)
-    assert math.isclose(cs.radius_m, 1.0, rel_tol=1e-9)
-
-
 from wing_design.generative.menu import (
     CandidateBeam,
     CandidateMenu,
     CandidateNode,
     ConflictTable,
     CoverageTarget,
+    CrossSectionOption,
+    CrossSectionShape,
     GateResult,
+    NodeKind,
     WingCandidate,
 )
+
+
+def test_cross_section_radius_is_equivalent_circle():
+    cs = CrossSectionOption(bucket=0, shape=CrossSectionShape.CIRCLE, area_m2=math.pi)
+    assert math.isclose(cs.radius_m, 1.0, rel_tol=1e-9)
 
 
 def test_candidate_menu_lookup_and_wing_candidate_ids():

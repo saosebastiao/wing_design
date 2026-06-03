@@ -71,11 +71,11 @@ class CandidateBeam:
     start_node: int
     end_node: int
     length_m: float
-    min_radius_m: float
+    min_radius_m: float  # minimum curvature radius along the centerline (not a section radius)
     on_chord_plane: bool
     mirror_id: int | None
     host_id: int | None
-    covers: tuple[int, ...]
+    covers: tuple[int, ...]  # CoverageTarget ids this beam can satisfy
 
 
 @dataclass(frozen=True)
