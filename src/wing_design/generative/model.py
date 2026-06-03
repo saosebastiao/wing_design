@@ -63,6 +63,19 @@ def _add_topology(model, menu, select):
             model.add(select[b.id] <= select[b.host_id])
 
 
+def _add_reach_tip(model, menu, select):
+    """At least one selected beam must terminate at the wing tip."""
+    from .menu import NodeKind
+
+    tip_beams = [
+        select[b.id]
+        for b in menu.beams
+        if b.start_kind == NodeKind.TIP or b.end_kind == NodeKind.TIP
+    ]
+    if tip_beams:
+        model.add(sum(tip_beams) >= 1)
+
+
 def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     """Build the CP-SAT model. Returns (model, select, sect)."""
     model = cp_model.CpModel()
@@ -70,4 +83,5 @@ def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     _add_count(model, menu, params, select)
     _add_symmetry(model, menu, select, sect)
     _add_topology(model, menu, select)
+    _add_reach_tip(model, menu, select)
     return model, select, sect

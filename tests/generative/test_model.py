@@ -90,3 +90,16 @@ def test_host_can_exist_without_dependent():
     model.add(select[1] == 0)  # host selected, dependent not — must be feasible
     solver, status = _solve(model)
     assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+
+def test_reach_tip_forces_a_tip_beam():
+    # Only beam 0 reaches the tip; beam 1 ends on beam 0. With min=0, the model
+    # must still select at least one tip-reaching beam (beam 0).
+    tip_beam = beam(0, start_kind=NodeKind.KEEL_STEP, end_kind=NodeKind.TIP)
+    inner = beam(1, start_kind=NodeKind.KEEL_STEP, end_kind=NodeKind.ON_BEAM, host_id=0)
+    m = menu([tip_beam, inner])
+    params = _params(n_beams_min=0, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.value(select[0]) == 1
