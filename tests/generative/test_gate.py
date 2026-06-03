@@ -264,6 +264,21 @@ def test_solve_frame_feasible_for_stout_beam_small_load():
     assert result.feasible is True
 
 
+def test_solve_frame_requires_keel_and_deck_landmarks():
+    # If build_frame failed to locate the keel/deck landmarks (e.g. a menu-vs-
+    # endpoint coordinate mismatch), the structure is under-constrained. Reject
+    # it loudly rather than returning a silent rigid-body-drift verdict.
+    frame = FrameModel(
+        coords=np.array([[0, 0, 0], [0, 0, 5.0]], dtype=float),
+        elements=[(0, 1, _A)],
+        node_kinds=[None, NodeKind.TIP],  # no KEEL_STEP / DECK_STEP
+        mass_kg=1.0,
+    )
+    params = default_scenario()
+    with pytest.raises(ValueError, match="KEEL_STEP"):
+        solve_frame(frame, params, {1: (100.0, 0.0, 0.0)})
+
+
 def test_solve_frame_infeasible_under_huge_load():
     menu = _single_beam_menu()
     candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)

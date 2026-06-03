@@ -146,7 +146,14 @@ def solve_displacements(K, load_vec, fixed_dofs):
     free = [d for d in range(n) if d not in fixed]
     Kff = K[np.ix_(free, free)]
     Ff = np.asarray(load_vec, dtype=float)[free]
-    uf = np.linalg.solve(Kff, Ff)
+    try:
+        uf = np.linalg.solve(Kff, Ff)
+    except np.linalg.LinAlgError as exc:
+        raise np.linalg.LinAlgError(
+            "singular reduced stiffness matrix — the frame is under-constrained "
+            "or has disconnected members (e.g. an ON_BEAM junction whose host has "
+            "no control point at the junction coordinate)"
+        ) from exc
     u = np.zeros(n)
     u[free] = uf
     return u
@@ -296,6 +303,15 @@ def solve_frame(frame, params, nodal_loads, governing_case="nominal"):
     shear, more accurate for a solid UD spar in torsion) is not in the material
     model. Adequate for this milestone-spike gate.
     """
+    # The frame can only be judged if its landmark nodes were located (kinds are
+    # inherited from the menu by exact coordinate match in build_frame). A missing
+    # keel/deck landmark would leave the structure under-constrained and produce a
+    # silent rigid-body-drift verdict, so reject it loudly instead.
+    kinds = set(frame.node_kinds)
+    if NodeKind.KEEL_STEP not in kinds:
+        raise ValueError("frame has no KEEL_STEP node; bearing BCs cannot be applied")
+    if NodeKind.DECK_STEP not in kinds:
+        raise ValueError("frame has no DECK_STEP node; bearing BCs cannot be applied")
     if not tip_node_indices(frame):
         raise ValueError("frame has no TIP node; cannot evaluate tip deflection")
 
