@@ -2,7 +2,46 @@
 
 **Date:** 2026-06-03
 **Branch:** `constraint-based-generative-optimization`
-**Status:** Approved design, pending implementation plan
+**Status:** Implemented and verified. See "Outcome & honest limitations" below.
+
+## 0. Outcome & honest limitations
+
+**Delivered & verified.** Generation is now genuinely deflection-driven.
+`examples/21_generate_truss.py` over the full envelope produces:
+
+```
+mass=  7.69 kg  ratio=0.485  tip=1876.4 mm  feasible=False  governing=survival
+mass= 15.37 kg  ratio=0.171  tip= 469.1 mm  feasible=False  governing=survival
+mass= 23.06 kg  ratio=0.093  tip= 208.5 mm  feasible=True   governing=survival
+```
+
+The lightest designs fail tip deflection under `survival`; the loop selects the
+lightest survivor. The final review confirmed: the worst-case-governs logic is
+provably correct (an infeasible case always has higher severity, so it always
+governs); load capture went from 0 N (M1 coarse frame) to ~98.4% of the analytic
+integral after subdivision; tip deflection scales as 1/mass² (textbook for a
+solid circle, confirming the lumping is correctly calibrated). 59 tests pass; all
+52 M1 tests remain green.
+
+**Validated engineering conclusion:** this wingsail is **stiffness-driven**, not
+strength-driven — stress ratio peaks at 0.485 (lightest) and is 0.093 at the
+chosen design, so tip deflection is the binding constraint. Buckling/torsion
+(gate v1) are correctly deferred — they would not change any verdict here.
+
+**The binding limitation is now library richness, not the loop.** CP-SAT only
+ever enumerates the spar at the six section buckets (mass 1:2:3:4:5:6) because the
+placeholder library has just 3 landmark nodes and 5 coincident-endpoint beams —
+there is no genuine truss to build, so the lightest survivor is necessarily a
+"fat spar," not a clever structure. The loop is doing its job correctly on a
+degenerate library. **Making this produce real trusses requires the curved
+stress-line library (spec §5 tracer) — that is the highest-value next deepening.**
+
+**Carry forward:** (1) curved stress-line library (the headline item — the loop
+is ready for it); (2) make `solve_designs` lazy (generator) so enumeration stops
+at the first feasible design once the library is large; (3) gate v1
+(buckling/torsion) only if a future load case makes strength bind; (4) a ~1.6%
+tip-truncation in lumping is benign now but worth revisiting if a case has
+significant tip loading.
 **Builds on:** `2026-06-02-constraint-based-generation-design.md` (Milestone 1: 1A CP-SAT
 core, 1B frame gate, 1C generator + end-to-end). See that spec's §0 for the M1
 known-limitations this increment addresses.

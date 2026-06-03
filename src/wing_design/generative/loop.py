@@ -7,7 +7,6 @@ docs/superpowers/specs/2026-06-03-m2-core-deflection-driven-loop-design.md.
 """
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass
 
 from .gate import build_frame, solve_frame
