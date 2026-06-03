@@ -9,7 +9,7 @@ from __future__ import annotations
 from ortools.sat.python import cp_model
 
 from ..scenario import GenerativeParameters
-from .menu import CandidateMenu, WingCandidate
+from .menu import CandidateMenu, NodeKind, WingCandidate
 
 # kg -> milligrams: keeps the mass objective in integer coefficients.
 MASS_SCALE = 1_000_000
@@ -64,16 +64,15 @@ def _add_topology(model, menu, select):
 
 
 def _add_reach_tip(model, menu, select):
-    """At least one selected beam must terminate at the wing tip."""
-    from .menu import NodeKind
+    """At least one selected beam must terminate at the wing tip.
 
-    tip_beams = [
-        select[b.id]
-        for b in menu.beams
-        if b.start_kind == NodeKind.TIP or b.end_kind == NodeKind.TIP
-    ]
-    if tip_beams:
-        model.add(sum(tip_beams) >= 1)
+    The monotonic-increasing-z invariant means the tip is always a beam's
+    high-z *end*, never its start. If the menu has no tip-reaching beam this
+    becomes sum([]) == 0 >= 1, i.e. genuinely infeasible — a malformed menu,
+    not a silent pass (mirrors `_add_coverage`).
+    """
+    tip_beams = [select[b.id] for b in menu.beams if b.end_kind == NodeKind.TIP]
+    model.add(sum(tip_beams) >= 1)
 
 
 def _add_no_intersection(model, menu, sect):

@@ -2,6 +2,7 @@ import dataclasses
 
 from ortools.sat.python import cp_model
 
+from wing_design.generative.menu import NodeKind
 from wing_design.generative.model import build_cp_model
 from wing_design.scenario import GenerativeParameters
 
@@ -64,9 +65,6 @@ def test_symmetry_ties_mirror_pair_sections():
     assert solver.value(sect[(1, 1)]) == 1  # mirror uses the same bucket
 
 
-from wing_design.generative.menu import NodeKind
-
-
 def test_host_implication_requires_host_selected():
     # Beam 1 starts on beam 0; selecting beam 1 forces beam 0.
     host = beam(0, start_kind=NodeKind.KEEL_STEP, end_kind=NodeKind.TIP)
@@ -103,6 +101,17 @@ def test_reach_tip_forces_a_tip_beam():
     solver, status = _solve(model)
     assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     assert solver.value(select[0]) == 1
+
+
+def test_reach_tip_infeasible_when_no_tip_beam_in_menu():
+    # A menu whose only beam ends at the deck-step (no tip-reaching beam) must
+    # be infeasible: sum([]) >= 1 cannot be satisfied.
+    root = beam(0, start_kind=NodeKind.KEEL_STEP, end_kind=NodeKind.DECK_STEP)
+    m = menu([root])
+    params = _params(n_beams_min=0, n_beams_max=1)
+    model, select, sect = build_cp_model(m, params)
+    solver, status = _solve(model)
+    assert status == cp_model.INFEASIBLE
 
 
 def test_conflict_makes_both_at_forbidden_buckets_infeasible():
