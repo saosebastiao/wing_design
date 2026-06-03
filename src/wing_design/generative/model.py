@@ -112,6 +112,7 @@ def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
 
 
 def _beam_bucket_mass_kg(menu, beam_id, bucket):
+    """Mass of a single beam at a given cross-section bucket, in kg."""
     b = menu.beam_by_id(beam_id)
     cs = next(c for c in menu.cross_sections if c.bucket == bucket)
     return b.length_m * cs.area_m2 * menu.rho_kgm3
@@ -126,16 +127,18 @@ def _set_mass_objective(model, menu, sect):
     model.minimize(sum(terms))
 
 
-def _extract_design(solver, menu, select, sect):
+def _extract_design(solver, menu, sect):
+    """Reconstruct a WingCandidate from a solved model's variable values.
+
+    Relies on the one-hot tie: an active `sect` variable implies its beam is
+    selected, so iterating `sect` alone fully describes the chosen design.
+    """
     chosen = []
     mass_kg = 0.0
-    for b in menu.beams:
-        if solver.value(select[b.id]) != 1:
-            continue
-        for cs in menu.cross_sections:
-            if solver.value(sect[(b.id, cs.bucket)]) == 1:
-                chosen.append((b.id, cs.bucket))
-                mass_kg += _beam_bucket_mass_kg(menu, b.id, cs.bucket)
+    for (beam_id, bucket), var in sect.items():
+        if solver.value(var) == 1:
+            chosen.append((beam_id, bucket))
+            mass_kg += _beam_bucket_mass_kg(menu, beam_id, bucket)
     return WingCandidate(beam_sections=tuple(chosen), mass_kg=mass_kg)
 
 
@@ -157,7 +160,7 @@ def solve_designs(menu, params, top_n=1):
         status = solver.solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             break
-        designs.append(_extract_design(solver, menu, select, sect))
+        designs.append(_extract_design(solver, menu, sect))
         chosen_vars = [
             var for key, var in sect.items() if solver.value(var) == 1
         ]
