@@ -2,7 +2,40 @@
 
 **Date:** 2026-06-02
 **Branch:** `constraint-based-generative-optimization`
-**Status:** Approved design, pending implementation plan
+**Status:** Milestone 1 (1A CP-SAT core, 1B frame gate, 1C generator + end-to-end)
+implemented and runnable. See "Milestone 1 status & known limitations" below.
+
+## 0. Milestone 1 status & known limitations
+
+**Delivered:** an end-to-end constraint-based pipeline. `build_candidate_menu`
+runs background shell FEA on the 5 m wingsail and emits a contract-correct
+`CandidateMenu`; CP-SAT (`solve_designs`) selects minimum-mass, chord-symmetric,
+manufacturable designs; the 1D frame gate (`solve_frame`, validated against
+closed-form beam solutions) judges them; `wing_candidate_to_part` exports STEP/
+STL. `examples/21_generate_truss.py` runs it (8 designs; lightest feasible at
+stress ratio 0.06, tip 74 mm, 27.86 kg). 52 tests pass.
+
+**Honest limitations (carry into M2 — surfaced by the M1 final review):**
+- **The stress-coverage proxy is currently inert.** Background von Mises (~14 MPa)
+  is far below the allowable (~1100 MPa), so the required-area heuristic collapses
+  to the smallest bucket for every target — coverage never steers CP-SAT toward
+  larger sections. The design is effectively governed by `n_beams_min`, not by
+  stress. M2 must re-reference the stress floor (fraction of *peak* von Mises, or
+  a buckling/Euler proxy) and tie the coverage tolerance to local geometry so
+  targets discriminate between beams.
+- **The conflict table is empty in practice.** Every non-spar beam shares the deck
+  and tip nodes, so the shared-endpoint exclusion suppresses all conflicts. The
+  mechanism is exercised only by unit tests. It will matter once the library has
+  non-endpoint-sharing (curved/stress-line) beams; at that point replace the
+  point-sampled `_segment_point_distance` with a true segment-to-segment distance.
+- **The beam library is the simple placeholder, not the spec §5 stress-line
+  tracer.** Curved stress-line-conformant beams remain the headline deferred item;
+  the current library is a clean drop-in replacement point.
+- **`n_beams_min` governs.** The outer loop (M2) should let mass trade against
+  stress rather than be floored by a beam count.
+- Several `CandidateBeam`/`CandidateNode` schema fields (`z_layer`, `min_radius_m`,
+  `principal_dirs/mags`, `start_node/end_node`) are carried but unused until the
+  richer library lands.
 
 ## 1. Summary
 

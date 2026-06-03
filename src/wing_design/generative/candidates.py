@@ -14,14 +14,24 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
+from ..aero.cases import DESIGN_CASES
+from ..aero.loads import run_case_lifting_line
+from ..aero.model import build_airplane
 from ..scenario import DesignParameters
+from ..structural.mesh import tet_mesh_wing
+from ..structural.shell import shell_mesh_from_tet_mesh, solve_shell_elastic
 from .menu import (
     CandidateBeam,
     CandidateMenu,
     CandidateNode,
+    ConflictTable,
+    CoverageTarget,
     CrossSectionOption,
     CrossSectionShape,
     NodeKind,
+    validate_menu,
 )
 
 
@@ -134,16 +144,6 @@ def build_beam_library(params: DesignParameters):
     return nodes, beams, _cross_section_catalog(params)
 
 
-import numpy as np
-
-from ..aero.cases import DESIGN_CASES
-from ..aero.loads import run_case_lifting_line
-from ..aero.model import build_airplane
-from ..structural.mesh import tet_mesh_wing
-from ..structural.shell import shell_mesh_from_tet_mesh, solve_shell_elastic
-from .menu import ConflictTable, CoverageTarget, validate_menu
-
-
 def _background_stress(params):
     """Run the shell FEA for the first design case; return (centroids, sigma_vm).
 
@@ -194,8 +194,13 @@ def _tri_areas(nodes, tri):
     )
 
 
-def _segment_point_distance(seg_a, seg_b, pts):
-    """Min distance between two polylines, sampled at their points (coarse)."""
+def _segment_point_distance(seg_a, seg_b):
+    """Min distance between two polylines, sampled at their points (coarse).
+
+    Point-sampled, not a true segment-to-segment minimum — adequate while the
+    library's beams only ever touch at shared endpoints. Replace with a real
+    segment distance when the conflict table must fire (see M2 carry-list).
+    """
     a = np.asarray(seg_a, dtype=float)
     b = np.asarray(seg_b, dtype=float)
     dmin = math.inf
@@ -253,7 +258,7 @@ def _conflict_table(beams, cross_sections):
             # interior min distance: sample interior points only
             ia_pts = ba.control_points[1:-1] or ba.control_points
             ib_pts = bb.control_points[1:-1] or bb.control_points
-            dist = _segment_point_distance(ia_pts, ib_pts, None)
+            dist = _segment_point_distance(ia_pts, ib_pts)
             for ca in cross_sections:
                 for cb in cross_sections:
                     if dist < (ca.radius_m + cb.radius_m) and not shared:
