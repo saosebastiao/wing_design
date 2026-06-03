@@ -69,6 +69,37 @@ class SkinParameters:
     t_baseline_m: float = 0.003
 
 
+@dataclass(frozen=True)
+class GenerativeParameters:
+    """Knobs for the constraint-based generative truss stack (Milestone 1).
+
+    Tractability levers keep the precomputed candidate menu and the CP-SAT
+    model small; the structural/manufacturability bounds feed the constraints
+    and the coverage proxy. See
+    docs/superpowers/specs/2026-06-02-constraint-based-generation-design.md.
+    """
+    # Beam-count bounds (a mirror pair counts as its two physical beams)
+    n_beams_min: int = 4
+    n_beams_max: int = 40
+    # Manufacturability
+    box_max_height_m: float = 1.5
+    beam_min_radius_m: float = 0.3
+    cross_section_area_max_m2: float = 5.0e-3
+    n_area_buckets: int = 6
+    # Coverage proxy
+    coverage_safety_factor: float = 2.0
+    # Candidate-menu tractability levers
+    max_node_count: int = 400
+    max_library_size: int = 200
+    poisson_disk_radius_m: float = 0.15
+    n_z_layers: int = 12
+    # Gate limits (used by Plan 1B; defined here so the scenario is complete)
+    tip_deflection_limit_m: float = 0.25
+    # CP-SAT solve controls
+    solver_max_time_s: float = 30.0
+    top_n_designs: int = 8
+
+
 # ---------------------------------------------------------------------------
 # Umbrella container
 # ---------------------------------------------------------------------------
@@ -92,6 +123,7 @@ class DesignParameters:
     aero: AeroParameters = field(default_factory=AeroParameters)
     frame_field: Phase5FrameFieldParameters = field(default_factory=Phase5FrameFieldParameters)
     skin_sizing: SkinParameters = field(default_factory=SkinParameters)
+    generative: GenerativeParameters = field(default_factory=GenerativeParameters)
 
     # Convenience properties derived from material + scaling factors
 
