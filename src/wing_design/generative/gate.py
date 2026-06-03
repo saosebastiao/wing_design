@@ -132,3 +132,19 @@ def element_global_stiffness(p0, p1, E, G, A, I, J):
     T, L = beam_transform(p0, p1)
     k_local = local_beam_stiffness(E, G, A, I, J, L)
     return T.T @ k_local @ T
+
+
+def solve_displacements(K, load_vec, fixed_dofs):
+    """Solve K u = f with `fixed_dofs` held at zero; return the full vector u.
+
+    Reduces to the free DOFs, solves the dense system, and scatters back.
+    """
+    n = K.shape[0]
+    fixed = set(fixed_dofs)
+    free = [d for d in range(n) if d not in fixed]
+    Kff = K[np.ix_(free, free)]
+    Ff = np.asarray(load_vec, dtype=float)[free]
+    uf = np.linalg.solve(Kff, Ff)
+    u = np.zeros(n)
+    u[free] = uf
+    return u
