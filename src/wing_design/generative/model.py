@@ -37,9 +37,25 @@ def _add_count(model, menu, params, select):
     model.add(total <= params.n_beams_max)
 
 
+def _add_symmetry(model, menu, select, sect):
+    """Tie each mirror pair: same selection and same cross-section bucket."""
+    seen = set()
+    for b in menu.beams:
+        if b.mirror_id is None:
+            continue
+        key = frozenset((b.id, b.mirror_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        model.add(select[b.id] == select[b.mirror_id])
+        for cs in menu.cross_sections:
+            model.add(sect[(b.id, cs.bucket)] == sect[(b.mirror_id, cs.bucket)])
+
+
 def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     """Build the CP-SAT model. Returns (model, select, sect)."""
     model = cp_model.CpModel()
     select, sect = _add_variables(model, menu)
     _add_count(model, menu, params, select)
+    _add_symmetry(model, menu, select, sect)
     return model, select, sect

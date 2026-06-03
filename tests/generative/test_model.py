@@ -37,3 +37,28 @@ def test_one_hot_section_matches_selection():
     for b in m.beams:
         n_sect = sum(solver.value(sect[(b.id, cs.bucket)]) for cs in m.cross_sections)
         assert n_sect == solver.value(select[b.id])
+
+
+def test_symmetry_ties_mirror_pair():
+    # Beams 0 and 1 are a mirror pair; selecting one must select the other.
+    b0 = beam(0, on_chord_plane=False, mirror_id=1)
+    b1 = beam(1, on_chord_plane=False, mirror_id=0)
+    m = menu([b0, b1])
+    params = _params(n_beams_min=0, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    model.add(select[0] == 1)  # assume one half is selected
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.value(select[1]) == 1
+
+
+def test_symmetry_ties_mirror_pair_sections():
+    b0 = beam(0, on_chord_plane=False, mirror_id=1)
+    b1 = beam(1, on_chord_plane=False, mirror_id=0)
+    m = menu([b0, b1], cross_sections=cs_catalog([1.0e-3, 2.0e-3]))
+    params = _params(n_beams_min=0, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    model.add(sect[(0, 1)] == 1)  # beam 0 uses bucket 1
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.value(sect[(1, 1)]) == 1  # mirror uses the same bucket
