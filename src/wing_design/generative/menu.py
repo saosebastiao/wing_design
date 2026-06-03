@@ -162,3 +162,59 @@ class GateResult:
     tip_deflection_m: float
     governing_case: str
     mass_kg: float
+
+
+def _coord_key(xyz, tol=1e-6):
+    return (round(xyz[0] / tol), round(xyz[1] / tol), round(xyz[2] / tol))
+
+
+def validate_menu(menu: "CandidateMenu") -> None:
+    """Assert the contracts the CP-SAT model and frame gate rely on but do not
+    re-check. Raises ValueError on the first violation.
+
+    Contracts (see the design spec, generator-contracts section):
+      * each beam's control points are strictly increasing in z (monotonic-z);
+      * every beam endpoint that is a landmark kind (keel/deck/tip) coincides
+        with a CandidateNode of that kind at the same coordinate;
+      * the host_id graph is acyclic;
+      * mirror_id is reciprocal (A.mirror == B  =>  B.mirror == A);
+      * an ON_BEAM endpoint names a host that exists.
+    """
+    node_kind_by_key = {_coord_key(n.xyz): n.kind for n in menu.nodes}
+    beam_by_id = {b.id: b for b in menu.beams}
+
+    for b in menu.beams:
+        zs = [p[2] for p in b.control_points]
+        if any(z1 <= z0 for z0, z1 in zip(zs[:-1], zs[1:])):
+            raise ValueError(f"beam {b.id} control points are not monotonic in z: {zs}")
+
+        start_key = _coord_key(b.control_points[0])
+        end_key = _coord_key(b.control_points[-1])
+        if b.start_kind in (NodeKind.KEEL_STEP, NodeKind.DECK_STEP, NodeKind.TIP):
+            if node_kind_by_key.get(start_key) != b.start_kind:
+                raise ValueError(
+                    f"beam {b.id} start landmark {b.start_kind} has no matching node"
+                )
+        if b.end_kind in (NodeKind.KEEL_STEP, NodeKind.DECK_STEP, NodeKind.TIP):
+            if node_kind_by_key.get(end_key) != b.end_kind:
+                raise ValueError(
+                    f"beam {b.id} end landmark {b.end_kind} has no matching node"
+                )
+
+        if b.host_id is not None and b.host_id not in beam_by_id:
+            raise ValueError(f"beam {b.id} names a host {b.host_id} that does not exist")
+
+        if b.mirror_id is not None:
+            partner = beam_by_id.get(b.mirror_id)
+            if partner is None or partner.mirror_id != b.id:
+                raise ValueError(f"beam {b.id} mirror_id {b.mirror_id} is not reciprocal")
+
+    # Host-graph acyclicity: walk each chain, bail if it revisits a beam.
+    for b in menu.beams:
+        seen = set()
+        cur = b
+        while cur.host_id is not None:
+            if cur.id in seen:
+                raise ValueError(f"host_id graph has a cycle involving beam {cur.id}")
+            seen.add(cur.id)
+            cur = beam_by_id[cur.host_id]
