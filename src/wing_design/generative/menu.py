@@ -201,6 +201,8 @@ def validate_menu(menu: "CandidateMenu") -> None:
                     f"beam {b.id} end landmark {b.end_kind} has no matching node"
                 )
 
+        if b.start_kind == NodeKind.ON_BEAM and b.host_id is None:
+            raise ValueError(f"beam {b.id} has start_kind ON_BEAM but no host_id")
         if b.host_id is not None and b.host_id not in beam_by_id:
             raise ValueError(f"beam {b.id} names a host {b.host_id} that does not exist")
 
@@ -209,7 +211,8 @@ def validate_menu(menu: "CandidateMenu") -> None:
             if partner is None or partner.mirror_id != b.id:
                 raise ValueError(f"beam {b.id} mirror_id {b.mirror_id} is not reciprocal")
 
-    # Host-graph acyclicity: walk each chain, bail if it revisits a beam.
+    # Host-graph: each chain must be acyclic AND terminate at a keel-rooted beam,
+    # since that is what transitively grounds every selected beam to the keel-step.
     for b in menu.beams:
         seen = set()
         cur = b
@@ -218,3 +221,8 @@ def validate_menu(menu: "CandidateMenu") -> None:
                 raise ValueError(f"host_id graph has a cycle involving beam {cur.id}")
             seen.add(cur.id)
             cur = beam_by_id[cur.host_id]
+        if cur.start_kind != NodeKind.KEEL_STEP:
+            raise ValueError(
+                f"host chain from beam {b.id} terminates at beam {cur.id} which is "
+                f"not keel-rooted (start_kind={cur.start_kind})"
+            )

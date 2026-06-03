@@ -17,13 +17,13 @@ from .menu import (
     NodeKind,
     WingCandidate,
     WingWrap,
+    validate_menu,
 )
 from .model import build_cp_model, solve_designs
 from .gate import build_frame, solve_frame
 from .build import wing_candidate_to_part
 from .candidates import build_beam_library
 from .loads import lump_spanwise_force_to_nodes
-from .menu import validate_menu
 
 __all__ = [
     "BeamWrap",

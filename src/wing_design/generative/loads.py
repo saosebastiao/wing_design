@@ -22,6 +22,8 @@ def lump_spanwise_force_to_nodes(frame, density_fn, *, z_min, z_max, direction):
     z = frame.coords[:, 2]
     in_span = [i for i in range(len(z)) if z_min - 1e-9 <= z[i] <= z_max + 1e-9]
     in_span.sort(key=lambda i: z[i])
+    # NOTE: returns {} if no node falls in [z_min, z_max]; callers that expect a
+    # loaded structure should check for an empty result.
 
     loads = {}
     for rank, i in enumerate(in_span):

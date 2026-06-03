@@ -85,6 +85,35 @@ def test_validate_rejects_host_cycle():
         validate_menu(_menu(nodes, [b0, b1]))
 
 
+def test_validate_rejects_nonexistent_host():
+    nodes = _good_menu().nodes
+    bad = _beam(0, [(0, 0, -0.95), (0, 0, 5.0)], NodeKind.KEEL_STEP, NodeKind.TIP,
+                host_id=99)
+    with pytest.raises(ValueError, match="does not exist"):
+        validate_menu(_menu(nodes, [bad]))
+
+
+def test_validate_rejects_on_beam_without_host():
+    nodes = _good_menu().nodes
+    spar = _beam(0, [(0, 0, -0.95), (0, 0, -0.20), (0, 0, 5.0)],
+                 NodeKind.KEEL_STEP, NodeKind.TIP)
+    orphan = _beam(1, [(0, 0, -0.20), (0, 0, 5.0)], NodeKind.ON_BEAM, NodeKind.TIP,
+                   host_id=None)
+    with pytest.raises(ValueError, match="ON_BEAM"):
+        validate_menu(_menu(nodes, [spar, orphan]))
+
+
+def test_validate_rejects_host_chain_not_keel_rooted():
+    # A deck-rooted beam (start_kind DECK_STEP, no host) hosting a branch: the
+    # chain terminates at a non-keel beam, breaking the grounding contract.
+    nodes = _good_menu().nodes
+    deck_root = _beam(0, [(0, 0, -0.20), (0, 0, 5.0)], NodeKind.DECK_STEP, NodeKind.TIP)
+    branch = _beam(1, [(0, 0, -0.20), (0.3, 0, 2.0), (0, 0, 5.0)],
+                   NodeKind.ON_BEAM, NodeKind.TIP, host_id=0)
+    with pytest.raises(ValueError, match="keel-rooted"):
+        validate_menu(_menu(nodes, [deck_root, branch]))
+
+
 def test_validate_rejects_nonreciprocal_mirror():
     nodes = _good_menu().nodes
     b0 = _beam(0, [(0, 0, -0.95), (0, 0, 5.0)], NodeKind.KEEL_STEP, NodeKind.TIP,
