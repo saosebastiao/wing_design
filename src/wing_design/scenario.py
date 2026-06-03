@@ -79,7 +79,7 @@ class GenerativeParameters:
     docs/superpowers/specs/2026-06-02-constraint-based-generation-design.md.
     """
     # Beam-count bounds (a mirror pair counts as its two physical beams)
-    n_beams_min: int = 4
+    n_beams_min: int = 1  # M2: the gate guarantees adequacy; floor no longer governs
     n_beams_max: int = 40
     # Manufacturability
     box_max_height_m: float = 1.5
@@ -93,6 +93,9 @@ class GenerativeParameters:
     max_library_size: int = 200
     poisson_disk_radius_m: float = 0.15
     n_z_layers: int = 12
+    # Frame discretization for the gate: subdivide beam segments to this length so
+    # the inboard span has nodes to receive distributed load (M2). None = no split.
+    frame_max_element_length_m: float = 0.3
     # Gate limits (used by Plan 1B; defined here so the scenario is complete)
     tip_deflection_limit_m: float = 0.25
     # CP-SAT solve controls
