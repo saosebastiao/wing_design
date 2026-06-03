@@ -18,6 +18,7 @@ from wing_design.generative.gate import (
     tip_deflection,
     tip_node_indices,
 )
+from wing_design.generative.loads import lump_spanwise_force_to_nodes
 from wing_design.generative.menu import (
     CandidateBeam,
     CandidateMenu,
@@ -290,9 +291,6 @@ def test_solve_frame_infeasible_under_huge_load():
     assert result.feasible is False
 
 
-from wing_design.generative.loads import lump_spanwise_force_to_nodes
-
-
 def test_build_frame_subdivides_long_segments():
     menu = _single_beam_menu()  # spar keel(-0.95)->deck(-0.20)->tip(5.0)
     candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=1.0)
@@ -300,15 +298,16 @@ def test_build_frame_subdivides_long_segments():
     coarse = build_frame(candidate, menu, max_element_length_m=None)
     assert coarse.coords.shape == (3, 3)
     assert len(coarse.elements) == 2
-    # Subdivided: each ~0.3 m -> many interior nodes; landmarks keep their kinds.
+    # Subdivided at 0.3 m: keel->deck (0.75 m) -> ceil(0.75/0.3)=3 elements;
+    # deck->tip (5.2 m) -> ceil(5.2/0.3)=18 elements; total 21 elements, 22 nodes.
     fine = build_frame(candidate, menu, max_element_length_m=0.3)
-    assert fine.coords.shape[0] > 3
-    assert len(fine.elements) > 2
+    assert len(fine.elements) == 21
+    assert fine.coords.shape[0] == 22
     assert NodeKind.KEEL_STEP in fine.node_kinds
     assert NodeKind.DECK_STEP in fine.node_kinds
     assert NodeKind.TIP in fine.node_kinds
-    # interior nodes are unclassified
-    assert fine.node_kinds.count(None) >= 1
+    # the interior subdivision nodes are unclassified
+    assert fine.node_kinds.count(None) == 22 - 3
 
 
 def test_subdivision_improves_distributed_load_capture():

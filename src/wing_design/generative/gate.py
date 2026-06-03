@@ -206,7 +206,7 @@ def build_frame(candidate, menu, *, max_element_length_m=None):
         return index_by_key[key]
 
     def n_sub(p_a, p_b):
-        if max_element_length_m is None:
+        if max_element_length_m is None or max_element_length_m <= 0:
             return 1
         length = math.dist(p_a, p_b)
         return max(1, math.ceil(length / max_element_length_m))

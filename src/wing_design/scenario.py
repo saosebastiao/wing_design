@@ -71,12 +71,14 @@ class SkinParameters:
 
 @dataclass(frozen=True)
 class GenerativeParameters:
-    """Knobs for the constraint-based generative truss stack (Milestone 1).
+    """Knobs for the constraint-based generative truss stack (Milestones 1-2).
 
     Tractability levers keep the precomputed candidate menu and the CP-SAT
     model small; the structural/manufacturability bounds feed the constraints
-    and the coverage proxy. See
-    docs/superpowers/specs/2026-06-02-constraint-based-generation-design.md.
+    and the (M1) coverage proxy. `frame_max_element_length_m` (M2) controls the
+    gate's frame discretization. See
+    docs/superpowers/specs/2026-06-02-constraint-based-generation-design.md and
+    docs/superpowers/specs/2026-06-03-m2-core-deflection-driven-loop-design.md.
     """
     # Beam-count bounds (a mirror pair counts as its two physical beams)
     n_beams_min: int = 1  # M2: the gate guarantees adequacy; floor no longer governs
