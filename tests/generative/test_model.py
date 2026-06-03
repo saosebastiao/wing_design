@@ -194,3 +194,47 @@ def test_solve_picks_minimum_mass_design():
     assert best.beam_sections == ((0, 0),)
     # mass = length * area * rho = 1.0 * 1e-3 * 1550 = 1.55 kg
     assert math.isclose(best.mass_kg, 1.55, rel_tol=1e-6)
+
+
+def test_top_n_returns_distinct_non_decreasing_designs():
+    # Three independent tip beams, each can cover its own target at bucket 0.
+    # Different lengths -> three distinct single-beam-ish designs by mass.
+    m = menu(
+        [
+            beam(0, length=1.0, covers=(10,)),
+            beam(1, length=2.0, covers=(11,)),
+            beam(2, length=3.0, covers=(12,)),
+        ],
+        cross_sections=cs_catalog([1.0e-3]),
+        coverage=[
+            target(10, 1.0e-3, [0]),
+            target(11, 1.0e-3, [1]),
+            target(12, 1.0e-3, [2]),
+        ],
+        rho=1550.0,
+    )
+    params = _params(n_beams_min=3, n_beams_max=3)
+    designs = solve_designs(m, params, top_n=3)
+    # With all three targets, the only feasible selection is all three beams;
+    # so only one distinct design exists and top_n must not fabricate more.
+    assert len(designs) == 1
+    assert set(designs[0].beam_ids) == {0, 1, 2}
+
+
+def test_top_n_enumerates_multiple_when_choices_exist():
+    # One target coverable by either beam 0 or beam 1 (different masses).
+    # min=1 lets the solver pick exactly one; top_n=2 should surface both,
+    # lightest first.
+    m = menu(
+        [beam(0, length=1.0, covers=(7,)), beam(1, length=2.0, covers=(7,))],
+        cross_sections=cs_catalog([1.0e-3]),
+        coverage=[target(7, 1.0e-3, [0, 1])],
+        rho=1550.0,
+    )
+    params = _params(n_beams_min=1, n_beams_max=1)
+    designs = solve_designs(m, params, top_n=2)
+    assert len(designs) == 2
+    masses = [d.mass_kg for d in designs]
+    assert masses == sorted(masses)  # non-decreasing
+    assert designs[0].beam_ids == (0,)  # lightest first
+    assert designs[1].beam_ids == (1,)
