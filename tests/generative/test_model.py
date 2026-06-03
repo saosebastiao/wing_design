@@ -103,3 +103,31 @@ def test_reach_tip_forces_a_tip_beam():
     solver, status = _solve(model)
     assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     assert solver.value(select[0]) == 1
+
+
+def test_conflict_makes_both_at_forbidden_buckets_infeasible():
+    # Single-bucket catalog; beams 0 and 1 conflict at (bucket 0, bucket 0).
+    # Forcing both selected (min=max=2) must be infeasible.
+    m = menu(
+        [beam(0), beam(1)],
+        cross_sections=cs_catalog([1.0e-3]),
+        conflicts=[(0, 0, 1, 0)],
+    )
+    params = _params(n_beams_min=2, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    solver, status = _solve(model)
+    assert status == cp_model.INFEASIBLE
+
+
+def test_conflict_allows_different_buckets():
+    # Two buckets; the conflict is only at (0,0,1,0). Both beams can be selected
+    # if at least one uses bucket 1.
+    m = menu(
+        [beam(0), beam(1)],
+        cross_sections=cs_catalog([1.0e-3, 2.0e-3]),
+        conflicts=[(0, 0, 1, 0)],
+    )
+    params = _params(n_beams_min=2, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)

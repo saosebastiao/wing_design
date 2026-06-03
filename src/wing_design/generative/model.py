@@ -76,6 +76,12 @@ def _add_reach_tip(model, menu, select):
         model.add(sum(tip_beams) >= 1)
 
 
+def _add_no_intersection(model, menu, sect):
+    """For each forbidden (beam_i, bucket_a, beam_j, bucket_b): not both."""
+    for (bi, a, bj, b) in menu.conflicts.forbidden:
+        model.add(sect[(bi, a)] + sect[(bj, b)] <= 1)
+
+
 def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     """Build the CP-SAT model. Returns (model, select, sect)."""
     model = cp_model.CpModel()
@@ -84,4 +90,5 @@ def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     _add_symmetry(model, menu, select, sect)
     _add_topology(model, menu, select)
     _add_reach_tip(model, menu, select)
+    _add_no_intersection(model, menu, sect)
     return model, select, sect
