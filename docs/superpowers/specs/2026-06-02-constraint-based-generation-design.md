@@ -208,6 +208,25 @@ guard there that asserts them before solving):
   sort of the harvested designs by mass (a round may return a non-optimal
   FEASIBLE design under `solver_max_time_s`).
 
+**Additional contracts the frame gate (Plan 1B) depends on** (also for the
+Plan 1C `validate_menu` guard — `build_frame` inherits node kinds and merges
+junctions purely by coordinate, so these must hold exactly):
+- **Landmark nodes sit at exact beam endpoints** — the keel-step, deck-step, and
+  tip `CandidateNode` coordinates must coincide (bit-identical, within the 1e-6 m
+  merge grid) with the corresponding beam control points. Otherwise `build_frame`
+  silently drops the landmark kind and the gate loses its bearing BCs. `solve_frame`
+  now hard-errors if keel/deck/tip kinds are absent, but 1C must place them
+  correctly so that error never fires in normal operation.
+- **Host control points at every ON_BEAM junction** — when a beam starts/ends on
+  a host, the host beam must carry a control point at the exact junction
+  coordinate, so the merged frame shares a node there and transfers load.
+  Otherwise the junction dangles and the solve is singular (now a diagnostic
+  `LinAlgError`).
+- **Coordinate identity across the menu** — beam endpoints, junction points, and
+  landmark node coordinates that are meant to coincide must be the *same* float
+  values (e.g. derived from one shared node), not independently recomputed, since
+  the merge is snap-to-grid rather than tolerance-based.
+
 ### 6.3 Objective
 
 Minimize **mass** = `sum_{b,k} sect[b,k] × (length_b × area_k × ρ)`. Linear
