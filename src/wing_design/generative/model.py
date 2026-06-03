@@ -98,8 +98,14 @@ def _add_coverage(model, menu, sect):
         model.add(sum(adequate) >= 1)
 
 
-def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
-    """Build the CP-SAT model. Returns (model, select, sect)."""
+def build_cp_model(menu: CandidateMenu, params: GenerativeParameters, *,
+                   enforce_coverage: bool = True):
+    """Build the CP-SAT model. Returns (model, select, sect).
+
+    `enforce_coverage=False` drops the stress-coverage constraint, leaving the
+    frame gate as the sole judge of structural adequacy (M2). Default True
+    preserves the Milestone 1 behavior.
+    """
     model = cp_model.CpModel()
     select, sect = _add_variables(model, menu)
     _add_count(model, menu, params, select)
@@ -107,7 +113,8 @@ def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     _add_topology(model, menu, select)
     _add_reach_tip(model, menu, select)
     _add_no_intersection(model, menu, sect)
-    _add_coverage(model, menu, sect)
+    if enforce_coverage:
+        _add_coverage(model, menu, sect)
     return model, select, sect
 
 
@@ -142,7 +149,7 @@ def _extract_design(solver, menu, sect):
     return WingCandidate(beam_sections=tuple(chosen), mass_kg=mass_kg)
 
 
-def solve_designs(menu, params, top_n=1):
+def solve_designs(menu, params, top_n=1, *, enforce_coverage=True):
     """Solve the menu and return up to `top_n` distinct designs by ascending mass.
 
     Each round minimizes mass, records the design, then adds a no-good cut
@@ -154,7 +161,7 @@ def solve_designs(menu, params, top_n=1):
     prior round's optimum, so the harvested list is sorted by mass before
     returning to guarantee the lightest-first ordering regardless of status.
     """
-    model, select, sect = build_cp_model(menu, params)
+    model, select, sect = build_cp_model(menu, params, enforce_coverage=enforce_coverage)
     _set_mass_objective(model, menu, sect)
 
     solver = cp_model.CpSolver()

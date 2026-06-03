@@ -233,3 +233,23 @@ def test_top_n_enumerates_multiple_when_choices_exist():
     assert masses == sorted(masses)  # non-decreasing
     assert designs[0].beam_ids == (0,)  # lightest first
     assert designs[1].beam_ids == (1,)
+
+
+def test_enforce_coverage_flag_toggles_constraint():
+    # A target needs area >= 5e-3 but the catalog tops out at 2e-3, so coverage
+    # is unsatisfiable. With enforce_coverage=True the model is INFEASIBLE; with
+    # enforce_coverage=False the constraint is dropped and the model is feasible.
+    m = menu(
+        [beam(0, covers=(5,))],
+        cross_sections=cs_catalog([1.0e-3, 2.0e-3]),
+        coverage=[target(5, required_min_area_m2=5.0e-3, candidate_beams=[0])],
+    )
+    params = _params(n_beams_min=0, n_beams_max=1)
+
+    model_on, _s, _x = build_cp_model(m, params, enforce_coverage=True)
+    solver_on, status_on = _solve(model_on)
+    assert status_on == cp_model.INFEASIBLE
+
+    model_off, _s2, _x2 = build_cp_model(m, params, enforce_coverage=False)
+    solver_off, status_off = _solve(model_off)
+    assert status_off in (cp_model.OPTIMAL, cp_model.FEASIBLE)
