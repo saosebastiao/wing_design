@@ -96,3 +96,32 @@ def local_beam_stiffness(E, G, A, I, J, L):
     k[10, 10] = c
 
     return k
+
+
+def beam_transform(p0, p1):
+    """Return (T, L): the 12x12 local->global transform and element length.
+
+    The local x-axis runs from p0 to p1. A reference vector (global +Z, or
+    global +Y when the element is itself nearly parallel to +Z) fixes the local
+    y/z axes. Because the wing spans along +Z, most beams are near-vertical, so
+    the +Z-parallel branch is the common path, not an edge case.
+    """
+    p0 = np.asarray(p0, dtype=float)
+    p1 = np.asarray(p1, dtype=float)
+    delta = p1 - p0
+    L = float(np.linalg.norm(delta))
+    x_local = delta / L
+
+    ref = np.array([0.0, 0.0, 1.0])
+    if abs(float(np.dot(x_local, ref))) > 0.9999:
+        ref = np.array([0.0, 1.0, 0.0])
+
+    y_local = np.cross(ref, x_local)
+    y_local /= np.linalg.norm(y_local)
+    z_local = np.cross(x_local, y_local)
+
+    R = np.vstack([x_local, y_local, z_local])  # rows = local axes in global coords
+    T = np.zeros((12, 12))
+    for blk in range(4):
+        T[3 * blk:3 * blk + 3, 3 * blk:3 * blk + 3] = R
+    return T, L
