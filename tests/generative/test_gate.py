@@ -201,3 +201,33 @@ def test_tip_node_indices():
     candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
     frame = build_frame(candidate, menu)
     assert tip_node_indices(frame) == [2]
+
+
+from wing_design.generative.gate import recover_max_stress_ratio, tip_deflection
+
+
+def test_recover_axial_stress_ratio():
+    ke = element_global_stiffness((0, 0, 0), (_L, 0, 0), _E, _G, _A, _I, _J)
+    P = 1000.0
+    load = np.zeros(12)
+    load[6 + 0] = P
+    u = solve_displacements(ke, load, _CLAMP)
+    frame = FrameModel(
+        coords=np.array([[0, 0, 0], [_L, 0, 0]], dtype=float),
+        elements=[(0, 1, _A)],
+        node_kinds=[None, None],
+        mass_kg=0.0,
+    )
+    sigma_allow = 1.0e9
+    ratio = recover_max_stress_ratio(frame, u, _E, _G, sigma_allow)
+    assert np.isclose(ratio, (P / _A) / sigma_allow, rtol=1e-4)
+
+
+def test_tip_deflection_lateral():
+    coords = np.array([[0, 0, -0.95], [0, 0, 5.0]], dtype=float)
+    frame = FrameModel(coords=coords, elements=[(0, 1, _A)],
+                       node_kinds=[NodeKind.KEEL_STEP, NodeKind.TIP], mass_kg=0.0)
+    u = np.zeros(12)
+    u[6 + 0] = 0.03
+    u[6 + 1] = 0.04
+    assert np.isclose(tip_deflection(frame, u), 0.05, rtol=1e-9)

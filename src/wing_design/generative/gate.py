@@ -247,3 +247,36 @@ def bearing_couple_fixed_dofs(frame):
 def tip_node_indices(frame):
     """Indices of frame nodes that are wing-tip landmarks."""
     return [i for i, kind in enumerate(frame.node_kinds) if kind == NodeKind.TIP]
+
+
+def recover_max_stress_ratio(frame, disp, E, G, sigma_allow):
+    """Max over elements of (|axial| + bending) stress / allowable.
+
+    For each element, recover local end forces f = k_local (T u). Axial stress
+    is N/A; bending stress is the resultant end moment times the section radius
+    over I. The two are summed (conservative) and compared to the allowable.
+    """
+    max_ratio = 0.0
+    for (i, j, area) in frame.elements:
+        A, I, J = section_properties(area)
+        radius = math.sqrt(area / math.pi)
+        T, L = beam_transform(frame.coords[i], frame.coords[j])
+        dofs = list(range(6 * i, 6 * i + 6)) + list(range(6 * j, 6 * j + 6))
+        d_local = T @ disp[dofs]
+        f_local = local_beam_stiffness(E, G, A, I, J, L) @ d_local
+        axial = abs(f_local[6]) / A
+        m_i = math.hypot(f_local[4], f_local[5])
+        m_j = math.hypot(f_local[10], f_local[11])
+        bending = max(m_i, m_j) * radius / I
+        sigma = axial + bending
+        max_ratio = max(max_ratio, sigma / sigma_allow)
+    return max_ratio
+
+
+def tip_deflection(frame, disp):
+    """Largest lateral (perpendicular-to-span, i.e. x-y) displacement at a tip node."""
+    best = 0.0
+    for i in tip_node_indices(frame):
+        lateral = math.hypot(disp[6 * i + 0], disp[6 * i + 1])
+        best = max(best, lateral)
+    return best
