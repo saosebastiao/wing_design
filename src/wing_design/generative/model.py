@@ -52,10 +52,22 @@ def _add_symmetry(model, menu, select, sect):
             model.add(sect[(b.id, cs.bucket)] == sect[(b.mirror_id, cs.bucket)])
 
 
+def _add_topology(model, menu, select):
+    """A beam that starts/ends on a host requires that host: select_b <= select_host.
+
+    Hosts always start at strictly lower z, so these implications form a DAG that
+    transitively grounds every selected beam back to the keel-step.
+    """
+    for b in menu.beams:
+        if b.host_id is not None:
+            model.add(select[b.id] <= select[b.host_id])
+
+
 def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     """Build the CP-SAT model. Returns (model, select, sect)."""
     model = cp_model.CpModel()
     select, sect = _add_variables(model, menu)
     _add_count(model, menu, params, select)
     _add_symmetry(model, menu, select, sect)
+    _add_topology(model, menu, select)
     return model, select, sect

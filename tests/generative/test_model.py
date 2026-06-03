@@ -62,3 +62,31 @@ def test_symmetry_ties_mirror_pair_sections():
     solver, status = _solve(model)
     assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     assert solver.value(sect[(1, 1)]) == 1  # mirror uses the same bucket
+
+
+from wing_design.generative.menu import NodeKind
+
+
+def test_host_implication_requires_host_selected():
+    # Beam 1 starts on beam 0; selecting beam 1 forces beam 0.
+    host = beam(0, start_kind=NodeKind.KEEL_STEP, end_kind=NodeKind.TIP)
+    dependent = beam(1, start_kind=NodeKind.ON_BEAM, end_kind=NodeKind.TIP, host_id=0)
+    m = menu([host, dependent])
+    params = _params(n_beams_min=0, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    model.add(select[1] == 1)  # select the dependent beam
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.value(select[0]) == 1  # host pulled in
+
+
+def test_host_can_exist_without_dependent():
+    host = beam(0, start_kind=NodeKind.KEEL_STEP, end_kind=NodeKind.TIP)
+    dependent = beam(1, start_kind=NodeKind.ON_BEAM, end_kind=NodeKind.TIP, host_id=0)
+    m = menu([host, dependent])
+    params = _params(n_beams_min=0, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    model.add(select[0] == 1)
+    model.add(select[1] == 0)  # host selected, dependent not — must be feasible
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
