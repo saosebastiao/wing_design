@@ -19,6 +19,7 @@ from .menu import (
     WingWrap,
 )
 from .model import build_cp_model, solve_designs
+from .gate import build_frame, solve_frame
 
 __all__ = [
     "BeamWrap",
@@ -34,5 +35,7 @@ __all__ = [
     "WingCandidate",
     "WingWrap",
     "build_cp_model",
+    "build_frame",
     "solve_designs",
+    "solve_frame",
 ]

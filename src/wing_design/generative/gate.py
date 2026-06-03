@@ -280,3 +280,40 @@ def tip_deflection(frame, disp):
         lateral = math.hypot(disp[6 * i + 0], disp[6 * i + 1])
         best = max(best, lateral)
     return best
+
+
+def solve_frame(frame, params, nodal_loads, governing_case="nominal"):
+    """Judge a frame under the given nodal loads against stress + deflection limits.
+
+    `params` is a DesignParameters: E from the UD ply's E1, G from G12, the
+    tensile allowable from `sigma_allow_Pa`, and the deflection cap from
+    `generative.tip_deflection_limit_m`. `nodal_loads` maps a frame node index
+    to a global (fx, fy, fz). Returns a GateResult.
+    """
+    E = params.material.E1_Pa
+    G = params.material.G12_Pa
+    sigma_allow = params.sigma_allow_Pa
+    limit = params.generative.tip_deflection_limit_m
+
+    n = frame.coords.shape[0]
+    K = assemble_global_K(frame, E, G)
+    load_vec = np.zeros(6 * n)
+    for node_idx, (fx, fy, fz) in nodal_loads.items():
+        load_vec[6 * node_idx + 0] += fx
+        load_vec[6 * node_idx + 1] += fy
+        load_vec[6 * node_idx + 2] += fz
+
+    fixed = bearing_couple_fixed_dofs(frame)
+    disp = solve_displacements(K, load_vec, fixed)
+
+    max_ratio = float(recover_max_stress_ratio(frame, disp, E, G, sigma_allow))
+    tip_def = float(tip_deflection(frame, disp))
+    feasible = bool((max_ratio <= 1.0) and (tip_def <= limit))
+
+    return GateResult(
+        feasible=feasible,
+        max_stress_ratio=max_ratio,
+        tip_deflection_m=tip_def,
+        governing_case=governing_case,
+        mass_kg=frame.mass_kg,
+    )

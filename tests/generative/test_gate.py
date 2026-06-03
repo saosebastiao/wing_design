@@ -122,6 +122,7 @@ from wing_design.generative.menu import (
     ConflictTable,
     CrossSectionOption,
     CrossSectionShape,
+    GateResult,
     NodeKind,
     WingCandidate,
 )
@@ -231,3 +232,34 @@ def test_tip_deflection_lateral():
     u[6 + 0] = 0.03
     u[6 + 1] = 0.04
     assert np.isclose(tip_deflection(frame, u), 0.05, rtol=1e-9)
+
+
+from wing_design.generative.gate import solve_frame
+from wing_design.scenario import default_scenario
+
+
+def test_solve_frame_feasible_for_stout_beam_small_load():
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
+    frame = build_frame(candidate, menu)
+    params = default_scenario()
+    tip = tip_node_indices(frame)[0]
+    loads = {tip: (200.0, 0.0, 0.0)}
+    result = solve_frame(frame, params, loads, governing_case="nominal")
+    assert isinstance(result, GateResult)
+    assert result.governing_case == "nominal"
+    assert math.isclose(result.mass_kg, 12.5, rel_tol=1e-12)
+    assert result.tip_deflection_m > 0.0
+    assert result.max_stress_ratio > 0.0
+    assert result.feasible is True
+
+
+def test_solve_frame_infeasible_under_huge_load():
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
+    frame = build_frame(candidate, menu)
+    params = default_scenario()
+    tip = tip_node_indices(frame)[0]
+    loads = {tip: (5.0e5, 0.0, 0.0)}
+    result = solve_frame(frame, params, loads)
+    assert result.feasible is False
