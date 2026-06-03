@@ -1,6 +1,6 @@
 import math
 
-from wing_design.generative.candidates import build_beam_library
+from wing_design.generative.candidates import build_beam_library, build_candidate_menu
 from wing_design.generative.menu import (
     CandidateMenu,
     ConflictTable,
@@ -58,3 +58,22 @@ def test_build_beam_library_has_a_reciprocal_mirror_pair():
     by_id = {b.id: b for b in beams}
     for b in mirrored:
         assert by_id[b.mirror_id].mirror_id == b.id
+
+
+def test_build_candidate_menu_runs_and_validates():
+    # Uses the real shell FEA (~40 s). Smaller mesh via a coarser element size
+    # keeps it fast enough for a test.
+    params = default_scenario()
+    menu = build_candidate_menu(params)
+    assert isinstance(menu, CandidateMenu)
+    assert len(menu.beams) >= 3
+    assert len(menu.coverage_targets) >= 1
+    # rho carried from the material
+    assert math.isclose(menu.rho_kgm3, params.material.rho_kgm3, rel_tol=1e-9)
+    # every coverage target is satisfiable by some beam+bucket in the menu
+    max_area = max(cs.area_m2 for cs in menu.cross_sections)
+    for tgt in menu.coverage_targets:
+        assert tgt.required_min_area_m2 <= max_area + 1e-12
+        assert len(tgt.candidate_beams) >= 1
+    # the produced menu obeys all generator contracts
+    validate_menu(menu)

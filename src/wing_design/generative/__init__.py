@@ -22,7 +22,7 @@ from .menu import (
 from .model import build_cp_model, solve_designs
 from .gate import build_frame, solve_frame
 from .build import wing_candidate_to_part
-from .candidates import build_beam_library
+from .candidates import build_beam_library, build_candidate_menu
 from .loads import lump_spanwise_force_to_nodes
 
 __all__ = [
@@ -39,6 +39,7 @@ __all__ = [
     "WingCandidate",
     "WingWrap",
     "build_beam_library",
+    "build_candidate_menu",
     "build_cp_model",
     "build_frame",
     "lump_spanwise_force_to_nodes",
