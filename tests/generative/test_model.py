@@ -1,9 +1,10 @@
 import dataclasses
+import math
 
 from ortools.sat.python import cp_model
 
-from wing_design.generative.menu import NodeKind
-from wing_design.generative.model import build_cp_model
+from wing_design.generative.menu import NodeKind, WingCandidate
+from wing_design.generative.model import build_cp_model, solve_designs
 from wing_design.scenario import GenerativeParameters
 
 from _menu_factory import beam, cs_catalog, menu, target
@@ -169,12 +170,6 @@ def test_coverage_infeasible_when_no_bucket_is_big_enough():
     model, select, sect = build_cp_model(m, params)
     solver, status = _solve(model)
     assert status == cp_model.INFEASIBLE
-
-
-import math
-
-from wing_design.generative.model import solve_designs
-from wing_design.generative.menu import WingCandidate
 
 
 def test_solve_picks_minimum_mass_design():
