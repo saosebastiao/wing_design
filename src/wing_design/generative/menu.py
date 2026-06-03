@@ -63,6 +63,20 @@ class CandidateBeam:
     on-beam->tip) at most one endpoint is ever ON_BEAM, so a single host
     suffices. `mirror_id` is the reflected partner across the chord plane, or
     None when the beam lies on the chord plane (`on_chord_plane=True`).
+
+    Generator contract (the candidate generator, Plan 1C, must uphold these;
+    the CP-SAT model's correctness depends on them but does NOT re-validate):
+      * z is monotonic-increasing along `control_points`, so the tip is always
+        the high-z *end* (never a start) — relied on by the reach-tip
+        constraint.
+      * the `host_id` graph is acyclic and every host chain terminates at a
+        keel-rooted beam (`start_kind == KEEL_STEP`, `host_id is None`) — this
+        is what makes `select[b] <= select[host]` transitively ground every
+        selected beam to the keel-step.
+      * mirror pairs are reciprocal: if beam A has `mirror_id == B` then beam B
+        has `mirror_id == A` — relied on by the symmetry tie.
+    A future `validate_menu(menu)` guard (Plan 1C) should assert these before
+    solving.
     """
     id: int
     control_points: tuple[tuple[float, float, float], ...]

@@ -147,7 +147,12 @@ def solve_designs(menu, params, top_n=1):
 
     Each round minimizes mass, records the design, then adds a no-good cut
     forbidding that exact (beam, bucket) set before re-solving — so successive
-    designs are distinct and non-decreasing in mass.
+    designs are distinct.
+
+    Rounds accept OPTIMAL *or* FEASIBLE results; under a `solver_max_time_s`
+    time-out a round may return a non-optimal FEASIBLE design lighter than a
+    prior round's optimum, so the harvested list is sorted by mass before
+    returning to guarantee the lightest-first ordering regardless of status.
     """
     model, select, sect = build_cp_model(menu, params)
     _set_mass_objective(model, menu, sect)
@@ -166,4 +171,5 @@ def solve_designs(menu, params, top_n=1):
         ]
         # Forbid this exact selection on the next round.
         model.add(sum(chosen_vars) <= len(chosen_vars) - 1)
+    designs.sort(key=lambda d: d.mass_kg)
     return designs
