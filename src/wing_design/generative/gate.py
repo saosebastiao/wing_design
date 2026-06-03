@@ -179,13 +179,18 @@ def _node_key(xyz, tol=1e-6):
     return (round(xyz[0] / tol), round(xyz[1] / tol), round(xyz[2] / tol))
 
 
-def build_frame(candidate, menu):
+def build_frame(candidate, menu, *, max_element_length_m=None):
     """Discretize a WingCandidate into a FrameModel.
 
     Each selected beam's consecutive control points become beam elements;
     coincident coordinates (shared endpoints / junctions) merge into one node so
     beams that touch transfer load. Node kinds are inherited from the menu's
     landmark nodes by coordinate match.
+
+    If `max_element_length_m` is given, each control-point segment is split into
+    equal sub-elements no longer than that, adding interior nodes (kind=None) so a
+    distributed load has somewhere to land along the span. None keeps one element
+    per control-point segment.
     """
     kind_by_key = {_node_key(n.xyz): n.kind for n in menu.nodes}
     coords = []
@@ -200,6 +205,12 @@ def build_frame(candidate, menu):
             node_kinds.append(kind_by_key.get(key))
         return index_by_key[key]
 
+    def n_sub(p_a, p_b):
+        if max_element_length_m is None:
+            return 1
+        length = math.dist(p_a, p_b)
+        return max(1, math.ceil(length / max_element_length_m))
+
     elements = []
     for beam_id, bucket in candidate.beam_sections:
         beam = menu.beam_by_id(beam_id)
@@ -208,9 +219,14 @@ def build_frame(candidate, menu):
             raise KeyError(f"cross-section bucket {bucket} not in menu")
         pts = beam.control_points
         for p_a, p_b in zip(pts[:-1], pts[1:]):
-            i = node_index(p_a)
-            j = node_index(p_b)
-            elements.append((i, j, cs.area_m2))
+            steps = n_sub(p_a, p_b)
+            prev = node_index(p_a)
+            for k in range(1, steps + 1):
+                t = k / steps
+                mid = tuple(p_a[d] + t * (p_b[d] - p_a[d]) for d in range(3))
+                cur = node_index(mid)
+                elements.append((prev, cur, cs.area_m2))
+                prev = cur
 
     return FrameModel(
         coords=np.array(coords, dtype=float),

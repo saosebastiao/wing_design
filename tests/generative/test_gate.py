@@ -288,3 +288,50 @@ def test_solve_frame_infeasible_under_huge_load():
     loads = {tip: (5.0e5, 0.0, 0.0)}
     result = solve_frame(frame, params, loads)
     assert result.feasible is False
+
+
+from wing_design.generative.loads import lump_spanwise_force_to_nodes
+
+
+def test_build_frame_subdivides_long_segments():
+    menu = _single_beam_menu()  # spar keel(-0.95)->deck(-0.20)->tip(5.0)
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=1.0)
+    # No subdivision: 3 nodes / 2 elements (the M1 behavior).
+    coarse = build_frame(candidate, menu, max_element_length_m=None)
+    assert coarse.coords.shape == (3, 3)
+    assert len(coarse.elements) == 2
+    # Subdivided: each ~0.3 m -> many interior nodes; landmarks keep their kinds.
+    fine = build_frame(candidate, menu, max_element_length_m=0.3)
+    assert fine.coords.shape[0] > 3
+    assert len(fine.elements) > 2
+    assert NodeKind.KEEL_STEP in fine.node_kinds
+    assert NodeKind.DECK_STEP in fine.node_kinds
+    assert NodeKind.TIP in fine.node_kinds
+    # interior nodes are unclassified
+    assert fine.node_kinds.count(None) >= 1
+
+
+def test_subdivision_improves_distributed_load_capture():
+    # Non-uniform line load density(z)=z^2 over the wing span [0, span]; analytic
+    # integral = span^3 / 3. A coarse spar frame (only the tip node is in-span)
+    # badly under/over-integrates; a finely subdivided one converges to it.
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=1.0)
+    span = 5.0
+    analytic = span**3 / 3.0
+
+    def density(z):
+        return z * z
+
+    coarse = build_frame(candidate, menu, max_element_length_m=None)
+    fine = build_frame(candidate, menu, max_element_length_m=0.1)
+
+    def total(frame):
+        loads = lump_spanwise_force_to_nodes(frame, density, z_min=0.0, z_max=span,
+                                             direction=(0.0, 1.0, 0.0))
+        return sum(fy for (_fx, fy, _fz) in loads.values())
+
+    coarse_err = abs(total(coarse) - analytic) / analytic
+    fine_err = abs(total(fine) - analytic) / analytic
+    assert fine_err < 0.02          # fine frame integrates the load accurately
+    assert fine_err < coarse_err    # and is strictly better than the coarse frame
