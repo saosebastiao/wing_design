@@ -82,6 +82,23 @@ def _add_no_intersection(model, menu, sect):
         model.add(sect[(bi, a)] + sect[(bj, b)] <= 1)
 
 
+def _add_coverage(model, menu, sect):
+    """Each high-stress target must be served by a selected beam whose assigned
+    section is large enough. Because sect implies select (one-hot tie), coverage
+    also forces selection of a covering beam.
+    """
+    for tgt in menu.coverage_targets:
+        adequate = [
+            sect[(bid, cs.bucket)]
+            for bid in tgt.candidate_beams
+            for cs in menu.cross_sections
+            if cs.area_m2 >= tgt.required_min_area_m2
+        ]
+        # If no (beam, bucket) can satisfy the target, this is an empty sum == 0
+        # >= 1, i.e. genuinely infeasible — which is the correct verdict.
+        model.add(sum(adequate) >= 1)
+
+
 def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     """Build the CP-SAT model. Returns (model, select, sect)."""
     model = cp_model.CpModel()
@@ -91,4 +108,5 @@ def build_cp_model(menu: CandidateMenu, params: GenerativeParameters):
     _add_topology(model, menu, select)
     _add_reach_tip(model, menu, select)
     _add_no_intersection(model, menu, sect)
+    _add_coverage(model, menu, sect)
     return model, select, sect

@@ -131,3 +131,32 @@ def test_conflict_allows_different_buckets():
     model, select, sect = build_cp_model(m, params)
     solver, status = _solve(model)
     assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+
+def test_coverage_forces_adequate_section():
+    # Target needs area >= 2e-3 and only beam 0 can cover it. The model must
+    # select beam 0 at a bucket whose area >= 2e-3 (bucket 1 in the catalog).
+    m = menu(
+        [beam(0, covers=(5,)), beam(1)],
+        cross_sections=cs_catalog([1.0e-3, 2.0e-3]),
+        coverage=[target(5, required_min_area_m2=2.0e-3, candidate_beams=[0])],
+    )
+    params = _params(n_beams_min=0, n_beams_max=2)
+    model, select, sect = build_cp_model(m, params)
+    solver, status = _solve(model)
+    assert status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.value(sect[(0, 1)]) == 1  # adequate bucket chosen
+    assert solver.value(select[0]) == 1
+
+
+def test_coverage_infeasible_when_no_bucket_is_big_enough():
+    # Target needs 5e-3 but the catalog tops out at 2e-3 -> infeasible.
+    m = menu(
+        [beam(0, covers=(5,))],
+        cross_sections=cs_catalog([1.0e-3, 2.0e-3]),
+        coverage=[target(5, required_min_area_m2=5.0e-3, candidate_beams=[0])],
+    )
+    params = _params(n_beams_min=0, n_beams_max=1)
+    model, select, sect = build_cp_model(m, params)
+    solver, status = _solve(model)
+    assert status == cp_model.INFEASIBLE
