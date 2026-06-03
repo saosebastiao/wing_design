@@ -150,3 +150,62 @@ def solve_displacements(K, load_vec, fixed_dofs):
     u = np.zeros(n)
     u[free] = uf
     return u
+
+
+@dataclass
+class FrameModel:
+    """A discretized frame ready to solve.
+
+    coords: (N, 3) node coordinates. elements: list of (node_i, node_j, area_m2).
+    node_kinds: per-node NodeKind (or None for interior nodes), inherited from
+    the menu by coordinate. mass_kg: carried from the WingCandidate for the
+    GateResult.
+    """
+    coords: np.ndarray
+    elements: list
+    node_kinds: list
+    mass_kg: float
+
+
+def _node_key(xyz, tol=1e-6):
+    """Quantized coordinate key so coincident points merge into one frame node."""
+    return (round(xyz[0] / tol), round(xyz[1] / tol), round(xyz[2] / tol))
+
+
+def build_frame(candidate, menu):
+    """Discretize a WingCandidate into a FrameModel.
+
+    Each selected beam's consecutive control points become beam elements;
+    coincident coordinates (shared endpoints / junctions) merge into one node so
+    beams that touch transfer load. Node kinds are inherited from the menu's
+    landmark nodes by coordinate match.
+    """
+    kind_by_key = {_node_key(n.xyz): n.kind for n in menu.nodes}
+    coords = []
+    node_kinds = []
+    index_by_key = {}
+
+    def node_index(point):
+        key = _node_key(point)
+        if key not in index_by_key:
+            index_by_key[key] = len(coords)
+            coords.append((float(point[0]), float(point[1]), float(point[2])))
+            node_kinds.append(kind_by_key.get(key))
+        return index_by_key[key]
+
+    elements = []
+    for beam_id, bucket in candidate.beam_sections:
+        beam = menu.beam_by_id(beam_id)
+        cs = next(c for c in menu.cross_sections if c.bucket == bucket)
+        pts = beam.control_points
+        for p_a, p_b in zip(pts[:-1], pts[1:]):
+            i = node_index(p_a)
+            j = node_index(p_b)
+            elements.append((i, j, cs.area_m2))
+
+    return FrameModel(
+        coords=np.array(coords, dtype=float),
+        elements=elements,
+        node_kinds=node_kinds,
+        mass_kg=candidate.mass_kg,
+    )

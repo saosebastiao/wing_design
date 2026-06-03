@@ -112,3 +112,60 @@ def test_torsion_matches_TL_over_GJ():
     load[6 + 3] = Tq  # torque (Mx) about the beam axis at node j
     u = solve_displacements(ke, load, _CLAMP)
     assert np.isclose(u[6 + 3], Tq * _L / (_G * _J), rtol=1e-6)
+
+
+from wing_design.generative.gate import FrameModel, build_frame
+from wing_design.generative.menu import (
+    CandidateBeam,
+    CandidateMenu,
+    CandidateNode,
+    ConflictTable,
+    CrossSectionOption,
+    CrossSectionShape,
+    NodeKind,
+    WingCandidate,
+)
+
+
+def _single_beam_menu():
+    """A keel->tip beam through the deck-step, with the three landmark nodes."""
+    nodes = (
+        CandidateNode(id=0, xyz=(0.0, 0.0, -0.95), kind=NodeKind.KEEL_STEP, z_layer=0),
+        CandidateNode(id=1, xyz=(0.0, 0.0, -0.20), kind=NodeKind.DECK_STEP, z_layer=1),
+        CandidateNode(id=2, xyz=(0.0, 0.0, 5.0), kind=NodeKind.TIP, z_layer=9),
+    )
+    beam = CandidateBeam(
+        id=0,
+        control_points=((0.0, 0.0, -0.95), (0.0, 0.0, -0.20), (0.0, 0.0, 5.0)),
+        start_kind=NodeKind.KEEL_STEP,
+        end_kind=NodeKind.TIP,
+        start_node=0,
+        end_node=2,
+        length_m=5.95,
+        min_radius_m=100.0,
+        on_chord_plane=True,
+        mirror_id=None,
+        host_id=None,
+        covers=(),
+    )
+    cs = (CrossSectionOption(bucket=0, shape=CrossSectionShape.CIRCLE, area_m2=4.0e-3),)
+    menu = CandidateMenu(
+        nodes=nodes, beams=(beam,), cross_sections=cs,
+        conflicts=ConflictTable(forbidden=()), coverage_targets=(), rho_kgm3=1550.0,
+    )
+    return menu
+
+
+def test_build_frame_nodes_elements_and_kinds():
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
+    frame = build_frame(candidate, menu)
+    assert isinstance(frame, FrameModel)
+    assert frame.coords.shape == (3, 3)
+    assert len(frame.elements) == 2
+    assert frame.node_kinds[0] == NodeKind.KEEL_STEP
+    assert frame.node_kinds[1] == NodeKind.DECK_STEP
+    assert frame.node_kinds[2] == NodeKind.TIP
+    for (_i, _j, area) in frame.elements:
+        assert math.isclose(area, 4.0e-3, rel_tol=1e-12)
+    assert math.isclose(frame.mass_kg, 12.5, rel_tol=1e-12)
