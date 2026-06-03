@@ -50,3 +50,15 @@ def test_beam_transform_handles_vertical_beam():
     R = T[0:3, 0:3]
     assert np.allclose(R @ R.T, np.eye(3), atol=1e-12)
     assert np.allclose(R[0], [0.0, 0.0, 1.0], atol=1e-12)
+
+
+from wing_design.generative.gate import element_global_stiffness
+
+
+def test_element_global_stiffness_symmetric_and_axisaligned():
+    E, G, A, I, J = 200e9, 80e9, 1e-3, 1e-6, 2e-6
+    ke = element_global_stiffness((0, 0, 0), (2.0, 0, 0), E, G, A, I, J)
+    assert ke.shape == (12, 12)
+    assert np.allclose(ke, ke.T, atol=1e-3)
+    k_local = local_beam_stiffness(E, G, A, I, J, 2.0)
+    assert np.allclose(ke, k_local, atol=1e-6)

@@ -125,3 +125,10 @@ def beam_transform(p0, p1):
     for blk in range(4):
         T[3 * blk:3 * blk + 3, 3 * blk:3 * blk + 3] = R
     return T, L
+
+
+def element_global_stiffness(p0, p1, E, G, A, I, J):
+    """Global-frame 12x12 stiffness for the beam from p0 to p1: T^T k_local T."""
+    T, L = beam_transform(p0, p1)
+    k_local = local_beam_stiffness(E, G, A, I, J, L)
+    return T.T @ k_local @ T
