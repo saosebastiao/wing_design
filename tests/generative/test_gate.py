@@ -59,9 +59,16 @@ def test_element_global_stiffness_symmetric_and_axisaligned():
     E, G, A, I, J = 200e9, 80e9, 1e-3, 1e-6, 2e-6
     ke = element_global_stiffness((0, 0, 0), (2.0, 0, 0), E, G, A, I, J)
     assert ke.shape == (12, 12)
-    assert np.allclose(ke, ke.T, atol=1e-3)
+    assert np.allclose(ke, ke.T)
     k_local = local_beam_stiffness(E, G, A, I, J, 2.0)
     assert np.allclose(ke, k_local, atol=1e-6)
+
+
+def test_beam_transform_rejects_zero_length_element():
+    import pytest
+
+    with pytest.raises(ValueError, match="degenerate"):
+        beam_transform((1.0, 2.0, 3.0), (1.0, 2.0, 3.0))
 
 
 from wing_design.generative.gate import solve_displacements

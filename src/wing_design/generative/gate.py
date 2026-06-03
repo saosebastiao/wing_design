@@ -110,6 +110,8 @@ def beam_transform(p0, p1):
     p1 = np.asarray(p1, dtype=float)
     delta = p1 - p0
     L = float(np.linalg.norm(delta))
+    if L < 1e-14:
+        raise ValueError(f"degenerate (zero-length) beam element: p0={p0}, p1={p1}")
     x_local = delta / L
 
     ref = np.array([0.0, 0.0, 1.0])
