@@ -196,7 +196,9 @@ def build_frame(candidate, menu):
     elements = []
     for beam_id, bucket in candidate.beam_sections:
         beam = menu.beam_by_id(beam_id)
-        cs = next(c for c in menu.cross_sections if c.bucket == bucket)
+        cs = next((c for c in menu.cross_sections if c.bucket == bucket), None)
+        if cs is None:
+            raise KeyError(f"cross-section bucket {bucket} not in menu")
         pts = beam.control_points
         for p_a, p_b in zip(pts[:-1], pts[1:]):
             i = node_index(p_a)
@@ -289,7 +291,14 @@ def solve_frame(frame, params, nodal_loads, governing_case="nominal"):
     tensile allowable from `sigma_allow_Pa`, and the deflection cap from
     `generative.tip_deflection_limit_m`. `nodal_loads` maps a frame node index
     to a global (fx, fy, fz). Returns a GateResult.
+
+    G12 (in-plane shear) is used as the torsional shear modulus; G23 (transverse
+    shear, more accurate for a solid UD spar in torsion) is not in the material
+    model. Adequate for this milestone-spike gate.
     """
+    if not tip_node_indices(frame):
+        raise ValueError("frame has no TIP node; cannot evaluate tip deflection")
+
     E = params.material.E1_Pa
     G = params.material.G12_Pa
     sigma_allow = params.sigma_allow_Pa

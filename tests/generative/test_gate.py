@@ -1,8 +1,35 @@
 import math
 
 import numpy as np
+import pytest
 
-from wing_design.generative.gate import section_properties
+from wing_design.generative.gate import (
+    FrameModel,
+    assemble_global_K,
+    beam_transform,
+    bearing_couple_fixed_dofs,
+    build_frame,
+    element_global_stiffness,
+    local_beam_stiffness,
+    recover_max_stress_ratio,
+    section_properties,
+    solve_displacements,
+    solve_frame,
+    tip_deflection,
+    tip_node_indices,
+)
+from wing_design.generative.menu import (
+    CandidateBeam,
+    CandidateMenu,
+    CandidateNode,
+    ConflictTable,
+    CrossSectionOption,
+    CrossSectionShape,
+    GateResult,
+    NodeKind,
+    WingCandidate,
+)
+from wing_design.scenario import default_scenario
 
 
 def test_section_properties_circle():
@@ -12,9 +39,6 @@ def test_section_properties_circle():
     # circle: I = A^2 / (4 pi), J = 2 I
     assert math.isclose(I, area**2 / (4.0 * math.pi), rel_tol=1e-12)
     assert math.isclose(J, 2.0 * I, rel_tol=1e-12)
-
-
-from wing_design.generative.gate import local_beam_stiffness
 
 
 def test_local_beam_stiffness_symmetric_and_axial():
@@ -30,9 +54,6 @@ def test_local_beam_stiffness_symmetric_and_axial():
     assert math.isclose(k[3, 3], G * J / L, rel_tol=1e-12)
     # bending: k[1,1] = 12 EI / L^3
     assert math.isclose(k[1, 1], 12.0 * E * I / L**3, rel_tol=1e-12)
-
-
-from wing_design.generative.gate import beam_transform
 
 
 def test_beam_transform_length_and_orthonormal():
@@ -52,9 +73,6 @@ def test_beam_transform_handles_vertical_beam():
     assert np.allclose(R[0], [0.0, 0.0, 1.0], atol=1e-12)
 
 
-from wing_design.generative.gate import element_global_stiffness
-
-
 def test_element_global_stiffness_symmetric_and_axisaligned():
     E, G, A, I, J = 200e9, 80e9, 1e-3, 1e-6, 2e-6
     ke = element_global_stiffness((0, 0, 0), (2.0, 0, 0), E, G, A, I, J)
@@ -65,13 +83,9 @@ def test_element_global_stiffness_symmetric_and_axisaligned():
 
 
 def test_beam_transform_rejects_zero_length_element():
-    import pytest
-
     with pytest.raises(ValueError, match="degenerate"):
         beam_transform((1.0, 2.0, 3.0), (1.0, 2.0, 3.0))
 
-
-from wing_design.generative.gate import solve_displacements
 
 # Shared beam properties for the analytic single-element checks.
 _E, _G, _A, _I, _J, _L = 200e9, 80e9, 1e-3, 1e-6, 2e-6, 2.0
@@ -112,20 +126,6 @@ def test_torsion_matches_TL_over_GJ():
     load[6 + 3] = Tq  # torque (Mx) about the beam axis at node j
     u = solve_displacements(ke, load, _CLAMP)
     assert np.isclose(u[6 + 3], Tq * _L / (_G * _J), rtol=1e-6)
-
-
-from wing_design.generative.gate import FrameModel, build_frame
-from wing_design.generative.menu import (
-    CandidateBeam,
-    CandidateMenu,
-    CandidateNode,
-    ConflictTable,
-    CrossSectionOption,
-    CrossSectionShape,
-    GateResult,
-    NodeKind,
-    WingCandidate,
-)
 
 
 def _single_beam_menu():
@@ -172,13 +172,6 @@ def test_build_frame_nodes_elements_and_kinds():
     assert math.isclose(frame.mass_kg, 12.5, rel_tol=1e-12)
 
 
-from wing_design.generative.gate import (
-    assemble_global_K,
-    bearing_couple_fixed_dofs,
-    tip_node_indices,
-)
-
-
 def test_assemble_global_K_shape_and_symmetry():
     menu = _single_beam_menu()
     candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
@@ -204,9 +197,6 @@ def test_tip_node_indices():
     assert tip_node_indices(frame) == [2]
 
 
-from wing_design.generative.gate import recover_max_stress_ratio, tip_deflection
-
-
 def test_recover_axial_stress_ratio():
     ke = element_global_stiffness((0, 0, 0), (_L, 0, 0), _E, _G, _A, _I, _J)
     P = 1000.0
@@ -224,6 +214,30 @@ def test_recover_axial_stress_ratio():
     assert np.isclose(ratio, (P / _A) / sigma_allow, rtol=1e-4)
 
 
+def test_recover_bending_stress_ratio():
+    # Single X-aligned cantilever, transverse tip load P. Max bending moment is
+    # P*L at the clamped end, so peak bending stress = P*L*r/I. Build the element
+    # stiffness from the SAME area-derived I that recovery uses, so the solve and
+    # the recovery are consistent.
+    A, I, J = section_properties(_A)
+    radius = math.sqrt(_A / math.pi)
+    ke = element_global_stiffness((0, 0, 0), (_L, 0, 0), _E, _G, A, I, J)
+    P = 500.0
+    load = np.zeros(12)
+    load[6 + 1] = P  # transverse Fy at the tip
+    u = solve_displacements(ke, load, _CLAMP)
+    frame = FrameModel(
+        coords=np.array([[0, 0, 0], [_L, 0, 0]], dtype=float),
+        elements=[(0, 1, _A)],
+        node_kinds=[None, None],
+        mass_kg=0.0,
+    )
+    sigma_allow = 1.0e9
+    expected = (P * _L * radius / I) / sigma_allow
+    ratio = recover_max_stress_ratio(frame, u, _E, _G, sigma_allow)
+    assert np.isclose(ratio, expected, rtol=1e-3)
+
+
 def test_tip_deflection_lateral():
     coords = np.array([[0, 0, -0.95], [0, 0, 5.0]], dtype=float)
     frame = FrameModel(coords=coords, elements=[(0, 1, _A)],
@@ -232,10 +246,6 @@ def test_tip_deflection_lateral():
     u[6 + 0] = 0.03
     u[6 + 1] = 0.04
     assert np.isclose(tip_deflection(frame, u), 0.05, rtol=1e-9)
-
-
-from wing_design.generative.gate import solve_frame
-from wing_design.scenario import default_scenario
 
 
 def test_solve_frame_feasible_for_stout_beam_small_load():
