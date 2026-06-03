@@ -209,3 +209,41 @@ def build_frame(candidate, menu):
         node_kinds=node_kinds,
         mass_kg=candidate.mass_kg,
     )
+
+
+def assemble_global_K(frame, E, G):
+    """Assemble the global stiffness matrix (6*N x 6*N) from the frame elements."""
+    n = frame.coords.shape[0]
+    K = np.zeros((6 * n, 6 * n))
+    for (i, j, area) in frame.elements:
+        A, I, J = section_properties(area)
+        ke = element_global_stiffness(frame.coords[i], frame.coords[j], E, G, A, I, J)
+        dofs = list(range(6 * i, 6 * i + 6)) + list(range(6 * j, 6 * j + 6))
+        for r in range(12):
+            for c in range(12):
+                K[dofs[r], dofs[c]] += ke[r, c]
+    return K
+
+
+def bearing_couple_fixed_dofs(frame):
+    """Boundary conditions for the free-rotating spar's two bearings.
+
+    Keel-step bearing: fix the three translations and the spin about the spar
+    axis (theta_z) — the latter represents the control system holding the
+    commanded angle of attack, and removes the otherwise-free spar-rotation
+    mechanism. Deck-step bearing: fix only the radial (x, y) translations; the
+    overturning moment is carried as a force couple between the two bearings.
+    """
+    fixed = []
+    for idx, kind in enumerate(frame.node_kinds):
+        base = 6 * idx
+        if kind == NodeKind.KEEL_STEP:
+            fixed += [base + 0, base + 1, base + 2, base + 5]
+        elif kind == NodeKind.DECK_STEP:
+            fixed += [base + 0, base + 1]
+    return sorted(set(fixed))
+
+
+def tip_node_indices(frame):
+    """Indices of frame nodes that are wing-tip landmarks."""
+    return [i for i, kind in enumerate(frame.node_kinds) if kind == NodeKind.TIP]

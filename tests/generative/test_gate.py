@@ -169,3 +169,35 @@ def test_build_frame_nodes_elements_and_kinds():
     for (_i, _j, area) in frame.elements:
         assert math.isclose(area, 4.0e-3, rel_tol=1e-12)
     assert math.isclose(frame.mass_kg, 12.5, rel_tol=1e-12)
+
+
+from wing_design.generative.gate import (
+    assemble_global_K,
+    bearing_couple_fixed_dofs,
+    tip_node_indices,
+)
+
+
+def test_assemble_global_K_shape_and_symmetry():
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
+    frame = build_frame(candidate, menu)
+    K = assemble_global_K(frame, E=135e9, G=4.5e9)
+    n = 6 * frame.coords.shape[0]
+    assert K.shape == (n, n)
+    assert np.allclose(K, K.T, atol=1e-3)
+
+
+def test_bearing_couple_fixed_dofs():
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
+    frame = build_frame(candidate, menu)
+    fixed = bearing_couple_fixed_dofs(frame)
+    assert set(fixed) == {0, 1, 2, 5, 6, 7}
+
+
+def test_tip_node_indices():
+    menu = _single_beam_menu()
+    candidate = WingCandidate(beam_sections=((0, 0),), mass_kg=12.5)
+    frame = build_frame(candidate, menu)
+    assert tip_node_indices(frame) == [2]
