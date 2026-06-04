@@ -46,13 +46,13 @@ class MaterialParameters:
 @dataclass(frozen=True)
 class MeshParameters:
     """gmsh tet-mesh + shell-extraction resolution."""
-    target_element_size_m: float = 0.05
+    target_element_size_m: float = 0.005
 
 
 @dataclass(frozen=True)
 class AeroParameters:
     """LiftingLine + AeroBuildup solver knobs."""
-    spanwise_resolution: int = 16
+    spanwise_resolution: int = 32
 
 
 @dataclass(frozen=True)

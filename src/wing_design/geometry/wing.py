@@ -41,7 +41,7 @@ class WingSpec:
     thickness: float = 0.18            # NACA00xx t/c
     pivot_frac: float = 0.25           # x/c of the rotation axis at every station
     spar_length: float = 0.75          # m, cylindrical portion below the fairing
-    spar_diameter: float = 0.15        # m, diameter of the cylindrical spar / fairing base
+    spar_diameter: float = 0.18        # m, diameter of the cylindrical spar / fairing base
     transition_length: float = 0.20    # m, height of airfoil->circle fairing below root
     n_transition_sections: int = 4     # interior morph sections in the fairing
     n_sections: int = 5                # spanwise airfoil sections (root..tip inclusive)
