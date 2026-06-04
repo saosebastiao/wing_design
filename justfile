@@ -1,3 +1,8 @@
+# Keep generated .pyc bytecode out of the source tree: Python writes every
+# __pycache__ under this single directory (gitignored) instead of next to
+# each source file. Exported here so all `uv run` recipes inherit it.
+export PYTHONPYCACHEPREFIX := justfile_directory() / ".pycache"
+
 default:
     @just --list
 
