@@ -41,7 +41,6 @@ class WingSpec:
     thickness: float = 0.18            # NACA00xx t/c
     pivot_frac: float = 0.25           # x/c of the rotation axis at every station
     spar_length: float = 0.75          # m, cylindrical portion below the fairing
-    spar_diameter: float = 0.15        # m, diameter of the cylindrical spar / fairing base
     transition_length: float = 0.20    # m, height of airfoil->circle fairing below root
     n_transition_sections: int = 4     # interior morph sections in the fairing
     n_sections: int = 5                # spanwise airfoil sections (root..tip inclusive)
@@ -56,6 +55,25 @@ class WingSpec:
     # Example — entasis (gentle inboard, sharp outboard):
     #   taper_profile = ((0.0, 1.0), (0.8, 0.9), (1.0, 0.6))
     taper_profile: tuple[tuple[float, float], ...] | None = None
+
+    @property
+    def spar_radius(self) -> float:
+        """Max circle inscribed in the root airfoil, centered at the pivot, floored to cm.
+
+        The cylindrical spar is the largest circle that fits inside the airfoil at
+        the rotation axis: its radius is the minimum distance from the pivot point
+        to the airfoil surface. Floored to the nearest centimetre for a tidy,
+        manufacturable stock size. (~0.08 m for NACA0018, 1 m chord, 25% pivot.)
+        """
+        coords = (naca_00xx_coords(self.thickness, n=self.n_airfoil_points)
+                  - np.array([self.pivot_frac, 0.0])) * self.root_chord
+        r_min = float(np.min(np.hypot(coords[:, 0], coords[:, 1])))
+        return np.floor(r_min * 100.0) / 100.0
+
+    @property
+    def spar_diameter(self) -> float:
+        """Derived spar/fairing-base circle diameter = 2 * spar_radius."""
+        return 2.0 * self.spar_radius
 
     def chord_at_z(self, z: float) -> float:
         """Piecewise-linear chord(z) through the taper profile (m).
