@@ -124,23 +124,31 @@ def size_beams(
         cache[key] = out
         return out
 
+    # Normalize the objective and all constraints to O(1). The raw scales differ
+    # by ~1e9 (stress in Pa vs deflection in m vs twist in deg), which makes
+    # SLSQP's QP subproblem ill-conditioned — the small-magnitude deflection
+    # constraint becomes numerically invisible and the solver quits early at an
+    # infeasible point. Dividing each constraint by its own limit (and the mass
+    # by a reference mass) puts them all on the same footing.
+    m_ref = frame_mass(frame, np.full(nl, config.r_max), ring_radius=config.ring_radius, rho=rho)
+
     def mass(x: np.ndarray) -> float:
-        return frame_mass(frame, x, ring_radius=config.ring_radius, rho=rho)
+        return frame_mass(frame, x, ring_radius=config.ring_radius, rho=rho) / m_ref
 
     def mass_grad(x: np.ndarray) -> np.ndarray:
-        return rho * 2.0 * np.pi * np.asarray(x) * L[:nl]
+        return rho * 2.0 * np.pi * np.asarray(x) * L[:nl] / m_ref
 
     def stress_con(x: np.ndarray) -> np.ndarray:
         worst_vm, _, _, _ = evaluate(x)
-        return config.sigma_allow_Pa - worst_vm          # >= 0
+        return 1.0 - worst_vm / config.sigma_allow_Pa            # >= 0
 
     def defl_con(x: np.ndarray) -> np.ndarray:
         _, d, _, _ = evaluate(x)
-        return np.array([config.tip_defl_max_m - d])     # >= 0
+        return np.array([1.0 - d / config.tip_defl_max_m])       # >= 0
 
     def twist_con(x: np.ndarray) -> np.ndarray:
         _, _, t, _ = evaluate(x)
-        return np.array([config.tip_twist_max_deg - t])  # >= 0
+        return np.array([1.0 - t / config.tip_twist_max_deg])    # >= 0
 
     res = minimize(
         mass, x0, jac=mass_grad, method="SLSQP",
@@ -158,7 +166,7 @@ def size_beams(
     worst_vm, d, t, ring_vm = evaluate(x_final)
     return SizingResult(
         radii=x_final,
-        mass_kg=mass(x_final),
+        mass_kg=frame_mass(frame, x_final, ring_radius=config.ring_radius, rho=rho),
         converged=bool(res.success),
         n_iter=int(res.nit),
         max_vm_stress_Pa=float(worst_vm.max()),

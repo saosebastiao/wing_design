@@ -157,6 +157,15 @@ Deliverable: `examples/22_sized_beams.py`. Caveat logged: the tube-spar baseline
 is a single bending member, so its mass is reported for context but is not
 directly comparable to the full form-beam frame.
 
+**Key finding:** the sized frame is **stiffness-driven, not strength-driven** —
+tip deflection sits exactly on its limit while the worst longitudinal stress is
+~42 MPa against a 1100 MPa allowable (≈26× margin). So sizing UD beams to a
+deflection target leaves them hugely over-strength; the mass-efficient stiffness
+lever is the **load-bearing skin** (Phase D shell coupling), not thicker beams.
+(SLSQP needed objective/constraint normalization to O(1) — the raw Pa-vs-metre
+scale gap made the QP ill-conditioned and the solver quit early at an infeasible
+point.)
+
 ### Phase D — Deepen geometry
 
 - Promote `spar_diameter` → derived `spar_radius()` (max inscribed circle at
