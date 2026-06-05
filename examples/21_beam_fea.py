@@ -11,7 +11,7 @@ import numpy as np
 
 from wing_design import default_scenario
 from wing_design.aero import build_airplane, sweep_envelope
-from wing_design.beams.fea_model import (
+from wing_design.beams import (
     build_beam_frame,
     project_panels_to_beam_nodes,
     solve_beam_frame,
