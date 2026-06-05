@@ -19,6 +19,8 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
+_NEAR_AXIS_COS = 0.99  # |cosθ| above which +Z is too near the element axis to use as the up-vector reference
+
 
 @dataclass(frozen=True)
 class BeamSection:
@@ -42,7 +44,8 @@ class BeamSection:
 class FrameResult:
     displacements: np.ndarray       # (n_nodes, 6)
     axial_force: np.ndarray         # (n_elem,) tension positive [N]
-    bending_moment: np.ndarray      # (n_elem,) max |M| over the two ends [N·m]
+    bending_moment: np.ndarray      # (n_elem,) max sqrt(My²+Mz²) over the two element ends [N·m];
+                                    # a valid bending-stress proxy only when Iy == Iz (circular sections)
     torsion: np.ndarray             # (n_elem,) [N·m]
 
     @property
@@ -96,7 +99,7 @@ def _element_rotation(pi: np.ndarray, pj: np.ndarray) -> tuple[np.ndarray, float
     d = pj - pi
     L = float(np.linalg.norm(d))
     ex = d / L
-    up = np.array([0.0, 0.0, 1.0]) if abs(ex[2]) < 0.99 else np.array([0.0, 1.0, 0.0])
+    up = np.array([0.0, 0.0, 1.0]) if abs(ex[2]) < _NEAR_AXIS_COS else np.array([0.0, 1.0, 0.0])
     ey = np.cross(up, ex)
     ey /= np.linalg.norm(ey)
     ez = np.cross(ex, ey)
@@ -119,6 +122,8 @@ def solve_frame(
     """
     n_nodes = nodes.shape[0]
     n_elem = elements.shape[0]
+    if len(sections) != n_elem:
+        raise ValueError(f"expected {n_elem} sections, got {len(sections)}")
     ndof = 6 * n_nodes
 
     rows: list[int] = []
@@ -132,8 +137,8 @@ def solve_frame(
         R, L = _element_rotation(nodes[i], nodes[j])
         kloc = local_beam_stiffness(E, G, sections[e], L)
         T = np.zeros((12, 12))
-        for b in range(4):
-            T[3 * b:3 * b + 3, 3 * b:3 * b + 3] = R
+        for blk in range(4):
+            T[3 * blk:3 * blk + 3, 3 * blk:3 * blk + 3] = R
         kg = T.T @ kloc @ T
         transforms.append(T)
         klocals.append(kloc)
