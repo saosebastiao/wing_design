@@ -34,6 +34,7 @@ class SizingResult:
     converged: bool
     n_iter: int
     max_vm_stress_Pa: float     # worst longitudinal element, over all cases
+    max_ring_vm_stress_Pa: float  # worst ring element (fixed radius; NOT a design var)
     tip_defl_m: float           # worst case
     tip_twist_deg: float        # worst case
 
@@ -84,20 +85,26 @@ def size_beams(
 
     `load_arrays` is one (n_nodes, 6) nodal-load array per load case (already
     safety-factored). The frame geometry is fixed; only longitudinal radii vary.
+
+    Ring connectors keep a fixed radius and are NOT design variables, so their
+    stress is not constrained — only reported (`SizingResult.max_ring_vm_stress_Pa`).
+    Check it against the allowable: if rings are over-stressed, raise
+    `config.ring_radius` (a converged result can still be ring-infeasible).
     """
     nl = n_longitudinal(frame)
     L = element_lengths(frame)
     x0 = np.full(nl, config.r_max if x0_radius is None else x0_radius)
 
-    cache: dict[bytes, tuple[np.ndarray, float, float]] = {}
+    cache: dict[bytes, tuple[np.ndarray, float, float, float]] = {}
 
-    def evaluate(x: np.ndarray) -> tuple[np.ndarray, float, float]:
+    def evaluate(x: np.ndarray) -> tuple[np.ndarray, float, float, float]:
         key = np.asarray(x, dtype=float).tobytes()
         hit = cache.get(key)
         if hit is not None:
             return hit
         sections = build_sections(frame, x, config.ring_radius)
         worst_vm = np.zeros(nl)
+        worst_ring_vm = 0.0
         max_defl = 0.0
         max_twist = 0.0
         for loads in load_arrays:
@@ -107,12 +114,13 @@ def size_beams(
             )
             vm = von_mises_per_element(res, sections)
             worst_vm = np.maximum(worst_vm, vm[:nl])
+            worst_ring_vm = max(worst_ring_vm, float(vm[nl:].max()))
             tip = frame.tip_nodes
             d = float(np.linalg.norm(res.displacements[tip, :3], axis=1).max())
             t = float(np.degrees(np.abs(res.displacements[tip, 5]).max()))
             max_defl = max(max_defl, d)
             max_twist = max(max_twist, t)
-        out = (worst_vm, max_defl, max_twist)
+        out = (worst_vm, max_defl, max_twist, worst_ring_vm)
         cache[key] = out
         return out
 
@@ -123,15 +131,15 @@ def size_beams(
         return rho * 2.0 * np.pi * np.asarray(x) * L[:nl]
 
     def stress_con(x: np.ndarray) -> np.ndarray:
-        worst_vm, _, _ = evaluate(x)
+        worst_vm, _, _, _ = evaluate(x)
         return config.sigma_allow_Pa - worst_vm          # >= 0
 
     def defl_con(x: np.ndarray) -> np.ndarray:
-        _, d, _ = evaluate(x)
+        _, d, _, _ = evaluate(x)
         return np.array([config.tip_defl_max_m - d])     # >= 0
 
     def twist_con(x: np.ndarray) -> np.ndarray:
-        _, _, t = evaluate(x)
+        _, _, t, _ = evaluate(x)
         return np.array([config.tip_twist_max_deg - t])  # >= 0
 
     res = minimize(
@@ -145,13 +153,16 @@ def size_beams(
         options={"maxiter": maxiter, "ftol": ftol},
     )
 
-    worst_vm, d, t = evaluate(res.x)
+    # SLSQP can return points fractionally outside the bounds; clip before reporting.
+    x_final = np.clip(np.asarray(res.x), config.r_min, config.r_max)
+    worst_vm, d, t, ring_vm = evaluate(x_final)
     return SizingResult(
-        radii=np.asarray(res.x),
-        mass_kg=mass(res.x),
+        radii=x_final,
+        mass_kg=mass(x_final),
         converged=bool(res.success),
         n_iter=int(res.nit),
         max_vm_stress_Pa=float(worst_vm.max()),
+        max_ring_vm_stress_Pa=float(ring_vm),
         tip_defl_m=float(d),
         tip_twist_deg=float(t),
     )
