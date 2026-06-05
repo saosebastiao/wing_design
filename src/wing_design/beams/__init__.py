@@ -12,6 +12,13 @@ from .fea_model import (
     solve_beam_frame,
     summarize_frame,
 )
+from .sizing import (
+    SizingConfig,
+    SizingResult,
+    frame_mass,
+    n_longitudinal,
+    size_beams,
+)
 
 __all__ = [
     "beam_section_points",
@@ -29,4 +36,9 @@ __all__ = [
     "project_panels_to_beam_nodes",
     "solve_beam_frame",
     "summarize_frame",
+    "SizingConfig",
+    "SizingResult",
+    "frame_mass",
+    "n_longitudinal",
+    "size_beams",
 ]

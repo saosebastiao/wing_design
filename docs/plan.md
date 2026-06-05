@@ -149,6 +149,23 @@ unsized 20 mm-radius frame is far over-stiff (tip deflection ≈ 0.2 % span, mem
 **Deliverable: `examples/22_sized_beams.py` → sized assembly with mass that beats
 the Phase-3 tube-spar baseline, all constraints satisfied.**
 
+**Status: done (2026-06-04).** Per-element longitudinal radii sized by SLSQP
+(`beams.sizing.size_beams`) minimizing beam mass s.t. per-element von Mises +
+tip-deflection + tip-twist constraints, re-solving the Phase-B frame FEA each
+step (rings held at a fixed minimum radius; their stress is reported, not sized).
+Deliverable: `examples/22_sized_beams.py`. Caveat logged: the tube-spar baseline
+is a single bending member, so its mass is reported for context but is not
+directly comparable to the full form-beam frame.
+
+**Key finding:** the sized frame is **stiffness-driven, not strength-driven** —
+tip deflection sits exactly on its limit while the worst longitudinal stress is
+~42 MPa against a 1100 MPa allowable (≈26× margin). So sizing UD beams to a
+deflection target leaves them hugely over-strength; the mass-efficient stiffness
+lever is the **load-bearing skin** (Phase D shell coupling), not thicker beams.
+(SLSQP needed objective/constraint normalization to O(1) — the raw Pa-vs-metre
+scale gap made the QP ill-conditioned and the solver quit early at an infeasible
+point.)
+
 ### Phase D — Deepen geometry
 
 - Promote `spar_diameter` → derived `spar_radius()` (max inscribed circle at
@@ -255,3 +272,4 @@ src/wing_design/
 | Spar radius | Derived (max inscribed circle at pivot, floored to cm), not stored. |
 | Phase-B FEA element | Fresh 3D Euler–Bernoulli frame (`structural.frame`); ring connectors stand in for skin shear transfer in the spike (coupled shell = later deepen). |
 | Example outputs | All examples write generated artifacts to the repo-root `exports/` (gitignored); no outputs tracked in git. |
+| Phase-C sizing | Continuous SLSQP NLP over per-element longitudinal radii; stress + tip-deflection + tip-twist constraints; analytic mass gradient, FD constraint Jacobian over FEA re-solves; rings fixed (stress reported). MILP stock catalog deferred to Phase E. |
