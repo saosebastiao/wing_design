@@ -10,16 +10,21 @@ from __future__ import annotations
 
 import numpy as np
 from build123d import (
+    BuildLine,
     BuildPart,
     BuildSketch,
     Circle,
     Compound,
     Locations,
     Plane,
+    Polyline,
     loft,
+    make_face,
 )
 
 from ..geometry.wing import WingSpec, build_wing_solid
+from .cross_section import beam_section_points
+from .sections import lens_section_polyline, oml_outward_normals
 from .splines import default_z_levels, form_beam_grid
 
 
@@ -80,3 +85,78 @@ def build_assembly(
         b.label = f"beam_{i:02d}"
     skin.label = "skin"
     return Compound(label="wingsail", children=[skin, *beams])
+
+
+def _segment_station_radii(long_radii: np.ndarray, b: int, n_levels: int) -> np.ndarray:
+    """Per-station radii for beam ``b`` from its (n_levels-1) segment radii.
+
+    Station k uses the radius of segment min(k, n_seg-1), so the loft is a
+    piecewise-prismatic stack of the sized segments.
+    """
+    seg = n_levels - 1
+    radii_b = np.asarray(long_radii)[b * seg:(b + 1) * seg]
+    return np.array([radii_b[min(k, seg - 1)] for k in range(n_levels)])
+
+
+def build_sized_circular_beams(
+    spec: WingSpec,
+    long_radii: np.ndarray,
+    *,
+    n_beams: int = 16,
+    n_levels: int = 20,
+) -> list:
+    """Loft circular beams whose per-station radius comes from the sized segment radii.
+
+    Circular sections inset inward along the true OML normal — the FEA-faithful
+    fallback when lens lofting is not desired/available.
+    """
+    z_levels = default_z_levels(spec, n_levels)
+    beams = []
+    for b in range(n_beams):
+        st_r = _segment_station_radii(long_radii, b, n_levels)
+        with BuildPart() as bp:
+            for k in range(n_levels):
+                z = float(z_levels[k])
+                P = beam_section_points(spec, z, n_beams)[b]
+                n_out = oml_outward_normals(spec, z, n_beams)[b]
+                c = P - st_r[k] * n_out          # inset inward by the radius
+                with BuildSketch(Plane.XY.offset(z)):
+                    with Locations((float(c[0]), float(c[1]))):
+                        Circle(float(st_r[k]))
+            loft(ruled=True)
+        beams.append(bp.part)
+    return beams
+
+
+def build_sized_lens_beams(
+    spec: WingSpec,
+    long_radii: np.ndarray,
+    *,
+    n_beams: int = 16,
+    n_levels: int = 20,
+    n_arc: int = 24,
+) -> list:
+    """Loft inward-arc 'lens' beams sized to the Phase-C areas (π r²) per segment.
+
+    Each station's lens has area = π·(station radius)², its flat edge on the OML and
+    its arc bulging inward. Raises if build123d cannot loft the custom faces — the
+    caller may fall back to ``build_sized_circular_beams``.
+    """
+    z_levels = default_z_levels(spec, n_levels)
+    beams = []
+    for b in range(n_beams):
+        st_r = _segment_station_radii(long_radii, b, n_levels)
+        with BuildPart() as bp:
+            for k in range(n_levels):
+                z = float(z_levels[k])
+                P = beam_section_points(spec, z, n_beams)[b]
+                n_out = oml_outward_normals(spec, z, n_beams)[b]
+                area = float(np.pi * st_r[k] ** 2)
+                poly = lens_section_polyline(P, n_out, area, n_arc=n_arc)
+                with BuildSketch(Plane.XY.offset(z)):
+                    with BuildLine():
+                        Polyline([(float(x), float(y)) for x, y in poly], close=True)
+                    make_face()
+            loft(ruled=True)
+        beams.append(bp.part)
+    return beams
