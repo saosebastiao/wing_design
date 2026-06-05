@@ -14,7 +14,7 @@ import numpy as np
 from ..aero.loads import PanelLoads
 from ..geometry.wing import WingSpec
 from ..materials.unidir import T700_EPOXY, UDPly
-from ..structural.frame import BeamSection
+from ..structural.frame import BeamSection, FrameResult, solve_frame
 from ..structural.projection import R_GEOM_FROM_AERO
 from .splines import default_z_levels, form_beam_grid
 
@@ -100,3 +100,55 @@ def project_panels_to_beam_nodes(
         d = np.linalg.norm(frame.nodes - centers_geom[k], axis=1)
         loads[int(d.argmin()), :3] += forces_geom[k]
     return loads
+
+
+def solve_beam_frame(frame: BeamFrame, loads: np.ndarray) -> FrameResult:
+    sections = [frame.section] * frame.elements.shape[0]
+    return solve_frame(
+        frame.nodes,
+        frame.elements,
+        sections,
+        E=frame.E,
+        G=frame.G,
+        fixed_nodes=frame.fixed_nodes,
+        loads=loads,
+    )
+
+
+@dataclass(frozen=True)
+class FrameMetrics:
+    case_name: str
+    applied_force_N: float
+    tip_translation_m: float
+    tip_twist_deg: float
+    max_axial_stress_Pa: float
+    max_bending_stress_Pa: float
+    max_vm_stress_Pa: float
+
+
+def summarize_frame(
+    frame: BeamFrame,
+    result: FrameResult,
+    case_name: str,
+    applied_force_N: float,
+) -> FrameMetrics:
+    """Reduce a FrameResult to the headline tip/stress metrics for a load case."""
+    sec = frame.section
+    sigma_axial = np.abs(result.axial_force) / sec.A
+    sigma_bend = result.bending_moment * sec.r / sec.Iz
+    tau = np.abs(result.torsion) * sec.r / sec.J
+    vm = np.sqrt((sigma_axial + sigma_bend) ** 2 + 3.0 * tau**2)
+
+    tip_nodes = np.array([b * frame.n_levels + 0 for b in range(frame.n_beams)])
+    tip_tr = float(np.linalg.norm(result.displacements[tip_nodes, :3], axis=1).max())
+    tip_twist = float(np.abs(result.displacements[tip_nodes, 5]).max())  # rz about span axis
+
+    return FrameMetrics(
+        case_name=case_name,
+        applied_force_N=applied_force_N,
+        tip_translation_m=tip_tr,
+        tip_twist_deg=float(np.degrees(tip_twist)),
+        max_axial_stress_Pa=float(sigma_axial.max()),
+        max_bending_stress_Pa=float(sigma_bend.max()),
+        max_vm_stress_Pa=float(vm.max()),
+    )

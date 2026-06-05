@@ -2,7 +2,7 @@ import numpy as np
 
 from wing_design.geometry import WingSpec
 from wing_design.aero.loads import PanelLoads
-from wing_design.beams.fea_model import build_beam_frame, project_panels_to_beam_nodes
+from wing_design.beams.fea_model import build_beam_frame, project_panels_to_beam_nodes, solve_beam_frame
 from wing_design.structural.projection import R_GEOM_FROM_AERO
 
 
@@ -37,3 +37,16 @@ def test_projection_conserves_force():
     expected = R_GEOM_FROM_AERO @ (panels.forces_xyz[0] * 2.0)
     assert np.allclose(loads[:, :3].sum(axis=0), expected)
     assert np.allclose(loads[:, 3:], 0.0)  # forces only, no applied moments
+
+
+def test_solve_runs_and_deflects():
+    spec = WingSpec()
+    frame = build_beam_frame(spec, n_beams=16, n_levels=12)
+    loads = np.zeros((frame.nodes.shape[0], 6))
+    tip = [b * frame.n_levels + 0 for b in range(frame.n_beams)]  # level 0 = tip
+    loads[tip, 0] = 50.0  # push the whole tip ring chordwise
+    res = solve_beam_frame(frame, loads)
+    assert np.isfinite(res.displacements).all()
+    assert res.max_translation_m > 0.0
+    # clamped base ring stays put
+    assert np.allclose(res.displacements[frame.fixed_nodes], 0.0)
