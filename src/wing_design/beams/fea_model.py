@@ -37,26 +37,29 @@ def build_beam_frame(
     beam_radius: float = 0.02,
     material: UDPly = T700_EPOXY,
     knockdown: float = 0.5,
-    nu: float = 0.32,
+    nu: float = 0.32,  # isotropic-equivalent; matches MaterialParameters.nu_isotropic in scenario.py
 ) -> BeamFrame:
     z = default_z_levels(spec, n_levels)
     grid = form_beam_grid(spec, z, n_beams)          # (n_beams, n_levels, 3)
     nodes = grid.reshape(-1, 3)
 
+    def nid(b: int, k: int) -> int:
+        return b * n_levels + k
+
     elems: list[tuple[int, int]] = []
     # longitudinal members: consecutive z-levels of each beam
     for b in range(n_beams):
         for k in range(n_levels - 1):
-            elems.append((b * n_levels + k, b * n_levels + (k + 1)))
+            elems.append((nid(b, k), nid(b, k + 1)))
     # ring members: adjacent beams at each level, wrapping around
     for k in range(n_levels):
         for b in range(n_beams):
             bn = (b + 1) % n_beams
-            elems.append((b * n_levels + k, bn * n_levels + k))
+            elems.append((nid(b, k), nid(bn, k)))
     elements = np.asarray(elems, dtype=int)
 
-    keel_k = n_levels - 1  # default_z_levels descends tip -> keel-step
-    fixed_nodes = np.array([b * n_levels + keel_k for b in range(n_beams)], dtype=int)
+    keel_k = int(np.argmin(z))  # keel-step = bottom of the default_z_levels range
+    fixed_nodes = np.array([nid(b, keel_k) for b in range(n_beams)], dtype=int)
 
     E = material.isotropic_equivalent_modulus(knockdown=knockdown)
     G = E / (2.0 * (1.0 + nu))

@@ -15,3 +15,5 @@ def test_frame_topology():
     # the clamped ring is the most-negative-z (keel-step) level
     z_fixed = frame.nodes[frame.fixed_nodes, 2]
     assert np.allclose(z_fixed, frame.nodes[:, 2].min())
+    assert frame.E > 0.0
+    assert frame.G > 0.0
