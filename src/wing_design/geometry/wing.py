@@ -158,6 +158,32 @@ def _section_face(
     return sk.sketch
 
 
+def oml_section_polyline(spec: WingSpec, z: float, n_pts: int | None = None) -> np.ndarray:
+    """Closed OML cross-section polyline (x, y) at spanwise height ``z``.
+
+    Wing region (z >= 0): pure airfoil at ``chord_at_z(z)``.
+    Transition (-transition_length <= z < 0): airfoil->circle radial blend.
+    Spar region (z < -transition_length): the spar circle.
+
+    Returns an (M, 2) array traversed upper-TE -> LE -> lower-TE; its first and
+    last points coincide at the trailing edge.
+    """
+    if n_pts is None:
+        n_pts = spec.n_airfoil_points
+    if z >= 0.0:
+        chord = spec.chord_at_z(z)
+        blend = 0.0
+    elif z >= -spec.transition_length:
+        chord = spec.root_chord
+        blend = -z / spec.transition_length
+    else:
+        chord = spec.root_chord
+        blend = 1.0
+    return _airfoil_to_circle_polyline(
+        chord, spec.thickness, spec.pivot_frac, spec.spar_diameter, blend, n_pts
+    )
+
+
 def build_wing_solid(spec: WingSpec = WingSpec()):
     """Loft the wing + fairing + cylindrical spar as a single solid.
 

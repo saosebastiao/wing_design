@@ -1,128 +1,278 @@
-@docs/guided_generative_design.md please analyze this document. I first want to fill in this document with necessary analysis and details, but then I
-  want to create an incremental development plan to implement this idea. I will want to update the @docs/plan.md accordingly.
+# Guided Generative Design — Sailing Wingsail
 
-# Sailing Wing Design
+A free-rotating, unstayed solid carbon-fiber **wingsail** built as a **space-frame
+of unidirectional CFRP beams** (straight or curved beams) wrapped and bound by a
+**filament-wound CFRP skin** that simultaneously forms the airfoil surface and the
+spar. The assembly is inserted into the boat hull like a keel-stepped mast and
+rotates within its bearing-lined enclosure. The spar is the pivot axis for 360°+
+rotation of the entire wing.
 
-A free-rotating, unstayed solid carbon-fiber **wingsail** built as a **space-frame of unidirectional CFRP beams** (straight or curved beams) wrapped and bound by a **filament-wound CFRP skin** that simultaneously forms the airfoil surface and spar, which is inserted into the boat hull similar to a keel-stepped mast, and rotates within its bearing-lined enclosure. The spar forms an effective pivot axis for 360+ degree rotation for the entire wing. 
+This document is the **design specification**. The incremental build sequence
+that implements it lives in [`plan.md`](./plan.md).
 
-## Glossary of Terms
-TODO: infer or rename terms in this document to more clearly communicate to the AI agent as well as engineers and manufacturers. 
-TODO: Define terms here for disambiguation
+> **Design philosophy (decided 2026-06-04).** The structural members are placed
+> **on the outer shell**, not as an interior volumetric truss: filament-winding
+> the skin around shell-following beams *is* what forms the structure. This
+> supersedes the earlier Arora/Jiang interior-volumetric-truss method. The
+> stress-aligned frame field is **retained** — initially as a diagnostic, and
+> ultimately to drive non-uniform beam spacing and direction (see Phase F in the
+> plan). Cross-sections are sized **FEA-in-the-loop**, and the wound skin is
+> modeled as a **load-bearing shell**, not a fairing.
+
+## Glossary of terms
+
+| Term | Meaning |
+| --- | --- |
+| **wing** | The aerodynamic section, from root (`z = 0`) to tip (`z = span`). |
+| **spar** | The cylindrical pivot shaft below the wing; the rotation axis and the part that steps into the hull. |
+| **keel-step** | Lowest point of the spar, `z = -(spar_length + spar_transition_length)`. Bears against the hull bottom (the deepest mast-step analogy). |
+| **deck-step** | Top of the cylindrical spar / deck-bearing level, `z = -spar_transition_length`. |
+| **transition** | The morphing region between the root airfoil (`z = 0`) and the full spar circle (`z = -spar_transition_length`). (The code's `geometry.wing` currently calls this region the *fairing*; we unify on **transition**.) |
+| **form beam** | A unidirectional-CFRP beam that runs along the OML (outer mold line) and both *defines* the aerodynamic shape and *carries* structural load. Aircraft analogy: a stringer / spar-cap. The doc previously called these "wing form beams." |
+| **LE / TE spline** | The two distinguished, full-length form beams that run along the leading edge and trailing edge: tip → root → transition → spar → keel-step. |
+| **skin** (a.k.a. *wrap*) | The filament-wound CFRP shell of thickness `shell_thickness` that forms the airfoil surface. **Load-bearing**, not just a fairing. |
+| **beam arc** | The inward-facing circular arc — centered on a form-beam spline point, with endpoints on the OML — whose radius is solved so the resulting cross-section hits the area chosen by the sizing optimization. |
+| **OML** | Outer mold line: the aerodynamic outer surface of the wing+transition+spar. |
+
+> **Retired term — "virtual beam."** The original draft modeled the
+> stretched-skin effect with infinite-tension "virtual beams" between adjacent
+> form beams. Because the skin is now modeled as a real load-bearing shell in the
+> FEA-in-the-loop sizing, this abstraction is no longer needed.
 
 ## Axis conventions
-The wing is created in an x,y,z coordinate system
-- the wing root airfoil is drawn on the x/y plane at z==0, and with the pivot point aligned at x==0 and y==0
-- the wing tip airfoil is drawn on the x/y plan at z==`span`, also with the pivot point at (x,y)==(0,0)
-- the wing spar is centered on (x,y)==(0,0)
-    - the wing spar keel-step (the lowest point on the spar) is located at z== -(spar_length + spar_transition_length)
-    - the wing spar deck-step (the highest point on the spar) is located at z== -spar_transition_length
-- the wing chord line (whether at the root or tip or any intermediate z level) is always the x axis
 
-## Wing Shape constraints specification 
-- center of moment ahead of pivot axis
-    - ensures that AoA passively decreases with increasing windspeed
-- center of gravity should be aft of the pivot axis
-    - ensures that AoA passively decreases when heeling
-- wing spar centerpoint is also the pivot point
-- wing spar radius is exactly the radius of the maximum inscribed circle at the wing spar centerpoint within the root aerofoil shape, rounded down to a whole centimeter
-- there is a fillet between the spar and the spar transition
-    - TODO: choose a reasonable default radius and name for this fillet
-- there is a fillet between the spar transition and the wing root
-    - TODO: choose a reasonable default radius and name for this fillet
-- there is a fillet on the wing trailing edge that allows for continous filament winding of the wing shape
-    - a pointed trailing edge would cause continous carbon fiber to bend in a way that weakens it, we need a minimized radius that still allows for the full strength of the fibers
-    - TODO: choose a reasonable default radius and name for this fillet
-- wing form beams always are along the outer shell of the wing 
-    - this is necessary so that the filament winding of the shell creates the wing beam
-    - this also doubles as the primary structural support for the wing
-    - there needs to be enough of them to maintain a reasonable shape resolution for the wing, but some may carry more load than others
+The wing is created in an `x, y, z` coordinate system:
 
-### Known Design Parameters                                         
-span ( Wing Root to Wing Tip)  :            5.0 m                                         
-wing_root_chord Root chord          : 1.0 m                                         
-wing_root_airfoil       : NACA 0018 (symmetric, t/c = 0.18)             
-wing_tip_chord          : 0.6 m                                         
-wing_tip_airfoil        :  NACA 0018 (symmetric, t/c = 0.18)             
-spar_transition_length : 0.5 m
-spar_length : 1.0 m
-pivot_location      : ~25% chord, move forward or backward to achieve predictable but small passive feathering moment forces. 
-material (primary)  : UD carbon / epoxy (E1 ≈ 130 GPa, anisotropic) 
-n_wing_form_beams: unknown
-wing shell thickness: 3mm
+- The wing **root** airfoil is drawn on the `x/y` plane at `z = 0`, with the pivot
+  point at `x = 0, y = 0`.
+- The wing **tip** airfoil is drawn on the `x/y` plane at `z = span`, also with
+  the pivot point at `(x, y) = (0, 0)`.
+- The wing **spar** is centered on `(x, y) = (0, 0)`.
+  - The spar **keel-step** (lowest point) is at `z = -(spar_length + spar_transition_length)`.
+  - The spar **deck-step** (highest point of the cylinder) is at `z = -spar_transition_length`.
+- The wing **chord line** (root, tip, or any intermediate `z`) is always the `x` axis.
 
+## Wing shape constraints
 
-## Aerodynamic Scenarios:
-- full range of lift of foil (no need to exceed stall , as we are designing to passively feather)
-- full range of reasonable sailing conditions
-    - reynolds numbers, ncrit
-- full range of reasonable wind shear
-- full range of reasonable apparent winds
-    - wind shear + boat speed == variable AoA along the wing
-- beaufort force 11 winds at -1 to 1 degree AoA (our main failure criteria)
+- **Center of pressure ahead of the pivot axis** → angle of attack passively
+  decreases with increasing wind speed (passive feathering).
+- **Center of gravity aft of the pivot axis** → angle of attack passively
+  decreases when heeling.
+- The **spar centerpoint is the pivot point** (`x = y = 0`).
+- **Spar radius is derived, not stored.** It equals the radius of the maximum
+  inscribed circle centered at the pivot within the root airfoil, **rounded down
+  to a whole centimeter**. For the working scenario (NACA 0018, root chord 1.0 m,
+  pivot at 25% chord) the controlling dimension is the airfoil half-thickness at
+  the pivot station (≈ 0.089 m), so `spar_radius ≈ 0.08 m` (diameter 0.16 m).
+  This becomes a method on the design dataclass, replacing the stored
+  `spar_diameter`.
+- **Fillets** (all sized at or above the minimum continuous-winding bend radius):
+  - `spar_transition_fillet_r` — between the spar and the transition. Default **30 mm**.
+  - `root_transition_fillet_r` — between the transition and the wing root. Default **50 mm**.
+  - `te_fillet_r` — trailing-edge rounding that lets the filament wind continuously.
+    A pointed TE would force continuous tow into a kink that destroys fiber
+    strength; this is the minimum radius that preserves full fiber strength.
+    Default **5 mm**.
+- **Form beams always lie on the outer shell.** This is required so that
+  filament-winding the skin forms the beam, it doubles as the primary structural
+  support, and there must be enough of them to hold the aerodynamic shape (though
+  some carry more load than others).
 
-## structural simulation:
-- structure must survive all scenarios within safety factor
-- structure must not exceed tolerances for tip/twist/shape deflection
-- stress/strain and principal directions of stresses at mesh cell or node level
+### Known design parameters
 
-## Performance Metrics and Constraints
-### aerodynamic 
-- moment force on pivot axis
-- lift to drag ratio
-- total lift
-### structural 
-- tip deflection
-- twist deflection
-- foil shape deflection
+| Parameter | Value |
+| --- | --- |
+| `span` (root → tip) | 5.0 m |
+| `wing_root_chord` | 1.0 m |
+| `wing_root_airfoil` | NACA 0018 (symmetric, t/c = 0.18) |
+| `wing_tip_chord` | 0.6 m |
+| `wing_tip_airfoil` | NACA 0018 (symmetric, t/c = 0.18) |
+| `spar_transition_length` | 0.5 m |
+| `spar_length` | 1.0 m |
+| `pivot_location` | ≈ 25% chord; tune fore/aft for a small, predictable passive-feathering moment |
+| `material` (primary) | UD carbon / epoxy (E1 ≈ 130 GPa, anisotropic) |
+| `spar_radius` | **derived** (see above) ≈ 0.08 m |
+| `n_form_beams` | **16**, evenly spaced by arc-length around the OML perimeter, with LE and TE counted as two of them |
+| `shell_thickness` | 3 mm |
+| `spar_transition_fillet_r` | 30 mm |
+| `root_transition_fillet_r` | 50 mm |
+| `te_fillet_r` | 5 mm |
 
-## Pipeline to achieve build design
+## Aerodynamic scenarios
 
-1. build123d 
-    - build wing outer solid for aerodynamic modeling
-    - aerodynamic modeling only needs the wing section (from wing root to wing tip), not the spar or the spar transition
-2. Use aerosandbox to generate pressure fields and point locations per load scenario (may need to decide on resolution)
-3. 3D linear FEA - calculate Cauchy stress σ(x) 
-4. Calculate stress-aligned frame field a la Arora
-5. build123d build spar truss for wing
-    1. build full wing (spar, transition, and wing) outer shell for structural modeling
-    2. build collection of points for 3d splines for wing form beams 
-        - all wing form beam splines are defined as points along the full wing outer shell
-        - wing leading edge spline starts at the wing tip leading edge, proceeds to the wing root leading edge, then down the spar transition leading edge to the spar leading edge all the way down to the keel step
-        - wing trailing edge spline does the same but with the trailing edge
-        - we need multiple other splines that form a structural basis for maintaining the wing aerodynamic shape as well as the wings structural loads
-            - let's start with a fixed number of evently spaced splines where each spline's x,y point is evenly spaced about the shell's filament-wound shell shape at whatever z level the point is at
-            - choose the number of splines so that they roughly align with resolution of the aerodynamic pressure field vectors
-        - choose a set of z axis points where we want spline points
-    3. create the splines by connecting the points for each spar spline
-        - optimize the spline knot vectors and weights such that they align as closely as possible with the wing shell shape
-            - TODO: how do we do this?
-6. solve LP model to optimize beam cross sections at each of the spline points that we've defined
-    1. build a 3d polyline truss model from the chosen beam spline points that becomes the basis for a linear programming model which can be solved to optimize beam cross sections at each point along the polyline
-        - assume unidirectional carbon fiber beams that form the shape of the polylines
-        - each beam is modeled with fixed base at the spar keel-step
-        - to model the stretched-skin structural effect of the wing shell being filament wound around the beams, form virtual beams between adjacent beams along the z-axis where the spline points are chosen. Assume infinite tension strength for these beams for this stage of the optimization. 
-        - constrain the model to require tip/twist deflections below allowable values
-        - optimization output: for each beam's spline point, we now should have an optimal cross section. 
-    2. solve the model 
-    3. iterate on the model if necessary to ensure that the model is producing coherent and realistic results. 
-7. build123d create the beams 
-    1. create x,y plane arcs with centers at all spline points and arc endpoints along the wing outer shell, facing inward from the shell
-    2. at each beam spline point, solve for the arc radius in order to achieve the beam's specified cross sectional area that was output from the optimization model in step 6 above
-    3. to form each beam, create lofts from the bottom of the spline to the top, aligning the arc points appropriately for the loft construction.
-8. build123d create the wing wrap
-    1. create horizontal lines from the beam arc termination points at each z-level to form a closed shape at each z-level
-    2. loft the z-level closed shapes into a shell
-    3. extrude the shell outwards by the shell thickness
-9. build123d create assembly of beams and wing wrap
-10. solve FEM model for structural capabilityh, generate metrics and visualizations
+- Full lift range of the foil (no need to exceed stall — we passively feather).
+- Full range of reasonable sailing conditions (Reynolds numbers, `ncrit`).
+- Full range of reasonable wind shear.
+- Full range of reasonable apparent winds (wind shear + boat speed ⇒ variable AoA
+  along the span).
+- **Beaufort force 11 winds at −1° to +1° AoA** — the primary failure criterion.
 
+## Structural requirements
 
+- The structure must survive every scenario within the safety factor.
+- The structure must not exceed tip / twist / shape-deflection tolerances.
+- Track stress/strain and the principal stress directions at the mesh
+  cell/node level.
 
-## future enhancements:
-- generation / optimization of cross-beam members and reinforcements
-- optimization of skin wrap weight vs beam weight
+## Performance metrics and constraints
 
-## Development Conventions:
-1. Maintain a single dataclass definition which has all design parameters
-    - only necessary parameters should be class members: if a parameter can be mathematically derived from another parameter, it shouldn't be maintained as a class member, but rather as a method on that class
-2. Maintain an instance of that class with our default design parameters
+**Aerodynamic:** moment about the pivot axis · lift-to-drag ratio · total lift.
+
+**Structural:** tip deflection · twist deflection · airfoil-shape deflection.
+
+## Pipeline
+
+Steps 1–4 reuse the existing foundation (geometry, aero loads, 3D FEA, frame
+field). Steps 5–10 are the shell-beam generative design.
+
+1. **build123d — wing OML.** Build the wing outer solid for aerodynamic modeling.
+   Aero only needs the wing section (root → tip), not the spar or transition.
+   *(exists: `geometry.wing`)*
+2. **AeroSandbox — load field.** Generate pressure fields and per-panel load
+   points per load scenario; project onto the OML mesh.
+   *(exists: `aero.model`, `aero.cases`, `aero.loads`)*
+3. **3D linear FEA — Cauchy stress σ(x).** *(exists: `structural.mesh`,
+   `structural.fea`)*
+4. **Stress-aligned frame field** (à la Arora). *(exists: `truss.frame_field`,
+   `truss.parametrization`)* Retained as a diagnostic now; drives beam
+   spacing/direction in Phase F.
+5. **build123d — form-beam splines on the full OML** (wing + transition + spar to
+   keel-step):
+   1. Build the full outer shell for structural modeling.
+   2. Build the collection of 3D spline control points, all sampled **on** the
+      OML:
+      - The **LE spline** starts at the tip leading edge, proceeds to the root
+        leading edge, then down the transition leading edge and the spar leading
+        edge to the keel-step. The **TE spline** does the same along the trailing
+        edge.
+      - The remaining form beams are sampled at fixed perimeter fractions: at each
+        `z` level, the beam's `(x, y)` point is evenly spaced by arc length around
+        the OML cross-section at that `z`. `n_form_beams = 16` (including LE and
+        TE), chosen to roughly match the aero chordwise pressure resolution.
+      - Choose a set of `z` levels for the spline points (tip → root → transition
+        → spar → keel-step).
+   3. **Fit the splines** to the sampled points. Because every control point is
+      sampled directly *on* the shell, an interpolating/least-squares cubic
+      B-spline (e.g. `scipy.interpolate.splprep`) through those points lies on the
+      shell to sampling tolerance. Fidelity is governed by the number of `z`
+      levels and the smoothing tolerance — no separate NURBS weight optimization
+      is required. (Earlier open question resolved this way.)
+6. **FEA-in-the-loop cross-section sizing** *(replaces the original LP)*:
+   1. Assemble a structural FEA model from the chosen spline geometry: **beam
+      elements** along each form-beam spline (fixed/cantilevered at the
+      keel-step) plus a **load-bearing skin shell** between adjacent beams
+      (isotropic-equivalent first, anisotropic CLT later — supersedes the old
+      fairing-only treatment).
+   2. Optimize the per-beam cross-sectional area at each spline point to satisfy
+      stress and tip/twist/shape-deflection constraints across **all** load
+      cases. Start with fully-stressed-design / optimality-criteria iteration;
+      promote to MILP over a discrete cross-section catalog (OR-Tools) later.
+   3. Iterate until results are coherent and realistic.
+   4. **Output:** an optimal cross-section area for every form-beam spline point.
+7. **build123d — create the beams.**
+   1. At each spline point, create an `x/y`-plane arc whose center is the spline
+      point and whose endpoints lie on the OML, facing inward from the shell.
+   2. Solve each arc's radius so its cross-section equals the optimized area from
+      step 6.
+   3. Loft from the bottom of each spline to the top, aligning the arc points, to
+      form each beam.
+8. **build123d — create the skin wrap.**
+   1. At each `z` level, connect the beam-arc termination points to form a closed
+      cross-section.
+   2. Loft the per-`z` closed sections into a shell.
+   3. Thicken the shell outward by `shell_thickness`.
+9. **build123d — assemble** the beams and the skin wrap.
+10. **Verification FEA** on the as-built assembly: solve under every load case,
+    generate metrics and visualizations, and feed σ(x) back to step 4 to iterate
+    toward a fixed point.
+
+## Future optimizations & directions
+
+Notes kept deliberately concrete so we can pick any of these up — or change
+direction — without re-deriving the rationale. Roughly ordered by expected
+payoff-to-effort.
+
+### 1. Frame-field-driven beam layout (Phase F)
+The stress-aligned frame field is computed but unused in the spike. Two levers:
+- **Spacing:** replace arc-length-uniform perimeter spacing with a density that
+  follows principal-stress magnitude — more beams over the spar/root and
+  high-bending regions, fewer near the lightly loaded tip and TE. Implementation:
+  integrate stress magnitude around each OML cross-section, then place beams at
+  equal *cumulative-stress* intervals instead of equal arc length.
+- **Direction:** add a second **helical/diagonal beam family** whose in-plane
+  angle tracks the principal-stress direction of the frame field (the shear/
+  torsion load path). This is the step that turns the structure from "spanwise
+  stringers" into a true wound laminate and is the natural home for the retained
+  Arora machinery. *Risk:* lofting non-spanwise beam arcs and keeping them
+  windable is geometrically harder; prototype on a flat panel first.
+
+### 2. Discrete cross-section catalog (MILP)
+Continuous fully-stressed sizing yields arbitrary areas. Real pultruded/RTM
+stock comes in discrete sizes. Promote step 6 to a MILP (OR-Tools, already a
+dependency) that picks from a catalog and groups co-linear neighbors into single
+stock pieces. Use FEA-derived sensitivities as the linear objective; re-solve FEA
+between MILP rounds (sequential linear programming). See the `ortools-cp` skill.
+
+### 3. Anisotropic skin (CLT) and winding-angle co-design
+Replace the isotropic-equivalent skin with Classical Laminate Theory over the
+actual wound fiber orientations (`materials.unidir` already has the ply data).
+Then the **winding angle becomes a design variable** co-optimized with beam
+areas — the skin's ±θ plies carry torsion while the beams carry bending. This is
+where the structure stops being "beams + dead skin" and becomes one optimized
+composite.
+
+### 4. Skin-weight vs. beam-weight trade
+With a load-bearing skin, there is a genuine mass trade between thickening the
+skin and growing the beams. Add `shell_thickness` (and per-region thickness) to
+the design vector and minimize total mass subject to the same constraints.
+Expected outcome: thicker skin + fewer/smaller beams over torsion-dominated
+spans, the reverse over bending-dominated spans.
+
+### 5. Filament-winding path planner + manufacturability
+Generate continuous winding passes that (a) form the airfoil surface and
+(b) reinforce joints and buckling-prone members (IsoTruss-style node wrapping).
+Output robot/G-code paths + a per-pass fiber-orientation map that feeds the CLT
+of item 3. Add manufacturability constraints back into sizing: minimum bend
+radius (the `te_fillet_r` rationale generalized), max fiber turn rate, no
+bridging across concavities. *This closes the loop:* the winding plan's actual
+fiber map becomes the FEA input, not an assumed one.
+
+### 6. Cross-beam members, ribs, and reinforcements
+The current model has only OML-following beams. Add generated internal ribs /
+shear webs where buckling or panel deflection governs, and local reinforcement
+plies at the spar-to-wing transition (the highest-moment region). Could be driven
+by a buckling eigenvalue check in the verification FEA.
+
+### 7. Richer load cases and physics
+- **Buckling:** linear eigenvalue buckling on the as-built shell (skin panels
+  between beams are the likely first mode).
+- **Dynamics:** flutter / divergence (free-rotating unstayed wing is
+  aeroelastically interesting), vortex shedding, gust transients.
+- **Fatigue:** cyclic load spectrum from a sailing-condition distribution.
+- **Impact / knockdown** beyond the static Beaufort-11 case.
+
+### 8. Full design-loop closure & scaling
+- **Fixed-point iteration:** feed verification σ(x) back into the frame field and
+  re-run, to convergence (doc step 10 → step 4).
+- **Outer optimization over global geometry:** today `pivot_frac`, taper profile,
+  and planform are fixed inputs. Wrap the whole pipeline in an outer optimizer
+  (pivot location for the passive-feathering target; taper for mass/lift) — the
+  pipeline becomes the objective function.
+- **Scaling:** parametrize span/chord/taper to retarget from the 5 m wingsail to
+  ~1 m FPV drone wings and >100 m turbine blades (the repo's stated long-term
+  goal). Validate that the shell-beam method's assumptions (winding feasibility,
+  beam-count resolution) hold across scales.
+
+### 9. Verification against the retired interior-truss method
+Keep the Arora/Jiang volumetric-truss code reachable (even if off the main path)
+so we can, once, compare mass and stiffness of an interior truss vs. the
+shell-beam design for the same load cases — a sanity check that "beams on the
+shell" is actually competitive, not just more manufacturable.
+
+## Development conventions
+
+1. Maintain a **single dataclass** holding all design parameters. A value that
+   can be mathematically derived from another parameter is **not** stored — it is
+   a method on the class (e.g. `spar_radius`). *(exists: `scenario.DesignParameters`)*
+2. Maintain an instance of that class with the **default** design parameters.
+   *(exists: `scenario.default_scenario()`)*
