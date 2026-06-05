@@ -25,7 +25,8 @@ class BeamFrame:
     elements: np.ndarray       # (n_elem, 2) int
     n_beams: int
     n_levels: int
-    fixed_nodes: np.ndarray    # (n_beams,) keel-step ring
+    fixed_nodes: np.ndarray    # (n_beams,) keel-step ring (clamped)
+    tip_nodes: np.ndarray      # (n_beams,) tip ring (where deflection/twist are read)
     section: BeamSection
     E: float
     G: float
@@ -41,6 +42,8 @@ def build_beam_frame(
     knockdown: float = 0.5,
     nu: float = 0.32,  # isotropic-equivalent; matches MaterialParameters.nu_isotropic in scenario.py
 ) -> BeamFrame:
+    if n_levels < 2:
+        raise ValueError(f"n_levels must be >= 2 to form longitudinal members, got {n_levels}")
     z = default_z_levels(spec, n_levels)
     grid = form_beam_grid(spec, z, n_beams)          # (n_beams, n_levels, 3)
     nodes = grid.reshape(-1, 3)
@@ -61,7 +64,9 @@ def build_beam_frame(
     elements = np.asarray(elems, dtype=int)
 
     keel_k = int(np.argmin(z))  # keel-step = bottom of the default_z_levels range
+    tip_k = int(np.argmax(z))   # tip = top of the range
     fixed_nodes = np.array([nid(b, keel_k) for b in range(n_beams)], dtype=int)
+    tip_nodes = np.array([nid(b, tip_k) for b in range(n_beams)], dtype=int)
 
     E = material.isotropic_equivalent_modulus(knockdown=knockdown)
     G = E / (2.0 * (1.0 + nu))
@@ -71,6 +76,7 @@ def build_beam_frame(
         n_beams=n_beams,
         n_levels=n_levels,
         fixed_nodes=fixed_nodes,
+        tip_nodes=tip_nodes,
         section=BeamSection.circular(beam_radius),
         E=E,
         G=G,
@@ -143,9 +149,9 @@ def summarize_frame(
     tau = np.abs(result.torsion) * sec.r / sec.J
     vm = np.sqrt((sigma_axial + sigma_bend) ** 2 + 3.0 * tau**2)
 
-    tip_nodes = np.array([b * frame.n_levels + 0 for b in range(frame.n_beams)])
-    tip_tr = float(np.linalg.norm(result.displacements[tip_nodes, :3], axis=1).max())
-    tip_twist = float(np.abs(result.displacements[tip_nodes, 5]).max())  # rz about span axis
+    tip = frame.tip_nodes
+    tip_tr = float(np.linalg.norm(result.displacements[tip, :3], axis=1).max())
+    tip_twist = float(np.abs(result.displacements[tip, 5]).max())  # rz about span axis
 
     return FrameMetrics(
         case_name=case_name,
