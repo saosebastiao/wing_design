@@ -11,9 +11,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..aero.loads import PanelLoads
 from ..geometry.wing import WingSpec
 from ..materials.unidir import T700_EPOXY, UDPly
 from ..structural.frame import BeamSection
+from ..structural.projection import R_GEOM_FROM_AERO
 from .splines import default_z_levels, form_beam_grid
 
 
@@ -73,3 +75,24 @@ def build_beam_frame(
         E=E,
         G=G,
     )
+
+
+def project_panels_to_beam_nodes(
+    frame: BeamFrame,
+    panels: PanelLoads,
+    *,
+    safety_factor: float = 1.0,
+) -> np.ndarray:
+    """(n_nodes, 6) nodal loads: each panel force (aero→geom) lumped at the nearest node.
+
+    Panel centers and forces are rotated from the aero frame (span +Y) to the
+    geom frame (span +Z) with `R_GEOM_FROM_AERO`, then each panel's full force
+    vector is assigned to the single nearest beam node. Moments are left zero.
+    """
+    loads = np.zeros((frame.nodes.shape[0], 6))
+    centers_geom = panels.centers_xyz @ R_GEOM_FROM_AERO.T
+    forces_geom = (panels.forces_xyz * safety_factor) @ R_GEOM_FROM_AERO.T
+    for k in range(panels.n_panels):
+        d = np.linalg.norm(frame.nodes - centers_geom[k], axis=1)
+        loads[int(d.argmin()), :3] += forces_geom[k]
+    return loads
