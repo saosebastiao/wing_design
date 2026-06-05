@@ -4,6 +4,14 @@ from __future__ import annotations
 from .cross_section import beam_section_points, resample_closed_polyline
 from .splines import default_z_levels, fit_beam_splines, form_beam_grid, sample_spline
 from .build import build_assembly, build_form_beams, build_skin_wrap
+from .fea_model import (
+    BeamFrame,
+    FrameMetrics,
+    build_beam_frame,
+    project_panels_to_beam_nodes,
+    solve_beam_frame,
+    summarize_frame,
+)
 
 __all__ = [
     "beam_section_points",
@@ -15,4 +23,10 @@ __all__ = [
     "build_assembly",
     "build_form_beams",
     "build_skin_wrap",
+    "BeamFrame",
+    "FrameMetrics",
+    "build_beam_frame",
+    "project_panels_to_beam_nodes",
+    "solve_beam_frame",
+    "summarize_frame",
 ]

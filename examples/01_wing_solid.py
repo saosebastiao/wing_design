@@ -12,7 +12,7 @@ from wing_design.viz import show_in_viewer
 def main() -> None:
     spec = WingSpec()
     part = build_wing_solid(spec)
-    out = Path(__file__).parent / "_out"
+    out = Path(__file__).resolve().parent.parent / "exports"
     out.mkdir(exist_ok=True)
     export_step(part, str(out / "wingsail_v0.step"))
     export_stl(part, str(out / "wingsail_v0.stl"))
