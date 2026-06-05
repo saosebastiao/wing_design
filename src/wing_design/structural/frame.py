@@ -176,3 +176,22 @@ def solve_frame(
 
     return FrameResult(displacements=disp, axial_force=axial,
                        bending_moment=bending, torsion=torsion)
+
+
+def von_mises_per_element(result: FrameResult, sections: list[BeamSection]) -> np.ndarray:
+    """Per-element combined-stress proxy (Pa) from a solved frame.
+
+    sigma_n = |N|/A + M_resultant * r / Iz   (axial + bending at the outer fibre)
+    tau     = |T| * r / J                     (St-Venant torsional shear)
+    sigma_vm = sqrt(sigma_n**2 + 3*tau**2)
+
+    Assumes circular sections (Iy == Iz); `M_resultant` is the resultant bending
+    moment already stored on `FrameResult.bending_moment`.
+    """
+    A = np.array([s.A for s in sections])
+    r = np.array([s.r for s in sections])
+    Iz = np.array([s.Iz for s in sections])
+    J = np.array([s.J for s in sections])
+    sigma_n = np.abs(result.axial_force) / A + result.bending_moment * r / Iz
+    tau = np.abs(result.torsion) * r / J
+    return np.sqrt(sigma_n**2 + 3.0 * tau**2)
