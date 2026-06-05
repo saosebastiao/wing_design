@@ -132,6 +132,14 @@ built end-to-end at crude fidelity.
 **Deliverable: `examples/21_beam_fea.py` → per-load-case stress/deflection
 metrics for the unsized structure.**
 
+**Status: done (2026-06-04).** Beam elements implemented as a fresh in-house 3D
+Euler–Bernoulli frame solver (`structural.frame`); the skin's transverse shear
+transfer is stood in for by **ring connectors** between adjacent beams at each
+z-level, not yet a coupled shell (deferred to a later deepen). Loads applied via
+full panel-force projection onto the nearest beam node (`beams.fea_model`). The
+unsized 20 mm-radius frame is far over-stiff (tip deflection ≈ 0.2 % span, member
+σ_vm ≲ 20 MPa vs. ~400+ MPa allowable) — the baseline Phase C thins down.
+
 ### Phase C — FEA-in-the-loop sizing spike
 
 - `wing_design.beams.sizing` — fully-stressed-design / optimality-criteria loop:
@@ -245,3 +253,5 @@ src/wing_design/
 | Phase-4 FEA backend | Roll-our-own linear-tet solver in numpy/scipy; promote to sfepy/FEniCSx when anisotropic homogenization matters. |
 | Spline fitting | Dense on-surface sampling + cubic B-spline interpolation (no NURBS weight optimization). |
 | Spar radius | Derived (max inscribed circle at pivot, floored to cm), not stored. |
+| Phase-B FEA element | Fresh 3D Euler–Bernoulli frame (`structural.frame`); ring connectors stand in for skin shear transfer in the spike (coupled shell = later deepen). |
+| Example outputs | All examples write generated artifacts to the repo-root `exports/` (gitignored); no outputs tracked in git. |
