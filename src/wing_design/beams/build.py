@@ -87,11 +87,22 @@ def build_assembly(
     return Compound(label="wingsail", children=[skin, *beams])
 
 
+def _check_long_radii(long_radii: np.ndarray, n_beams: int, n_levels: int) -> None:
+    """Fail clearly if the sized-radius array isn't beam-major/level-minor sized."""
+    expected = n_beams * (n_levels - 1)
+    if len(long_radii) != expected:
+        raise ValueError(
+            f"long_radii must have n_beams*(n_levels-1) = {expected} entries, "
+            f"got {len(long_radii)}"
+        )
+
+
 def _segment_station_radii(long_radii: np.ndarray, b: int, n_levels: int) -> np.ndarray:
     """Per-station radii for beam ``b`` from its (n_levels-1) segment radii.
 
-    Station k uses the radius of segment min(k, n_seg-1), so the loft is a
-    piecewise-prismatic stack of the sized segments.
+    Station k uses the radius of segment min(k, n_seg-1), so the loft is
+    piecewise-linear (each interior segment tapers from r_k to r_{k+1}); only the
+    final, clamped segment is prismatic.
     """
     seg = n_levels - 1
     radii_b = np.asarray(long_radii)[b * seg:(b + 1) * seg]
@@ -110,6 +121,7 @@ def build_sized_circular_beams(
     Circular sections inset inward along the true OML normal — the FEA-faithful
     fallback when lens lofting is not desired/available.
     """
+    _check_long_radii(long_radii, n_beams, n_levels)
     z_levels = default_z_levels(spec, n_levels)
     beams = []
     for b in range(n_beams):
@@ -142,6 +154,7 @@ def build_sized_lens_beams(
     its arc bulging inward. Raises if build123d cannot loft the custom faces — the
     caller may fall back to ``build_sized_circular_beams``.
     """
+    _check_long_radii(long_radii, n_beams, n_levels)
     z_levels = default_z_levels(spec, n_levels)
     beams = []
     for b in range(n_beams):
