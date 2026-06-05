@@ -15,12 +15,6 @@ from .cross_section import beam_section_points
 from .splines import default_z_levels, fit_beam_splines, form_beam_grid, sample_spline
 
 
-def beam_path_at_z(spec: WingSpec, z: float, n_beams: int) -> np.ndarray:
-    """True on-OML (x, y, z) of every beam at height ``z`` (the arc-spaced position)."""
-    xy = beam_section_points(spec, z, n_beams)
-    return np.column_stack([xy, np.full(n_beams, z)])
-
-
 def spline_surface_error(
     spec: WingSpec,
     *,

@@ -191,6 +191,8 @@ transition (30 mm) and root transition (50 mm) fillets fail OCC
 unfilleted solid. On-surface spline fidelity at 8 levels: **full 286 mm,
 aero-surface 282 mm** — coarse; tightening it (more z-levels / smoothing tuning)
 is the open Phase-D item, along with finding valid fillet radii (or `max_fillet`).
+The TE fillet (`te_fillet_r`) was deliberately not attempted: the sharp trailing
+edge is a continuous-winding feature handled in manufacturing, not a solid round.
 
 ### Phase E — Deepen structural
 

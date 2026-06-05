@@ -1,10 +1,11 @@
 """build123d geometry for the form beams, the skin wrap, and their assembly.
 
-Spike fidelity: beams are fixed-radius circular cross-sections inset inward from
-the shell along the radial direction from the pivot, lofted along each beam
-spline. The skin is the full OML solid minus its inward offset (a wall-thickness
-hollow shell). Both are refined in Phase D (area-sized inward-arc sections,
-beam-endpoint-driven wrap, true surface normals).
+`build_form_beams`/`build_assembly` are the Phase-A crude builders (fixed-radius
+circular sections inset along the radial-from-pivot direction). Phase D adds the
+sized builders driven by the FEA-optimized radii — `build_sized_circular_beams`
+and `build_sized_lens_beams` (area-exact inward-arc sections placed with true OML
+normals) — plus `apply_wing_fillets` (best-effort; see its docstring for the
+build123d 0.10.0 fillet limitation on this morphing loft).
 """
 from __future__ import annotations
 
