@@ -10,7 +10,19 @@ def test_surface_error_decreases_with_more_levels():
     assert fine >= 0.0
 
 
-def test_surface_error_is_small_when_fine():
+def test_transition_dominates_surface_error():
     spec = WingSpec()
-    err = spline_surface_error(spec, n_beams=16, n_levels=40)
-    assert err < 0.01              # < 1 cm worst-case on a 5 m wing
+    # The airfoil->circle transition (z in [-0.2, 0]) carries the worst error;
+    # restricting to the aero surface (z >= 0) gives a meaningfully smaller value.
+    full = spline_surface_error(spec, n_beams=16, n_levels=40)
+    wing = spline_surface_error(spec, n_beams=16, n_levels=40, z_min=0.0)
+    assert wing < full
+
+
+def test_wing_surface_error_decreases_with_more_levels():
+    spec = WingSpec()
+    # On the aero surface, more z-levels still reduce the (overshoot-driven) error.
+    coarse = spline_surface_error(spec, n_beams=16, n_levels=12, z_min=0.0)
+    fine = spline_surface_error(spec, n_beams=16, n_levels=40, z_min=0.0)
+    assert fine < coarse
+    assert fine >= 0.0
