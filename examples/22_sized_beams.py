@@ -84,8 +84,8 @@ def main() -> None:
     if result.max_ring_vm_stress_Pa > cfg.sigma_allow_Pa:
         print("  WARNING: ring elements exceed allowable -- increase ring_radius.")
 
-    # Per-beam root->tip radius profile. Longitudinal radii are beam-major,
-    # level-minor: beam b occupies indices [b*(n_levels-1), (b+1)*(n_levels-1)).
+    # Per-beam radius profile in tip->keel segment order. Longitudinal radii are
+    # beam-major, level-minor: beam b occupies indices [b*(n_levels-1), (b+1)*(n_levels-1)).
     seg = frame.n_levels - 1
     radii_mm = result.radii.reshape(frame.n_beams, seg) * 1e3
     print("\n  per-beam radii [mm], tip->keel segment order:")

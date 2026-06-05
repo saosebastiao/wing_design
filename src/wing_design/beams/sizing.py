@@ -91,6 +91,8 @@ def size_beams(
     Check it against the allowable: if rings are over-stressed, raise
     `config.ring_radius` (a converged result can still be ring-infeasible).
     """
+    if not load_arrays:
+        raise ValueError("load_arrays is empty: no loads to size against")
     nl = n_longitudinal(frame)
     L = element_lengths(frame)
     x0 = np.full(nl, config.r_max if x0_radius is None else x0_radius)
