@@ -134,6 +134,10 @@ def summarize_frame(
 ) -> FrameMetrics:
     """Reduce a FrameResult to the headline tip/stress metrics for a load case."""
     sec = frame.section
+    if sec.Iy != sec.Iz:
+        raise ValueError(
+            "summarize_frame's bending-stress proxy assumes a circular section (Iy == Iz)"
+        )
     sigma_axial = np.abs(result.axial_force) / sec.A
     sigma_bend = result.bending_moment * sec.r / sec.Iz
     tau = np.abs(result.torsion) * sec.r / sec.J

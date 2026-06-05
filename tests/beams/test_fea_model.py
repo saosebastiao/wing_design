@@ -2,7 +2,12 @@ import numpy as np
 
 from wing_design.geometry import WingSpec
 from wing_design.aero.loads import PanelLoads
-from wing_design.beams.fea_model import build_beam_frame, project_panels_to_beam_nodes, solve_beam_frame
+from wing_design.beams.fea_model import (
+    build_beam_frame,
+    project_panels_to_beam_nodes,
+    solve_beam_frame,
+    summarize_frame,
+)
 from wing_design.structural.projection import R_GEOM_FROM_AERO
 
 
@@ -50,3 +55,20 @@ def test_solve_runs_and_deflects():
     assert res.max_translation_m > 0.0
     # clamped base ring stays put
     assert np.allclose(res.displacements[frame.fixed_nodes], 0.0)
+
+
+def test_summarize_frame_metrics():
+    spec = WingSpec()
+    frame = build_beam_frame(spec, n_beams=16, n_levels=12)
+    loads = np.zeros((frame.nodes.shape[0], 6))
+    tip = [b * frame.n_levels + 0 for b in range(frame.n_beams)]
+    loads[tip, 0] = 50.0
+    res = solve_beam_frame(frame, loads)
+    m = summarize_frame(frame, res, "gust", applied_force_N=800.0)
+    assert m.case_name == "gust"
+    assert m.applied_force_N == 800.0
+    assert m.tip_translation_m > 0.0
+    assert m.max_axial_stress_Pa >= 0.0
+    assert m.max_bending_stress_Pa >= 0.0
+    assert m.max_vm_stress_Pa >= 0.0
+    assert np.isfinite(m.tip_twist_deg)
