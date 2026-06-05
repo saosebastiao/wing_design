@@ -68,3 +68,90 @@ def frame_mass(frame: BeamFrame, long_radii: np.ndarray, *, ring_radius: float, 
     long_area = np.pi * np.asarray(long_radii) ** 2
     ring_area = np.pi * ring_radius**2
     return float(rho * (np.sum(long_area * L[:nl]) + ring_area * np.sum(L[nl:])))
+
+
+def size_beams(
+    frame: BeamFrame,
+    load_arrays: list[np.ndarray],
+    config: SizingConfig,
+    *,
+    rho: float,
+    maxiter: int = 50,
+    ftol: float = 1.0e-4,
+    x0_radius: float | None = None,
+) -> SizingResult:
+    """Minimize beam mass s.t. stress, tip-deflection, and tip-twist constraints.
+
+    `load_arrays` is one (n_nodes, 6) nodal-load array per load case (already
+    safety-factored). The frame geometry is fixed; only longitudinal radii vary.
+    """
+    nl = n_longitudinal(frame)
+    L = element_lengths(frame)
+    x0 = np.full(nl, config.r_max if x0_radius is None else x0_radius)
+
+    cache: dict[bytes, tuple[np.ndarray, float, float]] = {}
+
+    def evaluate(x: np.ndarray) -> tuple[np.ndarray, float, float]:
+        key = np.asarray(x, dtype=float).tobytes()
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        sections = build_sections(frame, x, config.ring_radius)
+        worst_vm = np.zeros(nl)
+        max_defl = 0.0
+        max_twist = 0.0
+        for loads in load_arrays:
+            res = solve_frame(
+                frame.nodes, frame.elements, sections,
+                E=frame.E, G=frame.G, fixed_nodes=frame.fixed_nodes, loads=loads,
+            )
+            vm = von_mises_per_element(res, sections)
+            worst_vm = np.maximum(worst_vm, vm[:nl])
+            tip = frame.tip_nodes
+            d = float(np.linalg.norm(res.displacements[tip, :3], axis=1).max())
+            t = float(np.degrees(np.abs(res.displacements[tip, 5]).max()))
+            max_defl = max(max_defl, d)
+            max_twist = max(max_twist, t)
+        out = (worst_vm, max_defl, max_twist)
+        cache[key] = out
+        return out
+
+    def mass(x: np.ndarray) -> float:
+        return frame_mass(frame, x, ring_radius=config.ring_radius, rho=rho)
+
+    def mass_grad(x: np.ndarray) -> np.ndarray:
+        return rho * 2.0 * np.pi * np.asarray(x) * L[:nl]
+
+    def stress_con(x: np.ndarray) -> np.ndarray:
+        worst_vm, _, _ = evaluate(x)
+        return config.sigma_allow_Pa - worst_vm          # >= 0
+
+    def defl_con(x: np.ndarray) -> np.ndarray:
+        _, d, _ = evaluate(x)
+        return np.array([config.tip_defl_max_m - d])     # >= 0
+
+    def twist_con(x: np.ndarray) -> np.ndarray:
+        _, _, t = evaluate(x)
+        return np.array([config.tip_twist_max_deg - t])  # >= 0
+
+    res = minimize(
+        mass, x0, jac=mass_grad, method="SLSQP",
+        bounds=[(config.r_min, config.r_max)] * nl,
+        constraints=[
+            {"type": "ineq", "fun": stress_con},
+            {"type": "ineq", "fun": defl_con},
+            {"type": "ineq", "fun": twist_con},
+        ],
+        options={"maxiter": maxiter, "ftol": ftol},
+    )
+
+    worst_vm, d, t = evaluate(res.x)
+    return SizingResult(
+        radii=np.asarray(res.x),
+        mass_kg=mass(res.x),
+        converged=bool(res.success),
+        n_iter=int(res.nit),
+        max_vm_stress_Pa=float(worst_vm.max()),
+        tip_defl_m=float(d),
+        tip_twist_deg=float(t),
+    )

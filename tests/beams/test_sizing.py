@@ -2,7 +2,7 @@ import numpy as np
 
 from wing_design.geometry import WingSpec
 from wing_design.beams.fea_model import build_beam_frame
-from wing_design.beams.sizing import element_lengths, n_longitudinal, frame_mass
+from wing_design.beams.sizing import element_lengths, n_longitudinal, frame_mass, SizingConfig, size_beams
 
 
 def test_n_longitudinal():
@@ -33,3 +33,34 @@ def test_frame_mass_uniform_radius():
         np.pi * r_long**2 * L[:nl].sum() + np.pi * r_ring**2 * L[nl:].sum()
     )
     assert abs(m - expected) / expected < 1e-12
+
+
+def test_size_beams_reduces_mass_and_respects_stress():
+    # Tiny frame + a small synthetic tip load. With generous deflection/twist
+    # limits and a high stress allowable, the optimum drives every longitudinal
+    # radius to r_min, so sized mass must be well below the r_max starting mass.
+    spec = WingSpec()
+    frame = build_beam_frame(spec, n_beams=4, n_levels=3)
+    nl = n_longitudinal(frame)
+
+    loads = np.zeros((frame.nodes.shape[0], 6))
+    loads[frame.tip_nodes, 2] = 10.0  # gentle push on the tip ring
+
+    cfg = SizingConfig(
+        sigma_allow_Pa=1.0e8,
+        tip_defl_max_m=1.0,         # generous → not binding
+        tip_twist_max_deg=90.0,     # generous → not binding
+        r_min=0.004,
+        r_max=0.03,
+        ring_radius=0.008,
+    )
+    rho = 1550.0
+    start_mass = frame_mass(frame, np.full(nl, cfg.r_max), ring_radius=cfg.ring_radius, rho=rho)
+
+    result = size_beams(frame, [loads], cfg, rho=rho, maxiter=30)
+
+    assert result.radii.shape == (nl,)
+    assert result.mass_kg < start_mass                       # mass was reduced
+    assert result.max_vm_stress_Pa <= cfg.sigma_allow_Pa * 1.05  # stress feasible
+    assert np.all(result.radii >= cfg.r_min - 1e-9)          # bounds respected
+    assert np.all(result.radii <= cfg.r_max + 1e-9)
