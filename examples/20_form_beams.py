@@ -18,7 +18,7 @@ def main() -> None:
     spec = default_scenario().geometry
     asm = build_assembly(spec, n_beams=16, n_levels=20, beam_radius=0.02, wall=0.003)
 
-    out = Path(__file__).parent / "_out"
+    out = Path(__file__).resolve().parent.parent / "exports"
     out.mkdir(exist_ok=True)
     export_step(asm, str(out / "form_beams_v0.step"))
     print(f"Wrote {out}/form_beams_v0.step")
