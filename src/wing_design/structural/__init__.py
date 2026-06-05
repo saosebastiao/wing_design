@@ -12,7 +12,7 @@ Two FEA backends are wired in:
 """
 from .beam import TubeSparSizing, size_tube_spar
 from .fea import FEAResult, solve_linear_elastic
-from .frame import BeamSection, FrameResult, solve_frame
+from .frame import BeamSection, FrameResult, solve_frame, von_mises_per_element
 from .mesh import TetMesh, tet_mesh_wing
 from .projection import project_panels_to_oml_tris
 from .shell import (
@@ -37,4 +37,5 @@ __all__ = [
     "solve_linear_elastic",
     "solve_shell_elastic",
     "tet_mesh_wing",
+    "von_mises_per_element",
 ]
