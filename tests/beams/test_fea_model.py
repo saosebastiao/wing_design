@@ -1,9 +1,8 @@
 import numpy as np
 
 from wing_design.geometry import WingSpec
-from wing_design.beams.fea_model import build_beam_frame
 from wing_design.aero.loads import PanelLoads
-from wing_design.beams.fea_model import project_panels_to_beam_nodes
+from wing_design.beams.fea_model import build_beam_frame, project_panels_to_beam_nodes
 from wing_design.structural.projection import R_GEOM_FROM_AERO
 
 

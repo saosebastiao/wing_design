@@ -88,6 +88,10 @@ def project_panels_to_beam_nodes(
     Panel centers and forces are rotated from the aero frame (span +Y) to the
     geom frame (span +Z) with `R_GEOM_FROM_AERO`, then each panel's full force
     vector is assigned to the single nearest beam node. Moments are left zero.
+
+    Nearest-node search spans all nodes; this is safe because aero panels live
+    at geom z >= 0 while the clamped keel-step ring sits at z < 0, so a panel
+    load never snaps onto a support (where it would be reacted out and lost).
     """
     loads = np.zeros((frame.nodes.shape[0], 6))
     centers_geom = panels.centers_xyz @ R_GEOM_FROM_AERO.T
