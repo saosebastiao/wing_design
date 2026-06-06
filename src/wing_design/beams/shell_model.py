@@ -101,6 +101,11 @@ def build_beam_shell_model(
 
 
 def solve_beam_shell_model(model: BeamShellModel, loads: np.ndarray) -> FrameResult:
+    """Solve the beam-shell model under nodal ``loads`` (n_nodes, 6) → FrameResult.
+
+    Beam internal forces in the result are the longitudinal members' forces; the
+    skin's contribution shows up as the (stiffer) displacement field.
+    """
     sections = [model.section] * model.beam_elements.shape[0]
     return solve_beam_shell(
         model.nodes, model.beam_elements, sections, model.shell_tris,
