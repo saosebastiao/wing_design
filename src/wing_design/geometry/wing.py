@@ -10,9 +10,10 @@ Z layout (top to bottom):
     z = -transition_length            full circle (diameter = spar_diameter, t = 1)
     z = -(transition_length+spar_len) bottom of the cylindrical spar (same circle)
 
-Sections between z=0 and z=-transition_length morph linearly between the root
-airfoil and the spar circle, producing a smooth fairing instead of an abrupt
-step where the spar meets the airfoil.
+Sections between z=0 and z=-transition_length morph from the root airfoil to the
+spar circle with smoothstep easing (zero slope at both junctions; see
+`_transition_blend`), producing a crease-free fairing instead of an abrupt step
+where the spar meets the airfoil.
 """
 from __future__ import annotations
 
