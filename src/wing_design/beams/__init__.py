@@ -19,6 +19,7 @@ from .fea_model import (
     solve_beam_frame,
     summarize_frame,
 )
+from .shell_model import BeamShellModel, build_beam_shell_model, skin_triangles, solve_beam_shell_model
 from .fidelity import spline_surface_error
 from .sections import lens_section_polyline, oml_outward_normals
 from .sizing import (
@@ -48,6 +49,10 @@ __all__ = [
     "project_panels_to_beam_nodes",
     "solve_beam_frame",
     "summarize_frame",
+    "BeamShellModel",
+    "build_beam_shell_model",
+    "skin_triangles",
+    "solve_beam_shell_model",
     "spline_surface_error",
     "lens_section_polyline",
     "oml_outward_normals",
