@@ -70,3 +70,112 @@ def beam_mass(model: BeamShellModel, radii: np.ndarray, *, rho: float) -> float:
 def skin_mass(model: BeamShellModel, t_skin: float, *, rho: float) -> float:
     """Total skin mass [kg] = rho * t * sum(triangle areas)."""
     return float(rho * t_skin * skin_areas(model).sum())
+
+
+def size_beam_shell(
+    model: BeamShellModel,
+    load_arrays: list[np.ndarray],
+    config: BeamShellSizingConfig,
+    *,
+    rho: float,
+    maxiter: int = 60,
+    ftol: float = 1.0e-4,
+) -> BeamShellSizingResult:
+    """Co-size beam radii + uniform skin thickness to minimize beam+skin mass.
+
+    Design vector x = [radii (n_beam_elem), t_skin]. Constraints (all >= 0 after
+    normalization): beam vm, skin vm, tip deflection, tip twist. `load_arrays` is
+    one (n_nodes, 6) array per (already safety-factored) load case.
+    """
+    if not load_arrays:
+        raise ValueError("load_arrays is empty: no loads to size against")
+    n = model.beam_elements.shape[0]
+    Lb = beam_lengths(model)
+    Atri = skin_areas(model)
+    A_skin = float(Atri.sum())
+
+    x0 = np.concatenate([np.full(n, config.r_max), [config.t_max]])
+    cache: dict[bytes, tuple[np.ndarray, float, float, float]] = {}
+
+    def evaluate(x):
+        key = np.asarray(x, dtype=float).tobytes()
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        radii = x[:n]
+        t_skin = float(x[n])
+        sections = [BeamSection.circular(float(r)) for r in radii]
+        worst_beam = np.zeros(n)
+        worst_skin = 0.0
+        max_defl = 0.0
+        max_twist = 0.0
+        for loads in load_arrays:
+            res = solve_beam_shell(
+                model.nodes, model.beam_elements, sections, model.shell_tris,
+                E_beam=model.E_beam, G_beam=model.G_beam,
+                E_skin=model.E_skin, nu_skin=model.nu_skin, t_skin=t_skin,
+                fixed_nodes=model.fixed_nodes, loads=loads,
+            )
+            worst_beam = np.maximum(worst_beam, von_mises_per_element(res, sections))
+            skin_s = recover_membrane_stress(model.nodes, model.shell_tris, res.displacements,
+                                             E=model.E_skin, nu=model.nu_skin)
+            worst_skin = max(worst_skin, float(membrane_von_mises(skin_s).max()))
+            tip = model.tip_nodes
+            max_defl = max(max_defl, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
+            max_twist = max(max_twist, float(np.degrees(np.abs(res.displacements[tip, 5]).max())))
+        out = (worst_beam, worst_skin, max_defl, max_twist)
+        cache[key] = out
+        return out
+
+    m_ref = (beam_mass(model, np.full(n, config.r_max), rho=rho)
+             + skin_mass(model, config.t_max, rho=rho))
+
+    def mass(x):
+        return (rho * np.sum(np.pi * x[:n] ** 2 * Lb) + rho * x[n] * A_skin) / m_ref
+
+    def mass_grad(x):
+        g = np.empty(n + 1)
+        g[:n] = rho * 2.0 * np.pi * x[:n] * Lb / m_ref
+        g[n] = rho * A_skin / m_ref
+        return g
+
+    def beam_con(x):
+        wb, _, _, _ = evaluate(x)
+        return 1.0 - wb / config.sigma_allow_Pa
+
+    def skin_con(x):
+        _, ws, _, _ = evaluate(x)
+        return np.array([1.0 - ws / config.sigma_allow_Pa])
+
+    def defl_con(x):
+        _, _, d, _ = evaluate(x)
+        return np.array([1.0 - d / config.tip_defl_max_m])
+
+    def twist_con(x):
+        _, _, _, t = evaluate(x)
+        return np.array([1.0 - t / config.tip_twist_max_deg])
+
+    bounds = [(config.r_min, config.r_max)] * n + [(config.t_min, config.t_max)]
+    res = minimize(
+        mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
+        constraints=[
+            {"type": "ineq", "fun": beam_con},
+            {"type": "ineq", "fun": skin_con},
+            {"type": "ineq", "fun": defl_con},
+            {"type": "ineq", "fun": twist_con},
+        ],
+        options={"maxiter": maxiter, "ftol": ftol},
+    )
+
+    x = np.clip(res.x, [b[0] for b in bounds], [b[1] for b in bounds])
+    wb, ws, d, t = evaluate(x)
+    radii = x[:n]
+    t_skin = float(x[n])
+    bm = beam_mass(model, radii, rho=rho)
+    sm = skin_mass(model, t_skin, rho=rho)
+    return BeamShellSizingResult(
+        radii=radii, t_skin=t_skin, mass_kg=bm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
+        converged=bool(res.success), n_iter=int(res.nit),
+        max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
+        tip_defl_m=float(d), tip_twist_deg=float(t),
+    )
