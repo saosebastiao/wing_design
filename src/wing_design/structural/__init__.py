@@ -24,6 +24,8 @@ from .projection import project_panels_to_oml_tris
 from .shell import (
     ShellFEAResult,
     ShellMesh,
+    membrane_von_mises,
+    recover_membrane_stress,
     shell_mesh_from_tet_mesh,
     solve_shell_elastic,
     tri_element_stiffness,
@@ -37,7 +39,9 @@ __all__ = [
     "ShellMesh",
     "TetMesh",
     "TubeSparSizing",
+    "membrane_von_mises",
     "project_panels_to_oml_tris",
+    "recover_membrane_stress",
     "shell_mesh_from_tet_mesh",
     "size_tube_spar",
     "solve_beam_shell",
