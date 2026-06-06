@@ -608,3 +608,57 @@ def solve_shell_elastic(
         element_local_frames=element_Rs,
         element_areas=element_As,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reusable membrane-stress recovery (factored from solve_shell_elastic)
+# ---------------------------------------------------------------------------
+
+
+def recover_membrane_stress(
+    nodes: np.ndarray,
+    triangles: np.ndarray,
+    displacements: np.ndarray,
+    *,
+    E: float,
+    nu: float,
+) -> np.ndarray:
+    """Per-triangle CST membrane stress (M, 3) = [σxx, σyy, σxy] in element-local frame.
+
+    Stress in Pa, independent of thickness (membrane stress is D·ε). `displacements`
+    is the global (N, 6) field from any solver that shares the 6-DOF node layout
+    (e.g. `solve_beam_shell`). Mirrors the recovery in `solve_shell_elastic`.
+    """
+    M = triangles.shape[0]
+    out = np.zeros((M, 3))
+    Dm = (E / (1.0 - nu * nu)) * np.array(
+        [[1.0, nu, 0.0], [nu, 1.0, 0.0], [0.0, 0.0, (1.0 - nu) / 2.0]]
+    )
+    for e in range(M):
+        i, j, l = (int(v) for v in triangles[e])
+        R, local, area = _triangle_local_frame(nodes[i], nodes[j], nodes[l])
+        x1, y1 = local[0]; x2, y2 = local[1]; x3, y3 = local[2]
+        b_grad = np.array([y2 - y3, y3 - y1, y1 - y2])
+        c_grad = np.array([x3 - x2, x1 - x3, x2 - x1])
+        two_A = 2.0 * area
+        Bm = np.zeros((3, 6))
+        for k in range(3):
+            Bm[0, 2 * k + 0] = b_grad[k] / two_A
+            Bm[1, 2 * k + 1] = c_grad[k] / two_A
+            Bm[2, 2 * k + 0] = c_grad[k] / two_A
+            Bm[2, 2 * k + 1] = b_grad[k] / two_A
+        u_membrane = np.zeros(6)
+        for n_idx, gn in enumerate((i, j, l)):
+            u_local = R.T @ displacements[gn, 0:3]
+            u_membrane[2 * n_idx + 0] = u_local[0]
+            u_membrane[2 * n_idx + 1] = u_local[1]
+        out[e] = Dm @ Bm @ u_membrane
+    return out
+
+
+def membrane_von_mises(stress: np.ndarray) -> np.ndarray:
+    """Per-row plane-stress von Mises from (M, 3) [σxx, σyy, σxy] arrays."""
+    sxx = stress[:, 0]
+    syy = stress[:, 1]
+    sxy = stress[:, 2]
+    return np.sqrt(sxx**2 - sxx * syy + syy**2 + 3.0 * sxy**2)
