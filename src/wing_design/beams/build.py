@@ -189,6 +189,11 @@ def resample_segment_radii(
     at a finer one. For each beam, its ``n_from-1`` segment radii are interpolated
     (by normalized position along the beam) onto ``n_to-1`` segments. Returns a
     ``(n_beams*(n_to-1),)`` array in the same beam-major/level-minor layout.
+
+    Interpolation is at segment centres, so target segments beyond the source
+    centre range (the outermost ~half-segment at each end) are flat-clamped to the
+    first/last source radius (``np.interp`` boundary behaviour). Negligible for
+    densification (e.g. 8→60) but pronounced if ``n_from`` is tiny.
     """
     _check_long_radii(long_radii, n_beams, n_from)
     seg_from = n_from - 1
