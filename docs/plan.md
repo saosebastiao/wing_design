@@ -223,10 +223,24 @@ dependent: ~8.6x at n_levels=6, ~2.4x at n_levels=12 — more ring levels add ri
 stiffness, so the closed-skin advantage over discrete rings narrows as the mesh
 refines; the skin always wins.)
 
-**Deferred to later E increments:** skin membrane-stress recovery + re-sizing the
-beams WITH the skin carrying load (E.2); MILP discrete stock catalog; buckling +
-twist constraints in the sizing loop; CLT anisotropic skin (replacing isotropic-
-equivalent).
+**Status: E.2 done (2026-06-06).** Co-sized per-element beam radii **and** a uniform
+skin thickness against the combined beam+shell FEA (`beams.size_beam_shell`),
+minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist
+constraints (skin membrane stress recovered each solve via `structural.recover_membrane_stress`).
+`examples/25_resize_with_skin.py` (n_levels=8): the load-bearing skin cuts structural
+mass from the Phase-C beams-only **43.5 kg → 27.5 kg (37% lighter)** — beams 17.8 kg
+(radii 4–14 mm) + skin 9.7 kg (0.71 mm), converged & feasible.
+
+**Key finding:** with the skin carrying load the structure becomes **twist-governed**
+— tip twist sits exactly on its 5° limit while tip deflection is slack (49 mm of
+100) and stresses are tiny (beam 18 MPa, skin 73 MPa vs 1100 allowable). So the next
+mass lever is torsional stiffness (skin shear path / fibre angle), not beam or skin
+gauge. This motivates **CLT anisotropic skin** (E.4 — tailor ±45° plies for shear)
+and revisiting the twist limit.
+
+**Deferred to later E increments:** per-spanwise-band skin thickness; MILP discrete
+stock catalog (E.3); panel-buckling eigenvalue constraints; CLT anisotropic skin
+(E.4, replacing isotropic-equivalent — now the most-motivated thread).
 
 ### Phase F — Frame-field-driven layout
 
@@ -313,3 +327,4 @@ src/wing_design/
 | Phase-C sizing | Continuous SLSQP NLP over per-element longitudinal radii; stress + tip-deflection + tip-twist constraints; analytic mass gradient, FD constraint Jacobian over FEA re-solves; rings fixed (stress reported). MILP stock catalog deferred to Phase E. |
 | Phase-D geometry | Inward-arc **lens** beam sections sized to Phase-C radii (lens lofts cleanly, circular fallback unused); fillets best-effort and currently **no-op** (0/2 — OCC rejects the 30/50 mm transition radii, skipped not fatal); spline fidelity coarse (~286 mm full / ~282 mm aero at 8 levels) — fidelity tuning + valid fillet radii are open Phase-D items (2026-06-05). |
 | Phase-E.1 skin coupling | Load-bearing skin assembled as DKT+CST shell panels between beam nodes into the combined `structural.solve_beam_shell`; skin replaces ring connectors. Isotropic-equivalent skin; re-sizing/MILP/buckling/CLT deferred to later E increments. |
+| Phase-E.2 co-sizing | SLSQP co-sizes per-element beam radii + a uniform skin thickness minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist constraints (skin membrane stress recovered each solve). 43.5→27.5 kg (37% lighter); structure becomes twist-governed. Per-band skin / MILP / buckling / CLT deferred. |
