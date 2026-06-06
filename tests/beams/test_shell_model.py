@@ -50,5 +50,6 @@ def test_skin_stiffer_than_ring_frame():
     d_skin = np.linalg.norm(solve_beam_shell_model(model, loads).displacements[model.tip_nodes, :3], axis=1).max()
     assert d_skin < d_ring
     # The closed skin is a far better transverse/torsional load path than discrete
-    # rings (~8.6x observed); guard against a regression that collapses the gain.
+    # rings (~8.6x here at n_levels=6; the ratio shrinks as n_levels rises because
+    # more ring levels add ring stiffness — ~2.4x at n_levels=12). Guard the gain.
     assert d_ring / d_skin > 5.0

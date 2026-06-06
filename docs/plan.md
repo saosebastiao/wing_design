@@ -217,8 +217,11 @@ model: DKT+CST shell panels assembled between beam nodes via `structural.solve_b
 (`beams.build_beam_shell_model`), with the **skin replacing the ring connectors**.
 Isotropic-equivalent skin (3 mm). `examples/24_skin_coupling.py` measures the skin
 making the structure ~2.4x stiffer (tip deflection) than the ring frame at equal
-beam radius — confirming the Phase-C/D finding that the skin, not thicker beams, is
-the mass-efficient stiffness lever.
+beam radius (n_levels=12) — confirming the Phase-C/D finding that the skin, not
+thicker beams, is the mass-efficient stiffness lever. (The factor is resolution-
+dependent: ~8.6x at n_levels=6, ~2.4x at n_levels=12 — more ring levels add ring
+stiffness, so the closed-skin advantage over discrete rings narrows as the mesh
+refines; the skin always wins.)
 
 **Deferred to later E increments:** skin membrane-stress recovery + re-sizing the
 beams WITH the skin carrying load (E.2); MILP discrete stock catalog; buckling +

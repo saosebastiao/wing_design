@@ -1,6 +1,6 @@
 """Coarse structural sizing for the wingsail (Phase 3) + structural FEA.
 
-Two FEA backends are wired in:
+Several FEA backends are wired in:
 
   * `solve_linear_elastic` (in `fea`) — volumetric linear-elastic tet FEA
     on the wing solid (Phase 4a). Reference implementation; useful for
@@ -9,6 +9,11 @@ Two FEA backends are wired in:
     OML surface (Phase 4b). Architecturally what the wingsail actually is
     (a stressed-skin structure); produces 2-D principal directions on each
     triangle that Phase 5e traces.
+  * `solve_frame` (in `frame`) — 3D Euler–Bernoulli frame FEA for the
+    form-beam space frame (Phase B).
+  * `solve_beam_shell` (in `beam_shell`) — combined beam + DKT+CST shell
+    FEA: form beams plus a load-bearing skin, assembled into one system
+    (Phase E.1).
 """
 from .beam import TubeSparSizing, size_tube_spar
 from .beam_shell import solve_beam_shell
