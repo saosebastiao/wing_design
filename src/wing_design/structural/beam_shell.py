@@ -35,10 +35,13 @@ def solve_beam_shell(
     """Solve a clamped beam+shell structure; recover per-beam-element internal forces.
 
     `shell_tris` is (M, 3) int node indices (may be empty (0,3)). `loads` is (N, 6).
+    Degenerate (collinear) shell triangles raise from `tri_element_stiffness`.
     """
     n_nodes = nodes.shape[0]
     ndof = 6 * n_nodes
     n_beam = beam_elements.shape[0]
+    if len(beam_sections) != n_beam:
+        raise ValueError(f"expected {n_beam} beam_sections, got {len(beam_sections)}")
 
     rows: list[int] = []
     cols: list[int] = []
