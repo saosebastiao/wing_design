@@ -151,6 +151,13 @@ def size_beam_shell_laminate(
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
     x = np.clip(res.x, lo, hi)
+    # Re-enforce the fraction simplex: if SLSQP ended marginally infeasible on
+    # frac_con (f0+f45 > 1), rescale so f90 = 1-f0-f45 >= 0 and the three sum to 1.
+    # Done before the final evaluate so reported stresses match the reported layup.
+    s = x[n + 1] + x[n + 2]
+    if s > 1.0:
+        x[n + 1] /= s
+        x[n + 2] /= s
     wb, ws, d, t = evaluate(x)
     radii = x[:n]
     t_skin = float(x[n])
