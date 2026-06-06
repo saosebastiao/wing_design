@@ -2,8 +2,8 @@
 
 Derives the spar radius, sizes the beams via the Phase-C FEA-in-the-loop loop,
 builds inward-arc 'lens' beams sized to those areas (circular fallback if build123d
-can't loft the lens faces), applies best-effort wing fillets, assembles everything,
-and exports a STEP to exports/. Also prints the spline on-surface fidelity.
+can't loft the lens faces), assembles everything, and exports a STEP to exports/.
+Also prints the spline on-surface fidelity.
 """
 from __future__ import annotations
 
@@ -16,11 +16,11 @@ from wing_design import default_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     SizingConfig,
-    apply_wing_fillets,
     build_beam_frame,
     build_sized_circular_beams,
     build_sized_lens_beams,
     project_panels_to_beam_nodes,
+    resample_segment_radii,
     size_beams,
     spline_surface_error,
 )
@@ -31,6 +31,7 @@ def main() -> None:
     P = default_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
+    n_geo = 60   # build geometry at high resolution, decoupled from the sizing resolution
 
     print(f"Derived spar radius = {spec.spar_radius*1e3:.0f} mm "
           f"(diameter {spec.spar_diameter*1e3:.0f} mm)")
@@ -63,16 +64,22 @@ def main() -> None:
     print(f"  sized mass={sized.mass_kg:.2f} kg, "
           f"radii {sized.radii.min()*1e3:.1f}-{sized.radii.max()*1e3:.1f} mm")
 
+    # Sizing ran at n_levels (SLSQP speed); build the geometry at the finer n_geo by
+    # interpolating the sized radii — decouples on-surface fidelity from sizing cost.
+    geo_radii = resample_segment_radii(sized.radii, n_beams=n_beams, n_from=n_levels, n_to=n_geo)
+    err_geo = spline_surface_error(spec, n_beams=n_beams, n_levels=n_geo)
+    print(f"  geometry built at {n_geo} levels; on-surface fidelity worst {err_geo*1e3:.0f} mm "
+          f"(vs {err_full*1e3:.0f} mm at the {n_levels}-level sizing resolution)")
     try:
-        beams = build_sized_lens_beams(spec, sized.radii, n_beams=n_beams, n_levels=n_levels)
+        beams = build_sized_lens_beams(spec, geo_radii, n_beams=n_beams, n_levels=n_geo)
         section_kind = "lens"
     except Exception as exc:
         print(f"  lens build failed ({type(exc).__name__}: {exc}); falling back to circular.")
-        beams = build_sized_circular_beams(spec, sized.radii, n_beams=n_beams, n_levels=n_levels)
+        beams = build_sized_circular_beams(spec, geo_radii, n_beams=n_beams, n_levels=n_geo)
         section_kind = "circular"
     print(f"  built {len(beams)} {section_kind} beams")
 
-    wing = apply_wing_fillets(build_wing_solid(spec), spec)
+    wing = build_wing_solid(spec)   # eased transition → manufacturable junctions, no fillet needed
     wing.label = "wing"
     for i, b in enumerate(beams):
         b.label = f"beam_{i:02d}"

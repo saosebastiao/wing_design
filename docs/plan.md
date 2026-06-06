@@ -185,14 +185,22 @@ pivot). Beams built as inward-arc **lens** sections sized to the Phase-C radii
 (`beams.build_sized_lens_beams`; circular fallback unused — lens lofts cleanly,
 16/16 beams). `examples/23_sized_geometry.py` runs the full Phase-C SLSQP sizing
 (mass ≈ 45 kg, radii 4–40 mm) and exports `exports/sized_geometry_v0.step`.
-**Fillets are best-effort and currently a no-op: 0/2 applied** — both the spar
-transition (30 mm) and root transition (50 mm) fillets fail OCC
-(`Failed creating a fillet`), so `apply_wing_fillets` skips them and returns the
-unfilleted solid. On-surface spline fidelity at 8 levels: **full 286 mm,
-aero-surface 282 mm** — coarse; tightening it (more z-levels / smoothing tuning)
-is the open Phase-D item, along with finding valid fillet radii (or `max_fillet`).
-The TE fillet (`te_fillet_r`) was deliberately not attempted: the sharp trailing
+The TE fillet (`te_fillet_r`) is deliberately not attempted: the sharp trailing
 edge is a continuous-winding feature handled in manufacturing, not a solid round.
+
+**Deferred items resolved (2026-06-05).**
+(1) *Manufacturable junctions by construction.* Post-hoc filleting proved
+impossible — build123d 0.10.0's OCC kernel cannot blend the morphing airfoil→circle
+loft at any radius (`max_fillet` fails outright), though `fillet` works on a plain
+box. The cause is a slope crease where the linearly-morphing fairing met the
+constant airfoil and the constant spar cylinder. Fixed at the source: the morph now
+uses **smoothstep easing** (`_transition_blend`, zero slope at both junctions), so
+the surface is crease-free and no fillet is needed. `apply_wing_fillets` was retired.
+(2) *On-surface fidelity.* Decoupled geometry resolution from sizing resolution —
+sizing stays at 8 levels (SLSQP speed) while the geometry is built at **60 levels**
+via `resample_segment_radii`, cutting worst on-surface error from **289 mm → 113 mm**.
+The residual now lives mid-transition (smoothstep is steepest there); **transition-
+dense z-levels** would target it further — recorded as the remaining refinement.
 
 ### Phase E — Deepen structural
 

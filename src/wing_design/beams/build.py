@@ -4,14 +4,13 @@
 circular sections inset along the radial-from-pivot direction). Phase D adds the
 sized builders driven by the FEA-optimized radii — `build_sized_circular_beams`
 and `build_sized_lens_beams` (area-exact inward-arc sections placed with true OML
-normals) — plus `apply_wing_fillets` (best-effort; see its docstring for the
-build123d 0.10.0 fillet limitation on this morphing loft).
+normals). The eased transition (Task 1) removes the crease at spar/root junctions,
+making post-build fillets unnecessary.
 """
 from __future__ import annotations
 
 import numpy as np
 from build123d import (
-    Axis,
     BuildLine,
     BuildPart,
     BuildSketch,
@@ -20,7 +19,6 @@ from build123d import (
     Locations,
     Plane,
     Polyline,
-    fillet,
     loft,
     make_face,
 )
@@ -178,44 +176,35 @@ def build_sized_lens_beams(
     return beams
 
 
-def apply_wing_fillets(solid, spec: WingSpec):
-    """Best-effort fillets at the spar/transition and root/transition rings.
+def resample_segment_radii(
+    long_radii: np.ndarray,
+    *,
+    n_beams: int,
+    n_from: int,
+    n_to: int,
+) -> np.ndarray:
+    """Resample per-segment longitudinal radii from ``n_from`` to ``n_to`` levels.
 
-    build123d 0.10.0 fillet selection on this lofted, morphing solid is fragile;
-    each fillet is attempted independently and skipped (with the original solid
-    retained) if it raises. The trailing-edge fillet is intentionally NOT attempted
-    here — the sharp TE is a continuous-winding feature handled in manufacturing,
-    not a solid-edge round. Returns the (possibly partially) filleted solid.
+    Beam sizing runs at a coarse level count (SLSQP speed); the geometry is built
+    at a finer one. For each beam, its ``n_from-1`` segment radii are interpolated
+    (by normalized position along the beam) onto ``n_to-1`` segments. Returns a
+    ``(n_beams*(n_to-1),)`` array in the same beam-major/level-minor layout.
 
-    Edge selection: ``filter_by_position(Axis.Z, z_min, z_max)`` is confirmed to
-    work in build123d 0.10.0 for locating ring edges near a given z-plane; each
-    ring produces exactly one edge on the current lofted solid. The fillet call
-    itself may still raise a ``ValueError`` from the OCP kernel when the lofted
-    surface topology is too complex — in that case the target is silently skipped
-    and the solid is returned unchanged.
-
-    Targets:
-      * spar/transition ring  (z = -transition_length): 30 mm
-      * root/transition ring  (z = 0):                   50 mm
+    Interpolation is at segment centres, so target segments beyond the source
+    centre range (the outermost ~half-segment at each end) are flat-clamped to the
+    first/last source radius (``np.interp`` boundary behaviour). Negligible for
+    densification (e.g. 8→60) but pronounced if ``n_from`` is tiny.
     """
-    targets = [
-        (-spec.transition_length, 0.030),
-        (0.0, 0.050),
-    ]
-    result = solid
-    applied = 0
-    for z_ring, radius in targets:
-        try:
-            edges = result.edges().filter_by_position(
-                Axis.Z, z_ring - 1e-3, z_ring + 1e-3
-            )
-            if edges:
-                result = fillet(edges, radius=radius)
-                applied += 1
-        except Exception as exc:  # build123d raises a variety of OCP errors
-            print(
-                f"  [fillet] skipped z={z_ring:.3f} r={radius}: "
-                f"{type(exc).__name__}: {exc}"
-            )
-    print(f"  [fillet] {applied}/{len(targets)} fillets applied")
-    return result
+    _check_long_radii(long_radii, n_beams, n_from)
+    seg_from = n_from - 1
+    seg_to = n_to - 1
+    x_from = (np.arange(seg_from) + 0.5) / seg_from
+    x_to = (np.arange(seg_to) + 0.5) / seg_to
+    src = np.asarray(long_radii, dtype=float)
+    out = np.empty(n_beams * seg_to)
+    for b in range(n_beams):
+        rb = src[b * seg_from:(b + 1) * seg_from]
+        out[b * seg_to:(b + 1) * seg_to] = np.interp(x_to, x_from, rb)
+    return out
+
+
