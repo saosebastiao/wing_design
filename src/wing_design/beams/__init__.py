@@ -9,6 +9,7 @@ from .build import (
     build_sized_circular_beams,
     build_sized_lens_beams,
     build_skin_wrap,
+    resample_segment_radii,
 )
 from .fea_model import (
     BeamFrame,
@@ -40,6 +41,7 @@ __all__ = [
     "build_sized_circular_beams",
     "build_sized_lens_beams",
     "build_skin_wrap",
+    "resample_segment_radii",
     "BeamFrame",
     "FrameMetrics",
     "build_beam_frame",
