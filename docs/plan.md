@@ -238,9 +238,30 @@ mass lever is torsional stiffness (skin shear path / fibre angle), not beam or s
 gauge. This motivates **CLT anisotropic skin** (E.4 — tailor ±45° plies for shear)
 and revisiting the twist limit.
 
+**Status: E.4 done (2026-06-06).** CLT anisotropic skin: a symmetric-balanced
+laminate (smeared bending D) whose membrane `A`/bending `D` feed
+`tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; the layup area
+fractions (0/±45/90) are co-sized as design variables with beam radii + skin
+thickness (`beams.size_beam_shell_laminate`), minimizing mass under beam-vm,
+skin-vm, tip-deflection and tip-twist constraints. `examples/26_clt_skin.py`
+(n_levels=8): CLT cuts mass **27.5 kg (E.2 isotropic) → 25.6 kg (7% lighter)**,
+converged & feasible.
+
+**Key finding (hypothesis overturned):** the optimum layup is **all-0° (spanwise)**,
+NOT ±45°. Even though tip twist is the active constraint, the wing's material budget
+is dominated by **spanwise bending** — orienting the skin's stiff fibre direction
+(E1≈135 GPa) along the span stiffens bending and lets the **beams shrink**
+(17.8→14.7 kg), which outweighs the torsional-shear benefit ±45° plies would add;
+twist is instead held by slightly thicker skin (0.71→0.79 mm). The isotropic-
+equivalent skin can't orient its stiffness, so CLT's freedom to point fibres
+spanwise is the 7% win. (The optimizer *does* tailor toward ±45° when twist is the
+sole binding lever — covered by a dedicated test — so the mechanism is sound; here
+bending simply dominates.) Per-ply Tsai-Wu failure (vs laminate-average vm) and
+per-band layup would refine this further.
+
 **Deferred to later E increments:** per-spanwise-band skin thickness; MILP discrete
-stock catalog (E.3); panel-buckling eigenvalue constraints; CLT anisotropic skin
-(E.4, replacing isotropic-equivalent — now the most-motivated thread).
+stock catalog (E.3); panel-buckling eigenvalue constraints; per-ply Tsai-Wu skin
+failure.
 
 ### Phase F — Frame-field-driven layout
 
@@ -328,3 +349,4 @@ src/wing_design/
 | Phase-D geometry | Inward-arc **lens** beam sections sized to Phase-C radii (lens lofts cleanly, circular fallback unused); fillets best-effort and currently **no-op** (0/2 — OCC rejects the 30/50 mm transition radii, skipped not fatal); spline fidelity coarse (~286 mm full / ~282 mm aero at 8 levels) — fidelity tuning + valid fillet radii are open Phase-D items (2026-06-05). |
 | Phase-E.1 skin coupling | Load-bearing skin assembled as DKT+CST shell panels between beam nodes into the combined `structural.solve_beam_shell`; skin replaces ring connectors. Isotropic-equivalent skin; re-sizing/MILP/buckling/CLT deferred to later E increments. |
 | Phase-E.2 co-sizing | SLSQP co-sizes per-element beam radii + a uniform skin thickness minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist constraints (skin membrane stress recovered each solve). 43.5→27.5 kg (37% lighter); structure becomes twist-governed. Per-band skin / MILP / buckling / CLT deferred. |
+| Phase-E.4 CLT skin | Anisotropic skin via CLT (symmetric-balanced laminate, smeared D); laminate (A,D) feed `tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; co-sizes beam radii + skin thickness + layup fractions (f0,f45,f90) under beam-vm, skin-vm, deflection, twist. 27.5→25.6 kg (7% lighter); optimum layup is all-0° (bending dominates, beams shrink), not ±45. Per-ply Tsai-Wu / per-band layup / MILP / buckling deferred. |
