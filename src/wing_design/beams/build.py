@@ -4,14 +4,13 @@
 circular sections inset along the radial-from-pivot direction). Phase D adds the
 sized builders driven by the FEA-optimized radii — `build_sized_circular_beams`
 and `build_sized_lens_beams` (area-exact inward-arc sections placed with true OML
-normals) — plus `apply_wing_fillets` (best-effort; see its docstring for the
-build123d 0.10.0 fillet limitation on this morphing loft).
+normals). The eased transition (Task 1) removes the crease at spar/root junctions,
+making post-build fillets unnecessary.
 """
 from __future__ import annotations
 
 import numpy as np
 from build123d import (
-    Axis,
     BuildLine,
     BuildPart,
     BuildSketch,
@@ -20,7 +19,6 @@ from build123d import (
     Locations,
     Plane,
     Polyline,
-    fillet,
     loft,
     make_face,
 )
@@ -178,44 +176,3 @@ def build_sized_lens_beams(
     return beams
 
 
-def apply_wing_fillets(solid, spec: WingSpec):
-    """Best-effort fillets at the spar/transition and root/transition rings.
-
-    build123d 0.10.0 fillet selection on this lofted, morphing solid is fragile;
-    each fillet is attempted independently and skipped (with the original solid
-    retained) if it raises. The trailing-edge fillet is intentionally NOT attempted
-    here — the sharp TE is a continuous-winding feature handled in manufacturing,
-    not a solid-edge round. Returns the (possibly partially) filleted solid.
-
-    Edge selection: ``filter_by_position(Axis.Z, z_min, z_max)`` is confirmed to
-    work in build123d 0.10.0 for locating ring edges near a given z-plane; each
-    ring produces exactly one edge on the current lofted solid. The fillet call
-    itself may still raise a ``ValueError`` from the OCP kernel when the lofted
-    surface topology is too complex — in that case the target is silently skipped
-    and the solid is returned unchanged.
-
-    Targets:
-      * spar/transition ring  (z = -transition_length): 30 mm
-      * root/transition ring  (z = 0):                   50 mm
-    """
-    targets = [
-        (-spec.transition_length, 0.030),
-        (0.0, 0.050),
-    ]
-    result = solid
-    applied = 0
-    for z_ring, radius in targets:
-        try:
-            edges = result.edges().filter_by_position(
-                Axis.Z, z_ring - 1e-3, z_ring + 1e-3
-            )
-            if edges:
-                result = fillet(edges, radius=radius)
-                applied += 1
-        except Exception as exc:  # build123d raises a variety of OCP errors
-            print(
-                f"  [fillet] skipped z={z_ring:.3f} r={radius}: "
-                f"{type(exc).__name__}: {exc}"
-            )
-    print(f"  [fillet] {applied}/{len(targets)} fillets applied")
-    return result

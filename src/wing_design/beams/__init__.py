@@ -4,7 +4,6 @@ from __future__ import annotations
 from .cross_section import beam_section_points, resample_closed_polyline
 from .splines import default_z_levels, fit_beam_splines, form_beam_grid, sample_spline
 from .build import (
-    apply_wing_fillets,
     build_assembly,
     build_form_beams,
     build_sized_circular_beams,
@@ -36,7 +35,6 @@ __all__ = [
     "form_beam_grid",
     "fit_beam_splines",
     "sample_spline",
-    "apply_wing_fillets",
     "build_assembly",
     "build_form_beams",
     "build_sized_circular_beams",

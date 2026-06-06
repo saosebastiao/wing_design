@@ -2,8 +2,8 @@
 
 Derives the spar radius, sizes the beams via the Phase-C FEA-in-the-loop loop,
 builds inward-arc 'lens' beams sized to those areas (circular fallback if build123d
-can't loft the lens faces), applies best-effort wing fillets, assembles everything,
-and exports a STEP to exports/. Also prints the spline on-surface fidelity.
+can't loft the lens faces), assembles everything, and exports a STEP to exports/.
+Also prints the spline on-surface fidelity.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from wing_design import default_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     SizingConfig,
-    apply_wing_fillets,
     build_beam_frame,
     build_sized_circular_beams,
     build_sized_lens_beams,
@@ -72,7 +71,7 @@ def main() -> None:
         section_kind = "circular"
     print(f"  built {len(beams)} {section_kind} beams")
 
-    wing = apply_wing_fillets(build_wing_solid(spec), spec)
+    wing = build_wing_solid(spec)   # eased transition → manufacturable junctions, no fillet needed
     wing.label = "wing"
     for i, b in enumerate(beams):
         b.label = f"beam_{i:02d}"
