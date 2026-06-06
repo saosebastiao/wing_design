@@ -11,6 +11,7 @@ Two FEA backends are wired in:
     triangle that Phase 5e traces.
 """
 from .beam import TubeSparSizing, size_tube_spar
+from .beam_shell import solve_beam_shell
 from .fea import FEAResult, solve_linear_elastic
 from .frame import BeamSection, FrameResult, solve_frame, von_mises_per_element
 from .mesh import TetMesh, tet_mesh_wing
@@ -34,6 +35,7 @@ __all__ = [
     "project_panels_to_oml_tris",
     "shell_mesh_from_tet_mesh",
     "size_tube_spar",
+    "solve_beam_shell",
     "solve_frame",
     "solve_linear_elastic",
     "solve_shell_elastic",
