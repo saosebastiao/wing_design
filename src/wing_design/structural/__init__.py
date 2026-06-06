@@ -26,9 +26,11 @@ from .shell import (
     ShellMesh,
     membrane_von_mises,
     recover_membrane_stress,
+    recover_membrane_stress_C,
     shell_mesh_from_tet_mesh,
     solve_shell_elastic,
     tri_element_stiffness,
+    tri_element_stiffness_laminate,
 )
 
 __all__ = [
@@ -42,6 +44,7 @@ __all__ = [
     "membrane_von_mises",
     "project_panels_to_oml_tris",
     "recover_membrane_stress",
+    "recover_membrane_stress_C",
     "shell_mesh_from_tet_mesh",
     "size_tube_spar",
     "solve_beam_shell",
@@ -50,5 +53,6 @@ __all__ = [
     "solve_shell_elastic",
     "tet_mesh_wing",
     "tri_element_stiffness",
+    "tri_element_stiffness_laminate",
     "von_mises_per_element",
 ]
