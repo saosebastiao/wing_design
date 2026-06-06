@@ -212,6 +212,19 @@ dense z-levels** would target it further — recorded as the remaining refinemen
 **Deliverable: sized structure with discrete stock cross-sections + anisotropic
 skin, buckling-checked.**
 
+**Status: E.1 done (2026-06-05).** Load-bearing skin coupled into the structural
+model: DKT+CST shell panels assembled between beam nodes via `structural.solve_beam_shell`
+(`beams.build_beam_shell_model`), with the **skin replacing the ring connectors**.
+Isotropic-equivalent skin (3 mm). `examples/24_skin_coupling.py` measures the skin
+making the structure ~2.4x stiffer (tip deflection) than the ring frame at equal
+beam radius — confirming the Phase-C/D finding that the skin, not thicker beams, is
+the mass-efficient stiffness lever.
+
+**Deferred to later E increments:** skin membrane-stress recovery + re-sizing the
+beams WITH the skin carrying load (E.2); MILP discrete stock catalog; buckling +
+twist constraints in the sizing loop; CLT anisotropic skin (replacing isotropic-
+equivalent).
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -296,3 +309,4 @@ src/wing_design/
 | Example outputs | All examples write generated artifacts to the repo-root `exports/` (gitignored); no outputs tracked in git. |
 | Phase-C sizing | Continuous SLSQP NLP over per-element longitudinal radii; stress + tip-deflection + tip-twist constraints; analytic mass gradient, FD constraint Jacobian over FEA re-solves; rings fixed (stress reported). MILP stock catalog deferred to Phase E. |
 | Phase-D geometry | Inward-arc **lens** beam sections sized to Phase-C radii (lens lofts cleanly, circular fallback unused); fillets best-effort and currently **no-op** (0/2 — OCC rejects the 30/50 mm transition radii, skipped not fatal); spline fidelity coarse (~286 mm full / ~282 mm aero at 8 levels) — fidelity tuning + valid fillet radii are open Phase-D items (2026-06-05). |
+| Phase-E.1 skin coupling | Load-bearing skin assembled as DKT+CST shell panels between beam nodes into the combined `structural.solve_beam_shell`; skin replaces ring connectors. Isotropic-equivalent skin; re-sizing/MILP/buckling/CLT deferred to later E increments. |
