@@ -1,7 +1,7 @@
 import numpy as np
 
 from wing_design.structural.frame import BeamSection, solve_frame
-from wing_design.structural.beam_shell import solve_beam_shell
+from wing_design.structural.beam_shell import solve_beam_shell, solve_beam_shell_laminate
 
 E_B, NU = 70e9, 0.3
 G_B = E_B / (2 * (1 + NU))
@@ -50,3 +50,20 @@ def test_skin_stiffens_cantilever():
     d_yes = np.abs(with_skin.displacements[[1, 3], 2]).max()
     assert d_yes < d_no
     assert np.isfinite(d_yes) and d_yes > 0.0
+
+
+def test_laminate_solver_reduces_to_isotropic():
+    nodes = np.array([[0, 0, 0], [1, 0, 0], [0, 0.2, 0], [1, 0.2, 0]], dtype=float)
+    beam_elems = np.array([[0, 1], [2, 3]], dtype=int)
+    secs = [BeamSection.circular(0.01)] * 2
+    loads = np.zeros((4, 6)); loads[1, 2] = 100.0; loads[3, 2] = 100.0
+    fixed = np.array([0, 2])
+    tris = np.array([[0, 1, 3], [0, 3, 2]], dtype=int)
+    E, nu, t = 70e9, 0.3, 0.003
+    Dm = (E / (1 - nu**2)) * np.array([[1, nu, 0.0], [nu, 1, 0.0], [0, 0, (1 - nu) / 2]])
+    A, D = t * Dm, (t**3 / 12.0) * Dm
+    iso = solve_beam_shell(nodes, beam_elems, secs, tris, E_beam=E, G_beam=E / 2.6,
+                           E_skin=E, nu_skin=nu, t_skin=t, fixed_nodes=fixed, loads=loads)
+    lam = solve_beam_shell_laminate(nodes, beam_elems, secs, tris, E_beam=E, G_beam=E / 2.6,
+                                    A_skin=A, D_skin=D, fixed_nodes=fixed, loads=loads)
+    assert np.allclose(iso.displacements, lam.displacements, rtol=1e-9, atol=1e-12)

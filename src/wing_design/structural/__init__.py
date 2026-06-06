@@ -16,7 +16,7 @@ Several FEA backends are wired in:
     (Phase E.1).
 """
 from .beam import TubeSparSizing, size_tube_spar
-from .beam_shell import solve_beam_shell
+from .beam_shell import solve_beam_shell, solve_beam_shell_laminate
 from .fea import FEAResult, solve_linear_elastic
 from .frame import BeamSection, FrameResult, solve_frame, von_mises_per_element
 from .mesh import TetMesh, tet_mesh_wing
@@ -48,6 +48,7 @@ __all__ = [
     "shell_mesh_from_tet_mesh",
     "size_tube_spar",
     "solve_beam_shell",
+    "solve_beam_shell_laminate",
     "solve_frame",
     "solve_linear_elastic",
     "solve_shell_elastic",
