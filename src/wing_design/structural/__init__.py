@@ -20,6 +20,7 @@ from .shell import (
     ShellMesh,
     shell_mesh_from_tet_mesh,
     solve_shell_elastic,
+    tri_element_stiffness,
 )
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "solve_linear_elastic",
     "solve_shell_elastic",
     "tet_mesh_wing",
+    "tri_element_stiffness",
     "von_mises_per_element",
 ]

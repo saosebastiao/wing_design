@@ -395,6 +395,10 @@ def _element_K(
     return T @ Ke_local @ T.T
 
 
+# Public alias: the combined beam+shell solver (structural/beam_shell.py) reuses this.
+tri_element_stiffness = _element_K
+
+
 # ---------------------------------------------------------------------------
 # Result + solver
 # ---------------------------------------------------------------------------
