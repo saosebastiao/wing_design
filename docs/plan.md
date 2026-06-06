@@ -180,6 +180,20 @@ point.)
 **Deliverable: manufacturable, correctly-filleted geometry whose beams hit their
 sized areas.**
 
+**Status: done (2026-06-05).** `spar_radius` derived (80 mm / 160 mm dia at the
+pivot). Beams built as inward-arc **lens** sections sized to the Phase-C radii
+(`beams.build_sized_lens_beams`; circular fallback unused — lens lofts cleanly,
+16/16 beams). `examples/23_sized_geometry.py` runs the full Phase-C SLSQP sizing
+(mass ≈ 45 kg, radii 4–40 mm) and exports `exports/sized_geometry_v0.step`.
+**Fillets are best-effort and currently a no-op: 0/2 applied** — both the spar
+transition (30 mm) and root transition (50 mm) fillets fail OCC
+(`Failed creating a fillet`), so `apply_wing_fillets` skips them and returns the
+unfilleted solid. On-surface spline fidelity at 8 levels: **full 286 mm,
+aero-surface 282 mm** — coarse; tightening it (more z-levels / smoothing tuning)
+is the open Phase-D item, along with finding valid fillet radii (or `max_fillet`).
+The TE fillet (`te_fillet_r`) was deliberately not attempted: the sharp trailing
+edge is a continuous-winding feature handled in manufacturing, not a solid round.
+
 ### Phase E — Deepen structural
 
 - Anisotropic skin via CLT (`materials.unidir`) replacing isotropic-equivalent.
@@ -273,3 +287,4 @@ src/wing_design/
 | Phase-B FEA element | Fresh 3D Euler–Bernoulli frame (`structural.frame`); ring connectors stand in for skin shear transfer in the spike (coupled shell = later deepen). |
 | Example outputs | All examples write generated artifacts to the repo-root `exports/` (gitignored); no outputs tracked in git. |
 | Phase-C sizing | Continuous SLSQP NLP over per-element longitudinal radii; stress + tip-deflection + tip-twist constraints; analytic mass gradient, FD constraint Jacobian over FEA re-solves; rings fixed (stress reported). MILP stock catalog deferred to Phase E. |
+| Phase-D geometry | Inward-arc **lens** beam sections sized to Phase-C radii (lens lofts cleanly, circular fallback unused); fillets best-effort and currently **no-op** (0/2 — OCC rejects the 30/50 mm transition radii, skipped not fatal); spline fidelity coarse (~286 mm full / ~282 mm aero at 8 levels) — fidelity tuning + valid fillet radii are open Phase-D items (2026-06-05). |

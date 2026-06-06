@@ -1,25 +1,33 @@
 """build123d geometry for the form beams, the skin wrap, and their assembly.
 
-Spike fidelity: beams are fixed-radius circular cross-sections inset inward from
-the shell along the radial direction from the pivot, lofted along each beam
-spline. The skin is the full OML solid minus its inward offset (a wall-thickness
-hollow shell). Both are refined in Phase D (area-sized inward-arc sections,
-beam-endpoint-driven wrap, true surface normals).
+`build_form_beams`/`build_assembly` are the Phase-A crude builders (fixed-radius
+circular sections inset along the radial-from-pivot direction). Phase D adds the
+sized builders driven by the FEA-optimized radii — `build_sized_circular_beams`
+and `build_sized_lens_beams` (area-exact inward-arc sections placed with true OML
+normals) — plus `apply_wing_fillets` (best-effort; see its docstring for the
+build123d 0.10.0 fillet limitation on this morphing loft).
 """
 from __future__ import annotations
 
 import numpy as np
 from build123d import (
+    Axis,
+    BuildLine,
     BuildPart,
     BuildSketch,
     Circle,
     Compound,
     Locations,
     Plane,
+    Polyline,
+    fillet,
     loft,
+    make_face,
 )
 
 from ..geometry.wing import WingSpec, build_wing_solid
+from .cross_section import beam_section_points
+from .sections import lens_section_polyline, oml_outward_normals
 from .splines import default_z_levels, form_beam_grid
 
 
@@ -80,3 +88,134 @@ def build_assembly(
         b.label = f"beam_{i:02d}"
     skin.label = "skin"
     return Compound(label="wingsail", children=[skin, *beams])
+
+
+def _check_long_radii(long_radii: np.ndarray, n_beams: int, n_levels: int) -> None:
+    """Fail clearly if the sized-radius array isn't beam-major/level-minor sized."""
+    expected = n_beams * (n_levels - 1)
+    if len(long_radii) != expected:
+        raise ValueError(
+            f"long_radii must have n_beams*(n_levels-1) = {expected} entries, "
+            f"got {len(long_radii)}"
+        )
+
+
+def _segment_station_radii(long_radii: np.ndarray, b: int, n_levels: int) -> np.ndarray:
+    """Per-station radii for beam ``b`` from its (n_levels-1) segment radii.
+
+    Station k uses the radius of segment min(k, n_seg-1), so the loft is
+    piecewise-linear (each interior segment tapers from r_k to r_{k+1}); only the
+    final, clamped segment is prismatic.
+    """
+    seg = n_levels - 1
+    radii_b = np.asarray(long_radii)[b * seg:(b + 1) * seg]
+    return np.array([radii_b[min(k, seg - 1)] for k in range(n_levels)])
+
+
+def build_sized_circular_beams(
+    spec: WingSpec,
+    long_radii: np.ndarray,
+    *,
+    n_beams: int = 16,
+    n_levels: int = 20,
+) -> list:
+    """Loft circular beams whose per-station radius comes from the sized segment radii.
+
+    Circular sections inset inward along the true OML normal — the FEA-faithful
+    fallback when lens lofting is not desired/available.
+    """
+    _check_long_radii(long_radii, n_beams, n_levels)
+    z_levels = default_z_levels(spec, n_levels)
+    beams = []
+    for b in range(n_beams):
+        st_r = _segment_station_radii(long_radii, b, n_levels)
+        with BuildPart() as bp:
+            for k in range(n_levels):
+                z = float(z_levels[k])
+                P = beam_section_points(spec, z, n_beams)[b]
+                n_out = oml_outward_normals(spec, z, n_beams)[b]
+                c = P - st_r[k] * n_out          # inset inward by the radius
+                with BuildSketch(Plane.XY.offset(z)):
+                    with Locations((float(c[0]), float(c[1]))):
+                        Circle(float(st_r[k]))
+            loft(ruled=True)
+        beams.append(bp.part)
+    return beams
+
+
+def build_sized_lens_beams(
+    spec: WingSpec,
+    long_radii: np.ndarray,
+    *,
+    n_beams: int = 16,
+    n_levels: int = 20,
+    n_arc: int = 24,
+) -> list:
+    """Loft inward-arc 'lens' beams sized to the Phase-C areas (π r²) per segment.
+
+    Each station's lens has area = π·(station radius)², its flat edge on the OML and
+    its arc bulging inward. Raises if build123d cannot loft the custom faces — the
+    caller may fall back to ``build_sized_circular_beams``.
+    """
+    _check_long_radii(long_radii, n_beams, n_levels)
+    z_levels = default_z_levels(spec, n_levels)
+    beams = []
+    for b in range(n_beams):
+        st_r = _segment_station_radii(long_radii, b, n_levels)
+        with BuildPart() as bp:
+            for k in range(n_levels):
+                z = float(z_levels[k])
+                P = beam_section_points(spec, z, n_beams)[b]
+                n_out = oml_outward_normals(spec, z, n_beams)[b]
+                area = float(np.pi * st_r[k] ** 2)
+                poly = lens_section_polyline(P, n_out, area, n_arc=n_arc)
+                with BuildSketch(Plane.XY.offset(z)):
+                    with BuildLine():
+                        Polyline([(float(x), float(y)) for x, y in poly], close=True)
+                    make_face()
+            loft(ruled=True)
+        beams.append(bp.part)
+    return beams
+
+
+def apply_wing_fillets(solid, spec: WingSpec):
+    """Best-effort fillets at the spar/transition and root/transition rings.
+
+    build123d 0.10.0 fillet selection on this lofted, morphing solid is fragile;
+    each fillet is attempted independently and skipped (with the original solid
+    retained) if it raises. The trailing-edge fillet is intentionally NOT attempted
+    here — the sharp TE is a continuous-winding feature handled in manufacturing,
+    not a solid-edge round. Returns the (possibly partially) filleted solid.
+
+    Edge selection: ``filter_by_position(Axis.Z, z_min, z_max)`` is confirmed to
+    work in build123d 0.10.0 for locating ring edges near a given z-plane; each
+    ring produces exactly one edge on the current lofted solid. The fillet call
+    itself may still raise a ``ValueError`` from the OCP kernel when the lofted
+    surface topology is too complex — in that case the target is silently skipped
+    and the solid is returned unchanged.
+
+    Targets:
+      * spar/transition ring  (z = -transition_length): 30 mm
+      * root/transition ring  (z = 0):                   50 mm
+    """
+    targets = [
+        (-spec.transition_length, 0.030),
+        (0.0, 0.050),
+    ]
+    result = solid
+    applied = 0
+    for z_ring, radius in targets:
+        try:
+            edges = result.edges().filter_by_position(
+                Axis.Z, z_ring - 1e-3, z_ring + 1e-3
+            )
+            if edges:
+                result = fillet(edges, radius=radius)
+                applied += 1
+        except Exception as exc:  # build123d raises a variety of OCP errors
+            print(
+                f"  [fillet] skipped z={z_ring:.3f} r={radius}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+    print(f"  [fillet] {applied}/{len(targets)} fillets applied")
+    return result
