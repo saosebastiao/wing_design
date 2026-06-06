@@ -176,3 +176,30 @@ def build_sized_lens_beams(
     return beams
 
 
+def resample_segment_radii(
+    long_radii: np.ndarray,
+    *,
+    n_beams: int,
+    n_from: int,
+    n_to: int,
+) -> np.ndarray:
+    """Resample per-segment longitudinal radii from ``n_from`` to ``n_to`` levels.
+
+    Beam sizing runs at a coarse level count (SLSQP speed); the geometry is built
+    at a finer one. For each beam, its ``n_from-1`` segment radii are interpolated
+    (by normalized position along the beam) onto ``n_to-1`` segments. Returns a
+    ``(n_beams*(n_to-1),)`` array in the same beam-major/level-minor layout.
+    """
+    _check_long_radii(long_radii, n_beams, n_from)
+    seg_from = n_from - 1
+    seg_to = n_to - 1
+    x_from = (np.arange(seg_from) + 0.5) / seg_from
+    x_to = (np.arange(seg_to) + 0.5) / seg_to
+    src = np.asarray(long_radii, dtype=float)
+    out = np.empty(n_beams * seg_to)
+    for b in range(n_beams):
+        rb = src[b * seg_from:(b + 1) * seg_from]
+        out[b * seg_to:(b + 1) * seg_to] = np.interp(x_to, x_from, rb)
+    return out
+
+
