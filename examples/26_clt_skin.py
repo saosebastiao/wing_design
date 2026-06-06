@@ -2,9 +2,9 @@
 
 The E.2 result was twist-governed with an isotropic-equivalent skin. Here the skin
 is a CLT laminate whose 0/±45/90 ply-area fractions are design variables co-sized
-with beam radii and skin thickness, so the optimizer can put ±45° plies where the
-binding tip-twist constraint needs shear stiffness. Compares against the E.2
-isotropic co-sizing under the same loads and limits.
+with beam radii and skin thickness, so the optimizer can orient the plies for
+whatever constraint balance is binding (axial/bending stiffness, shear/torsion, or
+mass). Compares against the E.2 isotropic co-sizing under the same loads and limits.
 """
 from __future__ import annotations
 
@@ -72,12 +72,12 @@ def main() -> None:
     print(f"  tip defl {clt.tip_defl_m*1e3:.1f} mm | tip twist {clt.tip_twist_deg:.2f} deg "
           f"(limits {defl_lim*1e3:.0f} mm / {twist_lim:.0f} deg)")
 
+    layup = f"0deg {clt.f0:.2f} / ±45 {clt.f45:.2f} / 90deg {clt.f90:.2f}"
     if clt.mass_kg < iso.mass_kg:
-        print(f"\n  -> CLT ±45-tailored skin cuts mass {iso.mass_kg:.1f} -> {clt.mass_kg:.1f} kg "
-              f"({100*(1-clt.mass_kg/iso.mass_kg):.0f}% lighter than isotropic skin).")
+        print(f"\n  -> CLT-optimised skin ({layup}) cuts mass {iso.mass_kg:.1f} -> {clt.mass_kg:.1f} kg "
+              f"({100*(1-clt.mass_kg/iso.mass_kg):.0f}% lighter than the isotropic skin).")
     else:
-        print(f"\n  -> CLT mass {clt.mass_kg:.1f} kg vs isotropic {iso.mass_kg:.1f} kg "
-              f"(layup ±45 fraction {clt.f45:.2f}).")
+        print(f"\n  -> CLT mass {clt.mass_kg:.1f} kg vs isotropic {iso.mass_kg:.1f} kg (layup {layup}).")
 
 
 if __name__ == "__main__":
