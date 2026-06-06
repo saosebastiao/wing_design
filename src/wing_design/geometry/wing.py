@@ -125,6 +125,18 @@ class WingSpec:
         return tuple(all_z)
 
 
+def _transition_blend(u: float) -> float:
+    """Smoothstep airfoil→circle morph fraction with zero slope at u=0 and u=1.
+
+    Eases the transition so the lofted surface meets the constant airfoil (above,
+    u=0) and the constant spar cylinder (below, u=1) tangentially — no slope crease
+    at the junctions (which OCC could not fillet). u is the fraction into the
+    transition band, u = -z / transition_length ∈ [0, 1].
+    """
+    u = float(np.clip(u, 0.0, 1.0))
+    return u * u * (3.0 - 2.0 * u)
+
+
 def _airfoil_to_circle_polyline(
     chord: float,
     thickness: float,
@@ -193,7 +205,7 @@ def oml_section_polyline(spec: WingSpec, z: float, n_pts: int | None = None) -> 
         blend = 0.0
     elif z >= -spec.transition_length:
         chord = spec.root_chord
-        blend = -z / spec.transition_length
+        blend = _transition_blend(-z / spec.transition_length)
     else:
         chord = spec.root_chord
         blend = 1.0
@@ -232,8 +244,9 @@ def build_wing_solid(spec: WingSpec = WingSpec()):
 
     # Fairing: airfoil (blend=0 at z=0, already added) → circle (blend=1 at z=-T)
     for j in range(1, spec.n_transition_sections + 2):
-        blend = j / (spec.n_transition_sections + 1)
-        z = -spec.transition_length * blend
+        u = j / (spec.n_transition_sections + 1)
+        z = -spec.transition_length * u
+        blend = _transition_blend(u)
         face = _section_face(
             spec.root_chord, spec.thickness, spec.pivot_frac, spec.spar_diameter,
             blend=blend, n_pts=spec.n_airfoil_points,
