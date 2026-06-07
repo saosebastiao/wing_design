@@ -328,6 +328,20 @@ The retained Arora frame field finally drives geometry.
 **Deliverable: a beam layout demonstrably lighter/stiffer than even spacing for
 the same load cases.**
 
+**F.1 done (2026-06-07) — non-uniform (stress-weighted) spacing; marginal benefit,
+clear lesson.** Beams re-placed at equal-cumulative-skin-stress arc positions
+(`stress_weighted_targets` from a baseline `cross_section_stress_weights`;
+`arc_fractions` threaded through cross_section/splines/shell_model, default even =
+backward-compatible). `examples/30_nonuniform_spacing.py` (n_levels=8, with buckling):
+the per-segment skin stress is only **mildly concentrated (max/mean ≈ 1.8×)**;
+stress-weighted spacing comes out **~1% lighter (29.7 → 29.3 kg)** and reaches feasible
+beam buckling (util 1.00) where the even-spacing sizing stalled at 1.30 within maxiter.
+**Finding:** longitudinal beam re-spacing has **low leverage** on total mass for this
+design because it is **skin/buckling-dominated** (beams ~8.7 kg of ~30 kg; the skin
+ballooned to ~21 kg under the buckling constraint). The real layout levers are the
+**second diagonal beam family (F.2)** and skin tailoring, not longitudinal re-spacing.
+One-shot (not iterated); per-z-uniform arc_fractions.
+
 ### Phase G — Filament-winding path planner
 
 - `wing_design.manufacturing.winding` — continuous winding passes forming the
@@ -406,3 +420,4 @@ src/wing_design/
 | Buckling check | Closed-form beam Euler (element-length) + skin panel plate-buckling (triangle-as-plate, b=√area, fixed kc) added as optional sizing constraints in both sizers (gated by `buckling_safety_factor`). Buckling binds but mass robust: 25.6→26.1 kg (+2%), governing constraint flips twist→buckling, optimizer shifts mass from beams into thicker skin. Eigenvalue/global buckling + refined panel geometry deferred. |
 | Phase-E.4b ply datum | Ply angles measured against the span axis (per-triangle offset via `skin_datum_angles` + `laminate_stiffness_offset`; solver/recovery generalized to per-triangle stiffness). Opt-in via `LaminateSizingConfig.ply_angle_datum`. Coherent layup AND 26% lighter: 25.6→19.0 kg, optimum is 100% chordwise (90°) skin; design now uses both deflection + twist budgets. (19.0 kg is without buckling — datum+buckling is the real final combo.) |
 | Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
+| Phase-F.1 non-uniform spacing | Beams placed at equal-cumulative-skin-stress arc positions (`stress_weighted_targets` from `cross_section_stress_weights`); `arc_fractions` threaded through cross_section/splines/shell_model (default even, backward-compatible). One-shot; 2nd diagonal family deferred (F.2). Result: only ~1% lighter (skin stress mildly concentrated 1.8×, design is skin/buckling-dominated so beam re-spacing has low leverage) — the layout lever is F.2 / skin tailoring, not re-spacing. |
