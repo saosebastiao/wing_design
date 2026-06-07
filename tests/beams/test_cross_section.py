@@ -50,3 +50,11 @@ def test_beam_points_le_and_te_are_members():
     assert abs(pts[8, 1]) < 1e-6
     # Upper/lower symmetry: beam i mirrors beam (16 - i) in y.
     assert np.allclose(pts[1, 1], -pts[15, 1], atol=1e-6)
+
+
+def test_resample_with_arc_fractions_matches_even_default():
+    sq = np.array([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], dtype=float)
+    from wing_design.beams.cross_section import resample_closed_polyline
+    a = resample_closed_polyline(sq, 8)
+    b = resample_closed_polyline(sq, 8, arc_fractions=np.arange(8) / 8.0)
+    assert np.allclose(a, b)

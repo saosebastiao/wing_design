@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .cross_section import beam_section_points, resample_closed_polyline
+from .layout import cross_section_stress_weights, stress_weighted_targets
 from .splines import default_z_levels, fit_beam_splines, form_beam_grid, sample_spline
 from .build import (
     build_assembly,
@@ -85,4 +86,6 @@ __all__ = [
     "size_beams",
     "StockSelection",
     "select_stock_sizes",
+    "stress_weighted_targets",
+    "cross_section_stress_weights",
 ]
