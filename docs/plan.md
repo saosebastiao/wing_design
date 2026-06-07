@@ -238,9 +238,38 @@ mass lever is torsional stiffness (skin shear path / fibre angle), not beam or s
 gauge. This motivates **CLT anisotropic skin** (E.4 — tailor ±45° plies for shear)
 and revisiting the twist limit.
 
+**Status: E.4 done (2026-06-06).** CLT anisotropic skin: a symmetric-balanced
+laminate (smeared bending D) whose membrane `A`/bending `D` feed
+`tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; the layup area
+fractions (0/±45/90) are co-sized as design variables with beam radii + skin
+thickness (`beams.size_beam_shell_laminate`), minimizing mass under beam-vm,
+skin-vm, tip-deflection and tip-twist constraints. `examples/26_clt_skin.py`
+(n_levels=8): CLT cuts mass **27.5 kg (E.2 isotropic) → 25.6 kg (7% lighter)**,
+converged & feasible.
+
+**What is real:** the 7% mass gain is a valid optimum of the posed problem — CLT
+anisotropy lets the optimizer drop skin stiffness in unneeded directions, shrinking
+the beams (17.8→14.7 kg) while holding twist (the active constraint) with slightly
+thicker skin (0.71→0.79 mm). Stiffness and stress use the same per-triangle Qeff
+self-consistently, so the converged result is sound. A dedicated test confirms the
+optimizer *does* drive the layup toward ±45° when twist is the sole binding lever.
+
+**Important limitation (do NOT read the optimal layup as a manufacturable layup):**
+ply angles are defined relative to **each skin triangle's local frame** (e1 along
+its first edge), and the tiling's triangle frames are split ~50/50 spanwise vs
+chordwise (measured mean |cos∠(local-x, span)| = 0.49). So `(f0,f45,f90)` are not
+consistent global fibre directions — the converged "all-0°" is "0° per arbitrary
+local edge," not a coherent spanwise layup. A fixed-geometry sweep shows the layup
+effect is modest and that 90° is simply the worst orientation (highest deflection
+and twist); the exact `(1,0,0)` corner is somewhat arbitrary among the non-90°
+options. **Follow-up (E.4b): define ply angles against a consistent datum** (span
+axis, or local surface principal directions) before the layup result is physically
+actionable. Per-ply Tsai-Wu failure (vs laminate-average vm) and per-band layup
+would refine it further.
+
 **Deferred to later E increments:** per-spanwise-band skin thickness; MILP discrete
-stock catalog (E.3); panel-buckling eigenvalue constraints; CLT anisotropic skin
-(E.4, replacing isotropic-equivalent — now the most-motivated thread).
+stock catalog (E.3); panel-buckling eigenvalue constraints; per-ply Tsai-Wu skin
+failure.
 
 ### Phase F — Frame-field-driven layout
 
@@ -328,3 +357,4 @@ src/wing_design/
 | Phase-D geometry | Inward-arc **lens** beam sections sized to Phase-C radii (lens lofts cleanly, circular fallback unused); fillets best-effort and currently **no-op** (0/2 — OCC rejects the 30/50 mm transition radii, skipped not fatal); spline fidelity coarse (~286 mm full / ~282 mm aero at 8 levels) — fidelity tuning + valid fillet radii are open Phase-D items (2026-06-05). |
 | Phase-E.1 skin coupling | Load-bearing skin assembled as DKT+CST shell panels between beam nodes into the combined `structural.solve_beam_shell`; skin replaces ring connectors. Isotropic-equivalent skin; re-sizing/MILP/buckling/CLT deferred to later E increments. |
 | Phase-E.2 co-sizing | SLSQP co-sizes per-element beam radii + a uniform skin thickness minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist constraints (skin membrane stress recovered each solve). 43.5→27.5 kg (37% lighter); structure becomes twist-governed. Per-band skin / MILP / buckling / CLT deferred. |
+| Phase-E.4 CLT skin | Anisotropic skin via CLT (symmetric-balanced laminate, smeared D); laminate (A,D) feed `tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; co-sizes beam radii + skin thickness + layup fractions (f0,f45,f90) under beam-vm, skin-vm, deflection, twist. 27.5→25.6 kg (7% lighter, valid optimum). LIMITATION: ply angles are per-triangle-local (frames ~50/50 spanwise/chordwise), so the optimal layup is not a manufacturable fibre prescription — needs a consistent ply-angle datum (E.4b). Per-ply Tsai-Wu / per-band layup / MILP / buckling deferred. |

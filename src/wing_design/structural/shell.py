@@ -656,6 +656,98 @@ def recover_membrane_stress(
     return out
 
 
+def tri_element_stiffness_laminate(
+    p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
+    *, A: np.ndarray, D: np.ndarray, drilling_factor: float = 1.0e-4,
+) -> np.ndarray:
+    """18×18 global shell stiffness from laminate membrane A and bending D matrices.
+
+    A (3,3) is the CLT membrane stiffness [N/m], D (3,3) the bending stiffness [N·m].
+    Reduces exactly to `_element_K(E,nu,t)` when A = t·Dm, D = (t³/12)·Dm (isotropic),
+    since the drilling penalty uses A66 (= G·t in the isotropic case).
+    """
+    R, local, area = _triangle_local_frame(p1, p2, p3)
+    x1, y1 = local[0]; x2, y2 = local[1]; x3, y3 = local[2]
+    b = np.array([y2 - y3, y3 - y1, y1 - y2])
+    c = np.array([x3 - x2, x1 - x3, x2 - x1])
+    two_A = 2.0 * area
+    Bm = np.zeros((3, 6))
+    for i in range(3):
+        Bm[0, 2 * i + 0] = b[i] / two_A
+        Bm[1, 2 * i + 1] = c[i] / two_A
+        Bm[2, 2 * i + 0] = c[i] / two_A
+        Bm[2, 2 * i + 1] = b[i] / two_A
+    Km = area * (Bm.T @ A @ Bm)
+
+    x23, y23 = x2 - x3, y2 - y3
+    x31, y31 = x3 - x1, y3 - y1
+    x12, y12 = x1 - x2, y1 - y2
+    l23 = x23 * x23 + y23 * y23
+    l31 = x31 * x31 + y31 * y31
+    l12 = x12 * x12 + y12 * y12
+    P4, P5, P6 = -6.0 * x23 / l23, -6.0 * x31 / l31, -6.0 * x12 / l12
+    t4, t5, t6 = -6.0 * y23 / l23, -6.0 * y31 / l31, -6.0 * y12 / l12
+    q4, q5, q6 = 3.0 * x23 * y23 / l23, 3.0 * x31 * y31 / l31, 3.0 * x12 * y12 / l12
+    r4, r5, r6 = 3.0 * y23 * y23 / l23, 3.0 * y31 * y31 / l31, 3.0 * y12 * y12 / l12
+    Kb = np.zeros((9, 9))
+    for xi, eta in [(0.5, 0.0), (0.5, 0.5), (0.0, 0.5)]:
+        Bb = _dkt_B_matrix(xi, eta, x23, y23, x31, y31, x12, y12,
+                           P4, P5, P6, t4, t5, t6, q4, q5, q6, r4, r5, r6)
+        Kb += (1.0 / 3.0) * area * (Bb.T @ D @ Bb)
+
+    Ke_local = np.zeros((18, 18))
+    membrane_dofs = [0, 1, 6, 7, 12, 13]
+    for a_, da in enumerate(membrane_dofs):
+        for b_, db in enumerate(membrane_dofs):
+            Ke_local[da, db] += Km[a_, b_]
+    bending_dofs = [2, 3, 4, 8, 9, 10, 14, 15, 16]
+    for a_, da in enumerate(bending_dofs):
+        for b_, db in enumerate(bending_dofs):
+            Ke_local[da, db] += Kb[a_, b_]
+    drill_k = drilling_factor * float(A[2, 2]) * area
+    for d in (5, 11, 17):
+        Ke_local[d, d] += drill_k
+
+    T = np.zeros((18, 18))
+    for n in range(3):
+        for k in range(2):
+            base = 6 * n + 3 * k
+            T[base:base + 3, base:base + 3] = R
+    return T @ Ke_local @ T.T
+
+
+def recover_membrane_stress_C(
+    nodes: np.ndarray, triangles: np.ndarray, displacements: np.ndarray, *, C: np.ndarray,
+) -> np.ndarray:
+    """Per-triangle membrane stress (M,3) using a general constitutive matrix C (3,3).
+
+    For a CLT laminate pass C = Qeff (= A/thickness); for isotropic, C = Dm. Stress
+    is the laminate-average membrane stress σ = C·ε in the element-local frame [Pa].
+    """
+    M = triangles.shape[0]
+    out = np.zeros((M, 3))
+    for e in range(M):
+        i, j, l = (int(v) for v in triangles[e])
+        R, local, area = _triangle_local_frame(nodes[i], nodes[j], nodes[l])
+        x1, y1 = local[0]; x2, y2 = local[1]; x3, y3 = local[2]
+        b = np.array([y2 - y3, y3 - y1, y1 - y2])
+        c = np.array([x3 - x2, x1 - x3, x2 - x1])
+        two_A = 2.0 * area
+        Bm = np.zeros((3, 6))
+        for k in range(3):
+            Bm[0, 2 * k + 0] = b[k] / two_A
+            Bm[1, 2 * k + 1] = c[k] / two_A
+            Bm[2, 2 * k + 0] = c[k] / two_A
+            Bm[2, 2 * k + 1] = b[k] / two_A
+        u_m = np.zeros(6)
+        for n_idx, gn in enumerate((i, j, l)):
+            u_local = R.T @ displacements[gn, 0:3]
+            u_m[2 * n_idx + 0] = u_local[0]
+            u_m[2 * n_idx + 1] = u_local[1]
+        out[e] = C @ Bm @ u_m
+    return out
+
+
 def membrane_von_mises(stress: np.ndarray) -> np.ndarray:
     """Per-row plane-stress von Mises from (M, 3) [σxx, σyy, σxy] arrays."""
     sxx = stress[:, 0]

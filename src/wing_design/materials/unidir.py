@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass(frozen=True)
 class UDPly:
@@ -56,3 +58,57 @@ T800_EPOXY = UDPly(
     Xt_Pa=2900e6, Xc_Pa=1500e6, Yt_Pa=60e6, Yc_Pa=210e6, S12_Pa=90e6,
     rho_kgm3=1580.0, Vf=0.60,
 )
+
+
+def reduced_stiffness_Q(ply: UDPly) -> np.ndarray:
+    """Plane-stress reduced stiffness Q (3,3) in the ply material axes [Pa]."""
+    nu21 = ply.nu12 * ply.E2_Pa / ply.E1_Pa
+    denom = 1.0 - ply.nu12 * nu21
+    Q11 = ply.E1_Pa / denom
+    Q22 = ply.E2_Pa / denom
+    Q12 = ply.nu12 * ply.E2_Pa / denom
+    Q66 = ply.G12_Pa
+    return np.array([[Q11, Q12, 0.0], [Q12, Q22, 0.0], [0.0, 0.0, Q66]])
+
+
+def transformed_Qbar(Q: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Q rotated to laminate axes by ply `angle_deg` (3,3) [Pa]."""
+    th = np.radians(angle_deg)
+    c, s = np.cos(th), np.sin(th)
+    Q11, Q12, Q22, Q66 = Q[0, 0], Q[0, 1], Q[1, 1], Q[2, 2]
+    c2, s2 = c * c, s * s
+    c4, s4 = c2 * c2, s2 * s2
+    s2c2 = s2 * c2
+    Q11b = Q11 * c4 + 2.0 * (Q12 + 2.0 * Q66) * s2c2 + Q22 * s4
+    Q22b = Q11 * s4 + 2.0 * (Q12 + 2.0 * Q66) * s2c2 + Q22 * c4
+    Q12b = (Q11 + Q22 - 4.0 * Q66) * s2c2 + Q12 * (s4 + c4)
+    Q66b = (Q11 + Q22 - 2.0 * Q12 - 2.0 * Q66) * s2c2 + Q66 * (s4 + c4)
+    Q16b = (Q11 - Q12 - 2.0 * Q66) * s * c * c2 + (Q12 - Q22 + 2.0 * Q66) * s * s2 * c
+    Q26b = (Q11 - Q12 - 2.0 * Q66) * s * s2 * c + (Q12 - Q22 + 2.0 * Q66) * s * c * c2
+    return np.array([[Q11b, Q12b, Q16b], [Q12b, Q22b, Q26b], [Q16b, Q26b, Q66b]])
+
+
+def laminate_stiffness(
+    ply: UDPly,
+    *,
+    f0: float,
+    f45: float,
+    f90: float,
+    thickness: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Symmetric-balanced laminate (A, D, Qeff) from 0/±45/90 area fractions.
+
+    `f45` is the total ±45 fraction (split equally +45/−45, so balanced → A16=A26=0).
+    Qeff = f0·Qbar(0) + ½f45·(Qbar(45)+Qbar(−45)) + f90·Qbar(90)  (effective stiffness).
+    A = thickness·Qeff (N/m). Smeared bending D = (thickness³/12)·Qeff (N·m): a
+    fractions-only layup does not fix stacking order, so D uses the smeared model.
+    """
+    Q = reduced_stiffness_Q(ply)
+    Qeff = (
+        f0 * transformed_Qbar(Q, 0.0)
+        + 0.5 * f45 * (transformed_Qbar(Q, 45.0) + transformed_Qbar(Q, -45.0))
+        + f90 * transformed_Qbar(Q, 90.0)
+    )
+    A = thickness * Qeff
+    D = (thickness**3 / 12.0) * Qeff
+    return A, D, Qeff
