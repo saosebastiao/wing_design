@@ -64,11 +64,13 @@ def build_beam_shell_model(
     knockdown: float = 0.5,
     nu: float = 0.32,
     skin_thickness: float = 0.003,
+    arc_fractions: np.ndarray | None = None,
 ) -> BeamShellModel:
+    """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing."""
     if n_levels < 2:
         raise ValueError(f"n_levels must be >= 2, got {n_levels}")
     z = default_z_levels(spec, n_levels)
-    grid = form_beam_grid(spec, z, n_beams)
+    grid = form_beam_grid(spec, z, n_beams, arc_fractions=arc_fractions)
     nodes = grid.reshape(-1, 3)
 
     def nid(b: int, k: int) -> int:
