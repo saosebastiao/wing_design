@@ -1,19 +1,21 @@
 """CLT co-sizing: beam radii + uniform skin thickness + laminate layup fractions.
 
 Design vector x = [beam_radii (n), t_skin, f0, f45]; f90 = 1 - f0 - f45. Each
-evaluate builds the laminate (A, D, Qeff) from the fractions + thickness, solves the
+evaluate builds the laminate stiffness from the fractions + thickness, solves the
 combined beam+shell FEA with the anisotropic skin, and constrains beam von Mises,
 skin (laminate-average membrane) von Mises, tip deflection, and tip twist. SLSQP with
 O(1)-normalized objective/constraints; fractions enter only through the constraints
 (mass is fraction-independent at uniform density). Symmetric-balanced laminate,
 smeared bending D — see materials.laminate_stiffness.
 
-CAVEAT: the laminate ply angles are measured relative to EACH skin triangle's local
-frame (e1 along its first edge), and the tiling's triangle frames are not globally
-consistent (~50/50 spanwise/chordwise). The optimization is self-consistent, but the
-resulting `(f0, f45, f90)` is therefore NOT a manufacturable global fibre layup — it
-needs a consistent ply-angle datum (span axis / local surface axes) before it can be
-read as a real prescription. See plan.md Phase E.4 (E.4b follow-up).
+PLY-ANGLE DATUM (E.4b): by default (`config.ply_angle_datum is None`) ply angles are
+measured relative to each skin triangle's local frame, which is NOT globally
+consistent (the tiling's frames are ~50/50 spanwise/chordwise) — so the resulting
+`(f0, f45, f90)` is self-consistent but not a manufacturable global layup. Set
+`config.ply_angle_datum` (e.g. `(0,0,1)` = span) to measure angles against that global
+datum instead: each triangle's laminate is built with its ply angles offset by the
+triangle's local-frame angle to the datum (`skin_datum_angles` + `laminate_stiffness_offset`),
+making the optimized layup a coherent, manufacturable prescription (0° = the datum).
 """
 from __future__ import annotations
 
