@@ -31,6 +31,7 @@ from .sizing import (
     n_longitudinal,
     size_beams,
 )
+from .stock_catalog import StockSelection, select_stock_sizes
 
 __all__ = [
     "beam_section_points",
@@ -72,4 +73,6 @@ __all__ = [
     "frame_mass",
     "n_longitudinal",
     "size_beams",
+    "StockSelection",
+    "select_stock_sizes",
 ]
