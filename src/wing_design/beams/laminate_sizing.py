@@ -22,12 +22,12 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import minimize
 
-from ..materials.unidir import UDPly, laminate_stiffness
+from ..materials.unidir import UDPly, laminate_stiffness, laminate_stiffness_offset
 from ..structural.beam_shell import solve_beam_shell_laminate
 from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_stress_C
-from .shell_model import BeamShellModel
+from .shell_model import BeamShellModel, skin_datum_angles
 from .shell_sizing import beam_lengths, beam_mass, skin_areas, skin_mass
 
 
@@ -43,6 +43,7 @@ class LaminateSizingConfig:
     buckling_safety_factor: float | None = None  # if set, enforce beam Euler + panel buckling
     euler_K: float = 1.0
     panel_kc: float = 4.0
+    ply_angle_datum: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,10 @@ def size_beam_shell_laminate(
     Atri = skin_areas(model)
     A_skin_area = float(Atri.sum())
     x0 = np.concatenate([np.full(n, config.r_max), [config.t_max, 1.0 / 3.0, 1.0 / 3.0]])
+    datum_offsets_deg = (
+        np.degrees(skin_datum_angles(model, config.ply_angle_datum))
+        if config.ply_angle_datum is not None else None
+    )
     cache: dict = {}
 
     def evaluate(x):
@@ -94,7 +99,16 @@ def size_beam_shell_laminate(
         f0 = float(x[n + 1])
         f45 = float(x[n + 2])
         f90 = max(0.0, 1.0 - f0 - f45)
-        A, D, Qeff = laminate_stiffness(ply, f0=f0, f45=f45, f90=f90, thickness=t)
+        if datum_offsets_deg is None:
+            A_arg, D_arg, C_arg = laminate_stiffness(ply, f0=f0, f45=f45, f90=f90, thickness=t)
+            D11 = float(D_arg[0, 0])
+        else:
+            mats = [laminate_stiffness_offset(ply, f0=f0, f45=f45, f90=f90, thickness=t, offset_deg=o)
+                    for o in datum_offsets_deg]
+            A_arg = np.stack([m[0] for m in mats])
+            D_arg = np.stack([m[1] for m in mats])
+            C_arg = np.stack([m[2] for m in mats])
+            D11 = float(max(m[1][0, 0] for m in mats))
         sections = [BeamSection.circular(float(r)) for r in radii]
         wb = np.zeros(n)
         ws = 0.0
@@ -105,11 +119,11 @@ def size_beam_shell_laminate(
         for loads in load_arrays:
             res = solve_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
-                E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A, D_skin=D,
+                E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
                 fixed_nodes=model.fixed_nodes, loads=loads,
             )
             wb = np.maximum(wb, von_mises_per_element(res, sections))
-            skin_s = recover_membrane_stress_C(model.nodes, model.shell_tris, res.displacements, C=Qeff)
+            skin_s = recover_membrane_stress_C(model.nodes, model.shell_tris, res.displacements, C=C_arg)
             ws = max(ws, float(membrane_von_mises(skin_s).max()))
             tip = model.tip_nodes
             md = max(md, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
@@ -117,7 +131,7 @@ def size_beam_shell_laminate(
             if config.buckling_safety_factor is not None:
                 bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
                                             K=config.euler_K, safety_factor=config.buckling_safety_factor)
-                pu = panel_buckling_utilization(skin_s, Atri, D11=float(D[0, 0]), t=t,
+                pu = panel_buckling_utilization(skin_s, Atri, D11=D11, t=t,
                                                 kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
