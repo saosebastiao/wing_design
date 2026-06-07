@@ -7,6 +7,13 @@ skin (laminate-average membrane) von Mises, tip deflection, and tip twist. SLSQP
 O(1)-normalized objective/constraints; fractions enter only through the constraints
 (mass is fraction-independent at uniform density). Symmetric-balanced laminate,
 smeared bending D — see materials.laminate_stiffness.
+
+CAVEAT: the laminate ply angles are measured relative to EACH skin triangle's local
+frame (e1 along its first edge), and the tiling's triangle frames are not globally
+consistent (~50/50 spanwise/chordwise). The optimization is self-consistent, but the
+resulting `(f0, f45, f90)` is therefore NOT a manufacturable global fibre layup — it
+needs a consistent ply-angle datum (span axis / local surface axes) before it can be
+read as a real prescription. See plan.md Phase E.4 (E.4b follow-up).
 """
 from __future__ import annotations
 
