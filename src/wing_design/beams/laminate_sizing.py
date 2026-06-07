@@ -110,7 +110,10 @@ def size_beam_shell_laminate(
             A_arg = np.stack([m[0] for m in mats])
             D_arg = np.stack([m[1] for m in mats])
             C_arg = np.stack([m[2] for m in mats])
-            D11 = float(max(m[1][0, 0] for m in mats))
+            # Per-triangle plate bending stiffness for panel buckling: each panel is
+            # checked against its OWN D11 (a scalar max would understate weak panels;
+            # panel_buckling_utilization broadcasts an array D11 element-wise).
+            D11 = D_arg[:, 0, 0]
         sections = [BeamSection.circular(float(r)) for r in radii]
         wb = np.zeros(n)
         ws = 0.0
