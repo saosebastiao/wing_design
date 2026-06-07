@@ -68,3 +68,19 @@ def test_size_beam_shell_binding_constraint():
     worst = max(res.max_beam_vm_Pa, res.max_skin_vm_Pa)
     assert worst <= cfg.sigma_allow_Pa * 1.05      # feasible
     assert worst > 0.5 * cfg.sigma_allow_Pa        # genuinely constraint-limited, not min-gauge
+
+
+def test_buckling_constraint_respected():
+    spec = WingSpec()
+    model = build_beam_shell_model(spec, n_beams=8, n_levels=4)
+    loads = np.zeros((model.nodes.shape[0], 6))
+    loads[model.tip_nodes, 2] = 800.0
+    loads[model.tip_nodes, 0] = 400.0
+    cfg = BeamShellSizingConfig(
+        sigma_allow_Pa=1.0e9, tip_defl_max_m=1.0, tip_twist_max_deg=90.0,
+        r_min=0.004, r_max=0.04, t_min=0.0005, t_max=0.02,
+        buckling_safety_factor=1.5,
+    )
+    res = size_beam_shell(model, [loads], cfg, rho=1550.0, maxiter=80)
+    assert res.max_beam_buckling_util <= 1.05
+    assert res.max_panel_buckling_util <= 1.05
