@@ -76,6 +76,8 @@ def select_stock_sizes(
         for j in range(m):
             if (e, j) in x and solver.Value(x[e, j]) == 1:
                 assigned[e] = cat[j]
-    distinct = sorted({float(cat[j]) for j in range(m) if solver.Value(used[j]) == 1})
+    # Report the sizes actually assigned (robust regardless of the one-directional
+    # used[] channeling, which only enforces the <=K cardinality constraint).
+    distinct = sorted({float(r) for r in assigned})
     mass = float(rho * np.sum(np.pi * assigned**2 * L))
     return StockSelection(assigned_radii=assigned, distinct_sizes=distinct, mass_kg=mass)
