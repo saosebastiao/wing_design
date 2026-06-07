@@ -4,6 +4,7 @@ from .unidir import (
     T800_EPOXY,
     UDPly,
     laminate_stiffness,
+    laminate_stiffness_offset,
     reduced_stiffness_Q,
     transformed_Qbar,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "T800_EPOXY",
     "UDPly",
     "laminate_stiffness",
+    "laminate_stiffness_offset",
     "reduced_stiffness_Q",
     "transformed_Qbar",
 ]

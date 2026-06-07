@@ -112,3 +112,25 @@ def laminate_stiffness(
     A = thickness * Qeff
     D = (thickness**3 / 12.0) * Qeff
     return A, D, Qeff
+
+
+def laminate_stiffness_offset(
+    ply: UDPly, *, f0: float, f45: float, f90: float, thickness: float, offset_deg: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Like `laminate_stiffness` but with every ply angle shifted by `offset_deg`.
+
+    Used to express a laminate defined against a global datum in an element's local
+    frame whose x-axis sits `offset_deg` from that datum. With offset_deg=0 this is
+    identical to `laminate_stiffness`. (Off-datum, a balanced laminate legitimately
+    gains A16/A26 != 0 -- the shell element handles the full 3x3.)
+    """
+    Q = reduced_stiffness_Q(ply)
+    o = offset_deg
+    Qeff = (
+        f0 * transformed_Qbar(Q, o)
+        + 0.5 * f45 * (transformed_Qbar(Q, 45.0 + o) + transformed_Qbar(Q, -45.0 + o))
+        + f90 * transformed_Qbar(Q, 90.0 + o)
+    )
+    A = thickness * Qeff
+    D = (thickness**3 / 12.0) * Qeff
+    return A, D, Qeff

@@ -19,7 +19,7 @@ from .fea_model import (
     solve_beam_frame,
     summarize_frame,
 )
-from .shell_model import BeamShellModel, build_beam_shell_model, skin_triangles, solve_beam_shell_model
+from .shell_model import BeamShellModel, build_beam_shell_model, skin_datum_angles, skin_triangles, solve_beam_shell_model
 from .shell_sizing import BeamShellSizingConfig, BeamShellSizingResult, beam_mass, size_beam_shell, skin_mass
 from .laminate_sizing import LaminateSizingConfig, LaminateSizingResult, size_beam_shell_laminate
 from .fidelity import spline_surface_error
@@ -53,6 +53,7 @@ __all__ = [
     "summarize_frame",
     "BeamShellModel",
     "build_beam_shell_model",
+    "skin_datum_angles",
     "skin_triangles",
     "solve_beam_shell_model",
     "BeamShellSizingConfig",
