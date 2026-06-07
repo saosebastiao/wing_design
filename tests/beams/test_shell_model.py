@@ -53,3 +53,12 @@ def test_skin_stiffer_than_ring_frame():
     # rings (~8.6x here at n_levels=6; the ratio shrinks as n_levels rises because
     # more ring levels add ring stiffness — ~2.4x at n_levels=12). Guard the gain.
     assert d_ring / d_skin > 5.0
+
+
+def test_skin_datum_angles_shape_and_range():
+    from wing_design.beams.shell_model import skin_datum_angles
+    spec = WingSpec()
+    model = build_beam_shell_model(spec, n_beams=8, n_levels=5)
+    ang = skin_datum_angles(model, datum_dir=(0.0, 0.0, 1.0))
+    assert ang.shape == (model.shell_tris.shape[0],)
+    assert np.all(np.abs(ang) <= np.pi + 1e-9)

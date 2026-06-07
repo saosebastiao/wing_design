@@ -719,11 +719,15 @@ def tri_element_stiffness_laminate(
 def recover_membrane_stress_C(
     nodes: np.ndarray, triangles: np.ndarray, displacements: np.ndarray, *, C: np.ndarray,
 ) -> np.ndarray:
-    """Per-triangle membrane stress (M,3) using a general constitutive matrix C (3,3).
+    """Per-triangle membrane stress (M,3) using a general constitutive matrix C.
 
+    C may be (3,3) — one matrix applied to every triangle — or (M,3,3) — one
+    per-triangle matrix, where M matches the number of rows in ``triangles``.
     For a CLT laminate pass C = Qeff (= A/thickness); for isotropic, C = Dm. Stress
     is the laminate-average membrane stress σ = C·ε in the element-local frame [Pa].
     """
+    C = np.asarray(C, dtype=float)
+    per_tri = C.ndim == 3
     M = triangles.shape[0]
     out = np.zeros((M, 3))
     for e in range(M):
@@ -744,7 +748,8 @@ def recover_membrane_stress_C(
             u_local = R.T @ displacements[gn, 0:3]
             u_m[2 * n_idx + 0] = u_local[0]
             u_m[2 * n_idx + 1] = u_local[1]
-        out[e] = C @ Bm @ u_m
+        Ce = C[e] if per_tri else C
+        out[e] = Ce @ Bm @ u_m
     return out
 
 

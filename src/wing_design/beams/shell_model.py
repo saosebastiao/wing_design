@@ -15,6 +15,7 @@ from ..geometry.wing import WingSpec
 from ..materials.unidir import T700_EPOXY, UDPly
 from ..structural.beam_shell import solve_beam_shell
 from ..structural.frame import BeamSection, FrameResult
+from ..structural.shell import _triangle_local_frame
 from .splines import default_z_levels, form_beam_grid
 
 
@@ -98,6 +99,28 @@ def build_beam_shell_model(
         nu_skin=nu,
         t_skin=skin_thickness,
     )
+
+
+def skin_datum_angles(model: BeamShellModel, datum_dir=(0.0, 0.0, 1.0)) -> np.ndarray:
+    """(n_tris,) angle [rad] from each skin triangle's local x-axis to ``datum_dir``,
+    measured in the triangle's plane.
+
+    `datum_dir` is a global direction (default span = +Z). For each triangle it is
+    projected onto the triangle plane and expressed in local (e1,e2); the returned
+    angle delta = atan2(d.e2, d.e1). A laminate defined against this datum is built
+    per-triangle via `materials.laminate_stiffness_offset(..., offset_deg=degrees(delta))`.
+    If the datum is normal to a triangle (no in-plane component) delta defaults to 0.
+    """
+    d = np.asarray(datum_dir, dtype=float)
+    d = d / np.linalg.norm(d)
+    out = np.zeros(model.shell_tris.shape[0])
+    for e in range(model.shell_tris.shape[0]):
+        a, b, c = (int(v) for v in model.shell_tris[e])
+        R, _, _ = _triangle_local_frame(model.nodes[a], model.nodes[b], model.nodes[c])
+        e1, e2 = R[:, 0], R[:, 1]
+        dx, dy = float(d @ e1), float(d @ e2)
+        out[e] = 0.0 if (dx == 0.0 and dy == 0.0) else float(np.arctan2(dy, dx))
+    return out
 
 
 def solve_beam_shell_model(model: BeamShellModel, loads: np.ndarray) -> FrameResult:

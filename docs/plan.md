@@ -262,10 +262,24 @@ consistent global fibre directions — the converged "all-0°" is "0° per arbit
 local edge," not a coherent spanwise layup. A fixed-geometry sweep shows the layup
 effect is modest and that 90° is simply the worst orientation (highest deflection
 and twist); the exact `(1,0,0)` corner is somewhat arbitrary among the non-90°
-options. **Follow-up (E.4b): define ply angles against a consistent datum** (span
-axis, or local surface principal directions) before the layup result is physically
-actionable. Per-ply Tsai-Wu failure (vs laminate-average vm) and per-band layup
+options. Per-ply Tsai-Wu failure (vs laminate-average vm) and per-band layup
 would refine it further.
+
+**E.4b done (2026-06-07) — consistent span datum; layup now manufacturable AND 26%
+lighter.** `LaminateSizingConfig.ply_angle_datum=(0,0,1)` measures ply angles against
+the span axis: each triangle's laminate is built with its plies offset by the
+triangle's local-frame angle to the datum (`skin_datum_angles` + `laminate_stiffness_offset`;
+solver + stress recovery generalized to per-triangle stiffness). The optimized layup
+is now coherent (0°=spanwise). Re-running the co-sizing (`examples/28_ply_datum.py`):
+the span-datum optimum is **19.0 kg** with a clean manufacturable layup — **100%
+chordwise (90°) skin** — vs the incoherent per-tri-local 25.6 kg. It is **26% lighter**
+because a consistent datum lets the optimizer coherently exploit anisotropy and use
+both the deflection and twist budgets fully (the datum design sits at *both* limits;
+the per-tri-local one left deflection slack at 66/100 mm). Physically sensible: the
+longitudinal beams carry spanwise bending, so the skin's most efficient role is
+**chordwise (hoop) fibres** for section-shape/shear, not spanwise. CAVEAT: this 19.0 kg
+is WITHOUT buckling (apples-to-apples vs E.4); the true final design is datum + the
+closed-form buckling constraints (a quick combined run) — expect it modestly heavier.
 
 **Deferred to later E increments:** per-spanwise-band skin thickness; MILP discrete
 stock catalog (E.3); per-ply Tsai-Wu skin failure.
@@ -375,3 +389,4 @@ src/wing_design/
 | Phase-E.2 co-sizing | SLSQP co-sizes per-element beam radii + a uniform skin thickness minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist constraints (skin membrane stress recovered each solve). 43.5→27.5 kg (37% lighter); structure becomes twist-governed. Per-band skin / MILP / buckling / CLT deferred. |
 | Phase-E.4 CLT skin | Anisotropic skin via CLT (symmetric-balanced laminate, smeared D); laminate (A,D) feed `tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; co-sizes beam radii + skin thickness + layup fractions (f0,f45,f90) under beam-vm, skin-vm, deflection, twist. 27.5→25.6 kg (7% lighter, valid optimum). LIMITATION: ply angles are per-triangle-local (frames ~50/50 spanwise/chordwise), so the optimal layup is not a manufacturable fibre prescription — needs a consistent ply-angle datum (E.4b). Per-ply Tsai-Wu / per-band layup / MILP / buckling deferred. |
 | Buckling check | Closed-form beam Euler (element-length) + skin panel plate-buckling (triangle-as-plate, b=√area, fixed kc) added as optional sizing constraints in both sizers (gated by `buckling_safety_factor`). Buckling binds but mass robust: 25.6→26.1 kg (+2%), governing constraint flips twist→buckling, optimizer shifts mass from beams into thicker skin. Eigenvalue/global buckling + refined panel geometry deferred. |
+| Phase-E.4b ply datum | Ply angles measured against the span axis (per-triangle offset via `skin_datum_angles` + `laminate_stiffness_offset`; solver/recovery generalized to per-triangle stiffness). Opt-in via `LaminateSizingConfig.ply_angle_datum`. Coherent layup AND 26% lighter: 25.6→19.0 kg, optimum is 100% chordwise (90°) skin; design now uses both deflection + twist budgets. (19.0 kg is without buckling — datum+buckling is the real final combo.) |

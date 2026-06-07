@@ -127,15 +127,24 @@ def solve_beam_shell_laminate(
 
     Mirrors `solve_beam_shell` exactly, except the skin triangles are assembled
     using `tri_element_stiffness_laminate` with the CLT membrane stiffness matrix
-    ``A_skin`` (3×3, N/m) and bending stiffness matrix ``D_skin`` (3×3, N·m)
-    instead of the isotropic (E, nu, t) parameterisation.  The beam assembly,
-    boundary-condition elimination, linear solve, and beam-force recovery are
-    identical to `solve_beam_shell`, so when ``A_skin = t·Dm`` and
-    ``D_skin = (t³/12)·Dm`` the two solvers produce numerically identical results.
+    ``A_skin`` and bending stiffness matrix ``D_skin`` instead of the isotropic
+    (E, nu, t) parameterisation.
+
+    ``A_skin`` may be (3,3) [N/m] — one matrix applied to all triangles — or
+    (M,3,3) — one per-triangle membrane stiffness matrix.  Likewise ``D_skin``
+    may be (3,3) [N·m] or (M,3,3).  Mixed shapes (one uniform, one per-tri) are
+    supported.  The beam assembly, boundary-condition elimination, linear solve,
+    and beam-force recovery are identical to `solve_beam_shell`, so when
+    ``A_skin = t·Dm`` and ``D_skin = (t³/12)·Dm`` the two solvers produce
+    numerically identical results.
 
     `shell_tris` is (M, 3) int node indices (may be empty (0,3)).  `loads` is (N, 6).
     Degenerate (collinear) shell triangles raise from `tri_element_stiffness_laminate`.
     """
+    A_skin = np.asarray(A_skin, dtype=float)
+    D_skin = np.asarray(D_skin, dtype=float)
+    a_per = A_skin.ndim == 3
+    d_per = D_skin.ndim == 3
     n_nodes = nodes.shape[0]
     ndof = 6 * n_nodes
     n_beam = beam_elements.shape[0]
@@ -173,7 +182,9 @@ def solve_beam_shell_laminate(
                       int(shell_tris[tri_idx, 2]))
         ke = tri_element_stiffness_laminate(
             nodes[n0], nodes[n1], nodes[n2],
-            A=A_skin, D=D_skin, drilling_factor=drilling_factor,
+            A=(A_skin[tri_idx] if a_per else A_skin),
+            D=(D_skin[tri_idx] if d_per else D_skin),
+            drilling_factor=drilling_factor,
         )
         dofs = np.r_[6 * n0:6 * n0 + 6, 6 * n1:6 * n1 + 6, 6 * n2:6 * n2 + 6]
         for a_ in range(18):

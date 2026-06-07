@@ -67,3 +67,22 @@ def test_laminate_solver_reduces_to_isotropic():
     lam = solve_beam_shell_laminate(nodes, beam_elems, secs, tris, E_beam=E, G_beam=E / 2.6,
                                     A_skin=A, D_skin=D, fixed_nodes=fixed, loads=loads)
     assert np.allclose(iso.displacements, lam.displacements, rtol=1e-9, atol=1e-12)
+
+
+def test_laminate_solver_accepts_per_triangle_stiffness():
+    nodes = np.array([[0, 0, 0], [1, 0, 0], [0, 0.2, 0], [1, 0.2, 0]], dtype=float)
+    beam_elems = np.array([[0, 1], [2, 3]], dtype=int)
+    secs = [BeamSection.circular(0.01)] * 2
+    loads = np.zeros((4, 6)); loads[1, 2] = 100.0; loads[3, 2] = 100.0
+    fixed = np.array([0, 2])
+    tris = np.array([[0, 1, 3], [0, 3, 2]], dtype=int)
+    E, nu, t = 70e9, 0.3, 0.003
+    Dm = (E / (1 - nu**2)) * np.array([[1, nu, 0.0], [nu, 1, 0.0], [0, 0, (1 - nu) / 2]])
+    A, D = t * Dm, (t**3 / 12.0) * Dm
+    single = solve_beam_shell_laminate(nodes, beam_elems, secs, tris, E_beam=E, G_beam=E / 2.6,
+                                       A_skin=A, D_skin=D, fixed_nodes=fixed, loads=loads)
+    A_tris = np.repeat(A[None], len(tris), axis=0)
+    D_tris = np.repeat(D[None], len(tris), axis=0)
+    multi = solve_beam_shell_laminate(nodes, beam_elems, secs, tris, E_beam=E, G_beam=E / 2.6,
+                                      A_skin=A_tris, D_skin=D_tris, fixed_nodes=fixed, loads=loads)
+    assert np.allclose(single.displacements, multi.displacements, rtol=1e-12)
