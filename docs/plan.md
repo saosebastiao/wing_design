@@ -268,8 +268,24 @@ actionable. Per-ply Tsai-Wu failure (vs laminate-average vm) and per-band layup
 would refine it further.
 
 **Deferred to later E increments:** per-spanwise-band skin thickness; MILP discrete
-stock catalog (E.3); panel-buckling eigenvalue constraints; per-ply Tsai-Wu skin
-failure.
+stock catalog (E.3); per-ply Tsai-Wu skin failure.
+
+**Buckling check done (2026-06-06).** Closed-form constraints added (optional, gated
+by `buckling_safety_factor`): beam Euler (`Pcr=π²EI/(KL)²`, element-length buckling
+since the skin restrains nodes) + skin panel plate-buckling (triangle-as-plate,
+`b=√area`, `kc=4`), in both sizers. Helpers in `structural.buckling`;
+`examples/27_buckling.py` re-sizes the CLT design with vs without (SF=1.5).
+
+**Validity finding — buckling binds, but the mass is robust (+2%).** Without buckling
+the E.4 design is 25.6 kg, twist-governed, beam-heavy (beams 14.7 / skin 10.8 @
+0.79 mm) — and is in fact **buckling-infeasible**. With buckling (SF 1.5) the optimum
+is **26.1 kg (+2%)**, now **buckling-governed** (beam & panel utilization both = 1.0,
+twist slack at 2.8°): the optimizer rebalances material **from beams into a thicker
+skin** (beams 9.7 / skin 16.4 @ 1.20 mm, layup shifts slightly toward ±45) — the
+thicker skin both resists panel buckling and laterally stabilizes the beams. So the
+~26 kg headline holds; the prior 25.6 kg was mildly optimistic. Approximations
+(triangle-as-plate panel, element-length Euler, no eigenvalue/global modes) are
+conservative-ish; eigenvalue/global buckling is the refinement if needed.
 
 ### Phase F — Frame-field-driven layout
 
@@ -358,3 +374,4 @@ src/wing_design/
 | Phase-E.1 skin coupling | Load-bearing skin assembled as DKT+CST shell panels between beam nodes into the combined `structural.solve_beam_shell`; skin replaces ring connectors. Isotropic-equivalent skin; re-sizing/MILP/buckling/CLT deferred to later E increments. |
 | Phase-E.2 co-sizing | SLSQP co-sizes per-element beam radii + a uniform skin thickness minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist constraints (skin membrane stress recovered each solve). 43.5→27.5 kg (37% lighter); structure becomes twist-governed. Per-band skin / MILP / buckling / CLT deferred. |
 | Phase-E.4 CLT skin | Anisotropic skin via CLT (symmetric-balanced laminate, smeared D); laminate (A,D) feed `tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; co-sizes beam radii + skin thickness + layup fractions (f0,f45,f90) under beam-vm, skin-vm, deflection, twist. 27.5→25.6 kg (7% lighter, valid optimum). LIMITATION: ply angles are per-triangle-local (frames ~50/50 spanwise/chordwise), so the optimal layup is not a manufacturable fibre prescription — needs a consistent ply-angle datum (E.4b). Per-ply Tsai-Wu / per-band layup / MILP / buckling deferred. |
+| Buckling check | Closed-form beam Euler (element-length) + skin panel plate-buckling (triangle-as-plate, b=√area, fixed kc) added as optional sizing constraints in both sizers (gated by `buckling_safety_factor`). Buckling binds but mass robust: 25.6→26.1 kg (+2%), governing constraint flips twist→buckling, optimizer shifts mass from beams into thicker skin. Eigenvalue/global buckling + refined panel geometry deferred. |
