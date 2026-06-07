@@ -16,6 +16,7 @@ Several FEA backends are wired in:
     (Phase E.1).
 """
 from .beam import TubeSparSizing, size_tube_spar
+from .buckling import beam_euler_utilization, panel_buckling_utilization
 from .beam_shell import solve_beam_shell, solve_beam_shell_laminate
 from .fea import FEAResult, solve_linear_elastic
 from .frame import BeamSection, FrameResult, solve_frame, von_mises_per_element
@@ -35,6 +36,8 @@ from .shell import (
 
 __all__ = [
     "BeamSection",
+    "beam_euler_utilization",
+    "panel_buckling_utilization",
     "FEAResult",
     "FrameResult",
     "ShellFEAResult",
