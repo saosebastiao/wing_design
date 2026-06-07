@@ -1,4 +1,8 @@
-"""Sample the OML cross-section into evenly arc-spaced form-beam anchor points."""
+"""Sample the OML cross-section into form-beam anchor points.
+
+Default placement is even arc-length spacing; pass ``arc_fractions`` (Phase F) for
+non-uniform, stress-weighted placement around the perimeter.
+"""
 from __future__ import annotations
 
 import numpy as np
