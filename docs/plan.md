@@ -301,6 +301,21 @@ thicker skin both resists panel buckling and laterally stabilizes the beams. So 
 (triangle-as-plate panel, element-length Euler, no eigenvalue/global modes) are
 conservative-ish; eigenvalue/global buckling is the refinement if needed.
 
+**E.3 done (2026-06-07) — MILP stock catalog (CP-SAT).** `beams.select_stock_sizes`
+discretizes the continuous beam radii to a stock catalog via a CP-SAT min-mass
+assignment with a cap of K distinct sizes (the co-linear-grouping / part-count knob);
+`examples/29_stock_catalog.py` demonstrates + FEA-verifies. Stock catalog 4–20 mm
+(2 mm steps); continuous beam mass 8.65 kg. Mass-vs-part-count Pareto (all feasible):
+K=4 → **4 sizes, 9.5 kg (+10%)**; K=2 → 2 sizes, 17.4 kg (+101%); K=8 → 4 sizes (no
+gain over K=4). **Finding — round-up alone is NOT buckling-safe:** the monotonic
+"each beam ≥ its continuous radius stays feasible" argument holds for stress,
+deflection and twist but FAILS for beam buckling — non-uniform stiffening
+redistributes compression onto the pinned r_min (4 mm) beams, pushing their Euler
+utilization to ~1.3. A greedy **bump-and-reverify repair** (raise over-utilized
+beams to the next catalog size, re-select, re-solve — 1 iteration here) restores
+feasibility. The FEA verify step is therefore essential, not optional. Full
+SLP+FEA-sensitivity MILP remains deferred.
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -390,3 +405,4 @@ src/wing_design/
 | Phase-E.4 CLT skin | Anisotropic skin via CLT (symmetric-balanced laminate, smeared D); laminate (A,D) feed `tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; co-sizes beam radii + skin thickness + layup fractions (f0,f45,f90) under beam-vm, skin-vm, deflection, twist. 27.5→25.6 kg (7% lighter, valid optimum). LIMITATION: ply angles are per-triangle-local (frames ~50/50 spanwise/chordwise), so the optimal layup is not a manufacturable fibre prescription — needs a consistent ply-angle datum (E.4b). Per-ply Tsai-Wu / per-band layup / MILP / buckling deferred. |
 | Buckling check | Closed-form beam Euler (element-length) + skin panel plate-buckling (triangle-as-plate, b=√area, fixed kc) added as optional sizing constraints in both sizers (gated by `buckling_safety_factor`). Buckling binds but mass robust: 25.6→26.1 kg (+2%), governing constraint flips twist→buckling, optimizer shifts mass from beams into thicker skin. Eigenvalue/global buckling + refined panel geometry deferred. |
 | Phase-E.4b ply datum | Ply angles measured against the span axis (per-triangle offset via `skin_datum_angles` + `laminate_stiffness_offset`; solver/recovery generalized to per-triangle stiffness). Opt-in via `LaminateSizingConfig.ply_angle_datum`. Coherent layup AND 26% lighter: 25.6→19.0 kg, optimum is 100% chordwise (90°) skin; design now uses both deflection + twist budgets. (19.0 kg is without buckling — datum+buckling is the real final combo.) |
+| Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
