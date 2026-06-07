@@ -14,6 +14,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from ..structural.beam_shell import solve_beam_shell
+from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import _triangle_local_frame, membrane_von_mises, recover_membrane_stress
 from .shell_model import BeamShellModel
@@ -28,6 +29,9 @@ class BeamShellSizingConfig:
     r_max: float = 0.04
     t_min: float = 0.0005
     t_max: float = 0.02
+    buckling_safety_factor: float | None = None  # if set, enforce beam Euler + panel buckling
+    euler_K: float = 1.0
+    panel_kc: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,8 @@ class BeamShellSizingResult:
     max_skin_vm_Pa: float
     tip_defl_m: float
     tip_twist_deg: float
+    max_beam_buckling_util: float
+    max_panel_buckling_util: float
 
 
 def beam_lengths(model: BeamShellModel) -> np.ndarray:
@@ -95,7 +101,7 @@ def size_beam_shell(
     A_skin = float(Atri.sum())
 
     x0 = np.concatenate([np.full(n, config.r_max), [config.t_max]])
-    cache: dict[bytes, tuple[np.ndarray, float, float, float]] = {}
+    cache: dict[bytes, tuple] = {}
 
     def evaluate(x):
         key = np.asarray(x, dtype=float).tobytes()
@@ -109,6 +115,8 @@ def size_beam_shell(
         worst_skin = 0.0
         max_defl = 0.0
         max_twist = 0.0
+        worst_beam_buck = 0.0
+        worst_panel_buck = 0.0
         for loads in load_arrays:
             res = solve_beam_shell(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
@@ -123,7 +131,15 @@ def size_beam_shell(
             tip = model.tip_nodes
             max_defl = max(max_defl, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
             max_twist = max(max_twist, float(np.degrees(np.abs(res.displacements[tip, 5]).max())))
-        out = (worst_beam, worst_skin, max_defl, max_twist)
+            if config.buckling_safety_factor is not None:
+                bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
+                                            K=config.euler_K, safety_factor=config.buckling_safety_factor)
+                D11 = model.E_skin * t_skin ** 3 / (12.0 * (1.0 - model.nu_skin ** 2))
+                pu = panel_buckling_utilization(skin_s, Atri, D11=D11, t=t_skin,
+                                                kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
+                worst_beam_buck = max(worst_beam_buck, float(bu.max()))
+                worst_panel_buck = max(worst_panel_buck, float(pu.max()))
+        out = (worst_beam, worst_skin, max_defl, max_twist, worst_beam_buck, worst_panel_buck)
         cache[key] = out
         return out
 
@@ -140,35 +156,44 @@ def size_beam_shell(
         return g
 
     def beam_con(x):
-        wb, _, _, _ = evaluate(x)
+        wb, _, _, _, _, _ = evaluate(x)
         return 1.0 - wb / config.sigma_allow_Pa
 
     def skin_con(x):
-        _, ws, _, _ = evaluate(x)
+        _, ws, _, _, _, _ = evaluate(x)
         return np.array([1.0 - ws / config.sigma_allow_Pa])
 
     def defl_con(x):
-        _, _, d, _ = evaluate(x)
+        _, _, d, _, _, _ = evaluate(x)
         return np.array([1.0 - d / config.tip_defl_max_m])
 
     def twist_con(x):
-        _, _, _, t = evaluate(x)
-        return np.array([1.0 - t / config.tip_twist_max_deg])
+        _, _, _, tw, _, _ = evaluate(x)
+        return np.array([1.0 - tw / config.tip_twist_max_deg])
 
     bounds = [(config.r_min, config.r_max)] * n + [(config.t_min, config.t_max)]
+    constraints = [
+        {"type": "ineq", "fun": beam_con},
+        {"type": "ineq", "fun": skin_con},
+        {"type": "ineq", "fun": defl_con},
+        {"type": "ineq", "fun": twist_con},
+    ]
+    if config.buckling_safety_factor is not None:
+        def beam_buck_con(x):
+            *_, bbu, _ = evaluate(x)
+            return np.array([1.0 - bbu])
+        def panel_buck_con(x):
+            *_, pbu = evaluate(x)
+            return np.array([1.0 - pbu])
+        constraints += [{"type": "ineq", "fun": beam_buck_con}, {"type": "ineq", "fun": panel_buck_con}]
     res = minimize(
         mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
-        constraints=[
-            {"type": "ineq", "fun": beam_con},
-            {"type": "ineq", "fun": skin_con},
-            {"type": "ineq", "fun": defl_con},
-            {"type": "ineq", "fun": twist_con},
-        ],
+        constraints=constraints,
         options={"maxiter": maxiter, "ftol": ftol},
     )
 
     x = np.clip(res.x, [b[0] for b in bounds], [b[1] for b in bounds])
-    wb, ws, d, t = evaluate(x)
+    wb, ws, d, tw, bbu, pbu = evaluate(x)
     radii = x[:n]
     t_skin = float(x[n])
     bm = beam_mass(model, radii, rho=rho)
@@ -177,5 +202,7 @@ def size_beam_shell(
         radii=radii, t_skin=t_skin, mass_kg=bm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
         converged=bool(res.success), n_iter=int(res.nit),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
-        tip_defl_m=float(d), tip_twist_deg=float(t),
+        tip_defl_m=float(d), tip_twist_deg=float(tw),
+        max_beam_buckling_util=float(bbu),
+        max_panel_buckling_util=float(pbu),
     )
