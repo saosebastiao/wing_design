@@ -24,6 +24,7 @@ from scipy.optimize import minimize
 
 from ..materials.unidir import UDPly, laminate_stiffness
 from ..structural.beam_shell import solve_beam_shell_laminate
+from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_stress_C
 from .shell_model import BeamShellModel
@@ -39,6 +40,9 @@ class LaminateSizingConfig:
     r_max: float = 0.04
     t_min: float = 0.0005
     t_max: float = 0.02
+    buckling_safety_factor: float | None = None  # if set, enforce beam Euler + panel buckling
+    euler_K: float = 1.0
+    panel_kc: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,8 @@ class LaminateSizingResult:
     max_skin_vm_Pa: float
     tip_defl_m: float
     tip_twist_deg: float
+    max_beam_buckling_util: float
+    max_panel_buckling_util: float
 
 
 def size_beam_shell_laminate(
@@ -73,7 +79,8 @@ def size_beam_shell_laminate(
         raise ValueError("load_arrays is empty")
     n = model.beam_elements.shape[0]
     Lb = beam_lengths(model)
-    A_skin_area = float(skin_areas(model).sum())
+    Atri = skin_areas(model)
+    A_skin_area = float(Atri.sum())
     x0 = np.concatenate([np.full(n, config.r_max), [config.t_max, 1.0 / 3.0, 1.0 / 3.0]])
     cache: dict = {}
 
@@ -93,6 +100,8 @@ def size_beam_shell_laminate(
         ws = 0.0
         md = 0.0
         mt = 0.0
+        worst_beam_buck = 0.0
+        worst_panel_buck = 0.0
         for loads in load_arrays:
             res = solve_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
@@ -105,7 +114,14 @@ def size_beam_shell_laminate(
             tip = model.tip_nodes
             md = max(md, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
             mt = max(mt, float(np.degrees(np.abs(res.displacements[tip, 5]).max())))
-        out = (wb, ws, md, mt)
+            if config.buckling_safety_factor is not None:
+                bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
+                                            K=config.euler_K, safety_factor=config.buckling_safety_factor)
+                pu = panel_buckling_utilization(skin_s, Atri, D11=float(D[0, 0]), t=t,
+                                                kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
+                worst_beam_buck = max(worst_beam_buck, float(bu.max()))
+                worst_panel_buck = max(worst_panel_buck, float(pu.max()))
+        out = (wb, ws, md, mt, worst_beam_buck, worst_panel_buck)
         cache[key] = out
         return out
 
@@ -121,19 +137,19 @@ def size_beam_shell_laminate(
         return g
 
     def beam_con(x):
-        wb, _, _, _ = evaluate(x)
+        wb, _, _, _, _, _ = evaluate(x)
         return 1.0 - wb / config.sigma_allow_Pa
 
     def skin_con(x):
-        _, ws, _, _ = evaluate(x)
+        _, ws, _, _, _, _ = evaluate(x)
         return np.array([1.0 - ws / config.sigma_allow_Pa])
 
     def defl_con(x):
-        _, _, d, _ = evaluate(x)
+        _, _, d, _, _, _ = evaluate(x)
         return np.array([1.0 - d / config.tip_defl_max_m])
 
     def twist_con(x):
-        _, _, _, t = evaluate(x)
+        _, _, _, t, _, _ = evaluate(x)
         return np.array([1.0 - t / config.tip_twist_max_deg])
 
     def frac_con(x):
@@ -143,15 +159,24 @@ def size_beam_shell_laminate(
         [(config.r_min, config.r_max)] * n
         + [(config.t_min, config.t_max), (0.0, 1.0), (0.0, 1.0)]
     )
+    constraints = [
+        {"type": "ineq", "fun": beam_con},
+        {"type": "ineq", "fun": skin_con},
+        {"type": "ineq", "fun": defl_con},
+        {"type": "ineq", "fun": twist_con},
+        {"type": "ineq", "fun": frac_con},
+    ]
+    if config.buckling_safety_factor is not None:
+        def beam_buck_con(x):
+            *_, bbu, _ = evaluate(x)
+            return np.array([1.0 - bbu])
+        def panel_buck_con(x):
+            *_, pbu = evaluate(x)
+            return np.array([1.0 - pbu])
+        constraints += [{"type": "ineq", "fun": beam_buck_con}, {"type": "ineq", "fun": panel_buck_con}]
     res = minimize(
         mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
-        constraints=[
-            {"type": "ineq", "fun": beam_con},
-            {"type": "ineq", "fun": skin_con},
-            {"type": "ineq", "fun": defl_con},
-            {"type": "ineq", "fun": twist_con},
-            {"type": "ineq", "fun": frac_con},
-        ],
+        constraints=constraints,
         options={"maxiter": maxiter, "ftol": ftol},
     )
 
@@ -165,7 +190,7 @@ def size_beam_shell_laminate(
     if s > 1.0:
         x[n + 1] /= s
         x[n + 2] /= s
-    wb, ws, d, t = evaluate(x)
+    wb, ws, d, t, bbu, pbu = evaluate(x)
     radii = x[:n]
     t_skin = float(x[n])
     f0 = float(x[n + 1])
@@ -179,4 +204,6 @@ def size_beam_shell_laminate(
         converged=bool(res.success), n_iter=int(res.nit),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
         tip_defl_m=float(d), tip_twist_deg=float(t),
+        max_beam_buckling_util=float(bbu),
+        max_panel_buckling_util=float(pbu),
     )
