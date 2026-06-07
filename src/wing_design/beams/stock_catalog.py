@@ -1,11 +1,14 @@
 """Discretize continuous beam radii onto a manufacturable stock catalog (CP-SAT).
 
-Rounding a radius UP from the continuous (feasible) optimum preserves feasibility --
-stress and Euler-buckling utilization fall, deflection/twist improve -- so each
-element just needs a stock size >= its continuous radius. `select_stock_sizes` then
-picks <= K distinct catalog sizes and assigns one (>= req) to each element to minimize
-total beam mass (the co-linear-grouping / part-count trade). Verify the chosen
-discrete design with a real FEA solve (see examples/29).
+`select_stock_sizes` picks <= K distinct catalog sizes and assigns one (>= the
+continuous radius) to each element, minimizing total beam mass (the co-linear-grouping
+/ part-count trade). Rounding each element's radius UP improves it *in isolation* for
+stress, deflection and twist (axial/bending stress and the deflection/twist response
+all fall with radius). IMPORTANT: this per-element monotonicity does NOT hold for beam
+buckling once load redistribution is considered — non-uniform stiffening shifts
+compression onto beams pinned at the minimum radius, raising their Euler utilization.
+So the chosen discrete design MUST be FEA-verified, and buckling violations repaired by
+bumping the over-utilized beams up the catalog and re-verifying (see examples/29).
 """
 from __future__ import annotations
 
@@ -36,6 +39,8 @@ def select_stock_sizes(
     Each element e gets a stock radius >= req_radii[e]; at most `max_distinct_sizes`
     distinct catalog radii are used; total mass `rho * sum(pi r^2 L)` is minimized.
     Raises ValueError if the catalog's largest radius cannot cover the largest required.
+    `mass_scale` converts the float mass objective to CP-SAT integers (raise it if
+    element lengths/radii are so small the scaled costs lose resolution).
     """
     req = np.asarray(req_radii, dtype=float)
     L = np.asarray(lengths, dtype=float)
