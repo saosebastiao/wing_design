@@ -1,14 +1,19 @@
-"""Phase-2 sanity check: sweep the load case envelope and print totals + spanwise profile."""
+"""Sweep the aero load-case envelope for the medium (22 m) wingsail and print per-case totals.
+
+Runs the LiftingLine solver over all DESIGN_CASES and reports CL, CD,
+factored normal force, and root bending moment, then prints the spanwise
+elliptic load profile for the governing case.
+"""
 from __future__ import annotations
 
 import numpy as np
 
 from wing_design.aero import DESIGN_CASES, build_airplane, sweep_envelope
-from wing_design.geometry import WingSpec
+from wing_design.geometry import medium_wingsail
 
 
 def main() -> None:
-    spec = WingSpec()
+    spec = medium_wingsail
     airplane = build_airplane(spec)
     results = sweep_envelope(airplane, DESIGN_CASES)
 

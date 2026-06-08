@@ -1,13 +1,13 @@
-"""Print the project's current design scenario.
+"""Print every parameter in the medium (22 m) wingsail design scenario.
 
 `wing_design.scenario.DesignParameters` is the single source of truth
 for every parameter the Phase 4-5 pipeline consumes — geometry, material
 model, mesh resolution, aero solver, frame-field parametrization, and
-skin thickness. `default_scenario()` returns the working scenario
-(the 5 m demo wingsail today); every other example does:
+skin thickness. `medium_scenario()` returns the working 22 m wingsail
+scenario; every other example does:
 
-    from wing_design import default_scenario
-    P = default_scenario()
+    from wing_design import medium_scenario
+    P = medium_scenario()
     ...
     spec = P.geometry
     mesh = tet_mesh_wing(spec, target_element_size=P.mesh.target_element_size_m)
@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import dataclasses
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     print("=" * 70)
     print("  wing_design — current scenario")
     print("=" * 70)
@@ -79,10 +79,10 @@ def main() -> None:
     print("To override a parameter for one example without changing the project")
     print("default, use `dataclasses.replace`:")
     print()
-    print("    from wing_design import default_scenario")
+    print("    from wing_design import medium_scenario")
     print("    import dataclasses")
-    print("    P = dataclasses.replace(default_scenario(),")
-    print("                            mesh=dataclasses.replace(default_scenario().mesh,")
+    print("    P = dataclasses.replace(medium_scenario(),")
+    print("                            mesh=dataclasses.replace(medium_scenario().mesh,")
     print("                                                     target_element_size_m=0.03))")
 
 

@@ -1,14 +1,19 @@
-"""Phase-3 baseline: size the tapered CFRP tube spar against the full load envelope."""
+"""Size the tapered CFRP rotation-spar tube for the medium (22 m) wingsail against the full load envelope.
+
+Runs the LL aero envelope then calls structural.size_tube_spar to find the
+minimum-mass tapered hollow-tube spar that satisfies axial stress and tip
+deflection limits under all DESIGN_CASES, and prints mass + critical dimensions.
+"""
 from __future__ import annotations
 
 from wing_design.aero import DESIGN_CASES, build_airplane, sweep_envelope
-from wing_design.geometry import WingSpec
+from wing_design.geometry import medium_wingsail
 from wing_design.materials import T700_EPOXY
 from wing_design.structural import size_tube_spar
 
 
 def main() -> None:
-    spec = WingSpec()
+    spec = medium_wingsail
     airplane = build_airplane(spec)
     envelope = sweep_envelope(airplane, DESIGN_CASES)
     sizing = size_tube_spar(spec, envelope, material=T700_EPOXY)

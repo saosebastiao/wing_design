@@ -1,4 +1,4 @@
-"""Phase 5e: trace stress lines on the OML shell.
+"""Trace principal-stress streamlines on the medium (22 m) wingsail OML shell to identify spar-cap centerlines.
 
 Runs Phase 4b (shell FEA) → seeds high-σ_VM triangles → traces both
 families' principal-direction streamlines forward and backward → exports
@@ -27,7 +27,7 @@ from pathlib import Path
 import meshio
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, run_case_lifting_line
 from wing_design.structural import (
     shell_mesh_from_tet_mesh,
@@ -61,7 +61,7 @@ def project_panel_forces_to_shell_tris(panels, shell_mesh, *, safety_factor):
 def main() -> None:
     out_dir = Path(__file__).resolve().parent.parent / "exports"
     out_dir.mkdir(exist_ok=True)
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     SKIN_THICKNESS_M = P.skin_sizing.t_baseline_m
 

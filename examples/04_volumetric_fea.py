@@ -1,4 +1,4 @@
-"""Phase-4 spike: volumetric FEA of the wingsail under the LL load envelope.
+"""Phase-4 spike: volumetric FEA of the medium (22 m) wingsail under the LL load envelope.
 
 Runs the full pipeline: build wing OML → tet-mesh in gmsh → LL aero envelope →
 project per-panel loads to OML facets → linear elastic FEA per case → export
@@ -14,7 +14,7 @@ from pathlib import Path
 import meshio
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.structural import (
     project_panels_to_oml_tris,
@@ -24,7 +24,7 @@ from wing_design.structural import (
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     out_dir = Path(__file__).resolve().parent.parent / "exports"
     out_dir.mkdir(exist_ok=True)

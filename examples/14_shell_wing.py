@@ -1,4 +1,4 @@
-"""Phase-4 architectural refactor: wing as a thin shell (no internal frame yet).
+"""Run DKT+CST shell FEA on the medium (22 m) wingsail OML skin and export stress + principal directions.
 
 Replaces the volumetric tet FEA with a DKT+CST shell on the OML surface.
 The σ field is now 2-D **on the wing skin** instead of 3-D inside a solid
@@ -28,7 +28,7 @@ from pathlib import Path
 import meshio
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, run_case_lifting_line
 from wing_design.structural import (
     shell_mesh_from_tet_mesh,
@@ -79,7 +79,7 @@ def _tri_areas(shell):
 def main() -> None:
     out_dir = Path(__file__).resolve().parent.parent / "exports"
     out_dir.mkdir(exist_ok=True)
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     SKIN_THICKNESS_M = P.skin_sizing.t_baseline_m
 

@@ -1,4 +1,4 @@
-"""Phase-5b spike: SO(3) sign-aligned frame field + Poisson parametrization.
+"""Phase-5b spike: SO(3) sign-aligned frame field + Poisson parametrization on the medium (22 m) wingsail.
 
 Compares against the Phase-5a output side-by-side on the survival case:
   1. Build mesh + LL + FEA → nodal σ(x) and raw principal frame.
@@ -22,7 +22,7 @@ from pathlib import Path
 import meshio
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, run_case_lifting_line
 from wing_design.aero.loads import AeroResult
 from wing_design.structural import (
@@ -56,7 +56,7 @@ def _solve(mesh, case_result: AeroResult, E: float, nu: float) -> FEAResult:
 def main() -> None:
     out_dir = Path(__file__).resolve().parent.parent / "exports"
     out_dir.mkdir(exist_ok=True)
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
 
     print("Meshing wing OML...")

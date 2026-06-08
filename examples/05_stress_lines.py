@@ -1,4 +1,4 @@
-"""Phase-5a spike: stress-line tracing for the full load envelope.
+"""Phase-5a spike: trace volumetric stress lines through the medium (22 m) wingsail for the full load envelope.
 
 For each loaded design case we:
   1. Run LiftingLine + project loads to OML facets.
@@ -22,7 +22,7 @@ from pathlib import Path
 import meshio
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, run_case_lifting_line
 from wing_design.aero.loads import AeroResult
 from wing_design.structural import (
@@ -64,7 +64,7 @@ def _segment_sigma_along(polyline: np.ndarray, integrator: StreamlineIntegrator,
 def main() -> None:
     out_dir = Path(__file__).resolve().parent.parent / "exports"
     out_dir.mkdir(exist_ok=True)
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
 
     print("Meshing wing OML...")
