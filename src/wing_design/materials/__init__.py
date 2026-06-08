@@ -10,6 +10,7 @@ from .unidir import (
 )
 from .failure import (
     laminate_min_strength_ratio,
+    laminate_min_strength_ratio_batch,
     ply_strength_ratio,
     tsai_wu_coefficients,
     tsai_wu_index,
@@ -29,4 +30,5 @@ __all__ = [
     "tsai_wu_strength_ratio",
     "ply_strength_ratio",
     "laminate_min_strength_ratio",
+    "laminate_min_strength_ratio_batch",
 ]
