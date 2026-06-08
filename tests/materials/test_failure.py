@@ -93,3 +93,22 @@ def test_batch_handles_zero_and_shear_rows():
     batch = laminate_min_strength_ratio_batch(PLY, eps, f0=1.0, f45=0.0, f90=0.0, offset_deg=np.zeros(2))
     assert batch[0] >= 1.0e8
     assert np.isfinite(batch[1]) and batch[1] > 0
+
+
+def test_batch_array_fractions_match_per_element():
+    rng = np.random.default_rng(7)
+    M = 16
+    eps = rng.normal(scale=1e-3, size=(M, 3))
+    offs = rng.uniform(-90.0, 90.0, size=M)
+    f0 = rng.uniform(0.1, 0.6, size=M)
+    f45 = rng.uniform(0.1, 0.6, size=M) * (1.0 - f0)
+    f90 = 1.0 - f0 - f45
+    from wing_design.materials.failure import laminate_min_strength_ratio_batch, laminate_min_strength_ratio
+    batch = laminate_min_strength_ratio_batch(PLY, eps, f0=f0, f45=f45, f90=f90, offset_deg=offs)
+    per = np.array([
+        laminate_min_strength_ratio(PLY, eps[i], f0=float(f0[i]), f45=float(f45[i]), f90=float(f90[i]),
+                                    offset_deg=float(offs[i]))
+        for i in range(M)
+    ])
+    assert batch.shape == (M,)
+    assert np.allclose(batch, per, rtol=1e-9, atol=0.0)

@@ -90,37 +90,33 @@ def _strength_ratio_array(s1, s2, t12, coeffs) -> np.ndarray:
 
 
 def laminate_min_strength_ratio_batch(
-    ply: UDPly, eps_local, *, f0: float, f45: float, f90: float, offset_deg,
+    ply: UDPly, eps_local, *, f0, f45, f90, offset_deg,
 ) -> np.ndarray:
     """(M,) min Tsai-Wu strength ratio per triangle over the present ply orientations.
 
-    ``eps_local`` is (M,3) element-local engineering strain; ``offset_deg`` is (M,) (or a
-    scalar, broadcast). Vectorized equivalent of ``laminate_min_strength_ratio`` per row.
+    ``eps_local`` is (M,3) element-local engineering strain. ``offset_deg`` and the
+    fractions ``f0/f45/f90`` may each be a scalar (broadcast) or a length-M array (the
+    per-band-layup case). Each of the 0/+45/-45/90 orientations is gated element-wise by
+    its fraction (>1e-9 to count as present); the min is over present orientations.
+    Vectorized equivalent of ``laminate_min_strength_ratio`` per row.
     """
     eps = np.asarray(eps_local, dtype=float)
     if eps.ndim != 2 or eps.shape[1] != 3:
         raise ValueError(f"eps_local must be (M,3), got {eps.shape}")
     M = eps.shape[0]
     off = np.broadcast_to(np.asarray(offset_deg, dtype=float), (M,))
+    f0a = np.broadcast_to(np.asarray(f0, dtype=float), (M,))
+    f45a = np.broadcast_to(np.asarray(f45, dtype=float), (M,))
+    f90a = np.broadcast_to(np.asarray(f90, dtype=float), (M,))
     ex, ey, gxy = eps[:, 0], eps[:, 1], eps[:, 2]
     Q = reduced_stiffness_Q(ply)
     Q11, Q12, Q22, Q66 = Q[0, 0], Q[0, 1], Q[1, 1], Q[2, 2]
     coeffs = tsai_wu_coefficients(ply)
-
     eps_tol = 1.0e-9
-    bases: list[float] = []
-    if f0 > eps_tol:
-        bases.append(0.0)
-    if f45 > eps_tol:
-        bases.append(45.0)
-        bases.append(-45.0)
-    if f90 > eps_tol:
-        bases.append(90.0)
-    if not bases:
-        return np.full(M, _SAFE_R)
 
-    ratios = np.empty((len(bases), M))
-    for k, base in enumerate(bases):
+    orientations = ((0.0, f0a), (45.0, f45a), (-45.0, f45a), (90.0, f90a))
+    ratios = np.full((len(orientations), M), _SAFE_R)
+    for k, (base, frac) in enumerate(orientations):
         th = np.radians(base + off)
         c, s = np.cos(th), np.sin(th)
         e1 = ex * c * c + ey * s * s + gxy * s * c
@@ -129,7 +125,8 @@ def laminate_min_strength_ratio_batch(
         s1 = Q11 * e1 + Q12 * e2
         s2 = Q12 * e1 + Q22 * e2
         t12 = Q66 * g12
-        ratios[k] = _strength_ratio_array(s1, s2, t12, coeffs)
+        r = _strength_ratio_array(s1, s2, t12, coeffs)
+        ratios[k] = np.where(frac > eps_tol, r, _SAFE_R)
     return ratios.min(axis=0)
 
 
