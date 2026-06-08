@@ -1,10 +1,11 @@
 """Centralized design parameters for the wingsail project.
 
 Every parameter the project uses lives in `DesignParameters`. Examples
-construct one instance (via `default_scenario()` for the current 5 m demo
-wingsail) and pass field values into each module — no more hardcoded
-constants scattered across `examples/*.py`. To change the working scenario,
-edit `default_scenario()` here; every example picks up the change.
+construct one instance (via `small_scenario()`/`medium_scenario()`/
+`large_scenario()` for the demo wingsails) and pass field values into each
+module — no more hardcoded constants scattered across `examples/*.py`. To
+change a working scenario, edit the relevant builder here; every example
+picks up the change.
 
 This file is scoped to **Phase 4-5 only** (structural FEA + principal-
 direction extraction): the geometry, materials, mesh, aero solver, and
@@ -17,7 +18,7 @@ to derive a modified scenario without touching the original.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .aero.cases import DESIGN_CASES, LoadCase
 from .geometry.wing import WingSpec
@@ -39,35 +40,35 @@ class MaterialParameters:
     Poisson + safety-factor parameters that turn the UD ply into the
     isotropic-equivalent (E, ν, σ_allow) the Phase-4 FEA actually uses.
     """
-    skin_E_knockdown: float = 0.5
-    nu_isotropic: float = 0.32
-    sigma_allow_safety_factor: float = 2.0
+    skin_E_knockdown: float
+    nu_isotropic: float
+    sigma_allow_safety_factor: float
 
 
 @dataclass(frozen=True)
 class MeshParameters:
     """gmsh tet-mesh + shell-extraction resolution."""
-    target_element_size_m: float = 0.05
+    target_element_size_m: float
 
 
 @dataclass(frozen=True)
 class AeroParameters:
     """LiftingLine + AeroBuildup solver knobs."""
-    spanwise_resolution: int = 16
+    spanwise_resolution: int
 
 
 @dataclass(frozen=True)
 class Phase5FrameFieldParameters:
     """Phase 5a-5b: principal-frame parametrization on the volumetric tet σ field."""
-    n_levels: int = 24
-    sigma_floor_fraction: float = 0.05
-    sigma_augment_fraction: float = 1.0    # Phase 5d spar augmentation hack — obsolete with shell
+    n_levels: int
+    sigma_floor_fraction: float
+    sigma_augment_fraction: float    # Phase 5d spar augmentation hack — obsolete with shell
 
 
 @dataclass(frozen=True)
 class SkinParameters:
     """Skin shell thickness used by the Phase 4b shell FEA."""
-    t_baseline_m: float = 0.003
+    t_baseline_m: float
 
 
 # ---------------------------------------------------------------------------
@@ -80,19 +81,19 @@ class DesignParameters:
     """Single source of truth for one wingsail design scenario.
 
     Pass an instance into the pipeline and it propagates through every
-    phase. Use `default_scenario()` to get the project's current working
-    scenario (5 m demo wingsail); use `dataclasses.replace(params, …)`
-    to derive variants without mutating it.
+    phase. Use `small_scenario()`/`medium_scenario()`/`large_scenario()` to
+    get a working scenario; use `dataclasses.replace(params, …)` to derive
+    variants without mutating it.
     """
 
-    geometry: WingSpec = field(default_factory=WingSpec)
-    material: UDPly = T700_EPOXY
-    material_iso: MaterialParameters = field(default_factory=MaterialParameters)
-    load_cases: tuple[LoadCase, ...] = DESIGN_CASES
-    mesh: MeshParameters = field(default_factory=MeshParameters)
-    aero: AeroParameters = field(default_factory=AeroParameters)
-    frame_field: Phase5FrameFieldParameters = field(default_factory=Phase5FrameFieldParameters)
-    skin_sizing: SkinParameters = field(default_factory=SkinParameters)
+    geometry: WingSpec
+    material: UDPly
+    material_iso: MaterialParameters
+    load_cases: tuple[LoadCase, ...]
+    mesh: MeshParameters
+    aero: AeroParameters
+    frame_field: Phase5FrameFieldParameters
+    skin_sizing: SkinParameters
 
     # Convenience properties derived from material + scaling factors
 
@@ -167,21 +168,3 @@ def medium_scenario() -> DesignParameters:
 def large_scenario() -> DesignParameters:
     """45 m wingsail scenario."""
     return _scenario(large_wingsail)
-
-
-# ---------------------------------------------------------------------------
-# Default scenario
-# ---------------------------------------------------------------------------
-
-
-def default_scenario() -> DesignParameters:
-    """Return the project's working scenario — the 5 m demo wingsail.
-
-    Equivalent to `DesignParameters()` today, but kept as an explicit
-    function so future scenarios (FPV drone wing, 100 m turbine blade)
-    can be added as siblings:
-
-        def fpv_drone_scenario() -> DesignParameters: ...
-        def turbine_blade_scenario() -> DesignParameters: ...
-    """
-    return DesignParameters()

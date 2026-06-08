@@ -4,18 +4,18 @@ See docs/plan.md for the phased development plan and docs/glossary.md
 for terminology.
 
 The single source of truth for design parameters is
-`wing_design.scenario.DesignParameters` — use `default_scenario()` to
+`wing_design.scenario.DesignParameters` — use `small_scenario()` to
 load the 5 m demonstration wingsail scenario.
 """
 from __future__ import annotations
 
 from .scenario import (
-    DesignParameters, default_scenario,
+    DesignParameters,
     small_scenario, medium_scenario, large_scenario,
 )
 from .viz import show_in_viewer
 
-__all__ = ["DesignParameters", "default_scenario", "show_in_viewer",
+__all__ = ["DesignParameters", "show_in_viewer",
            "small_scenario", "medium_scenario", "large_scenario"]
 
 

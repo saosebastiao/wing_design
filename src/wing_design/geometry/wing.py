@@ -36,26 +36,26 @@ from .airfoil import naca_00xx_coords
 
 @dataclass(frozen=True)
 class WingSpec:
-    span: float = 5.0                  # m, root (z=0) to tip
-    root_chord: float = 1.0            # m
-    tip_chord: float = 0.6             # m
-    thickness: float = 0.18            # NACA00xx t/c
-    pivot_frac: float = 0.25           # x/c of the rotation axis at every station
-    spar_length: float = 0.75          # m, cylindrical portion below the fairing
-    transition_length: float = 0.20    # m, height of airfoil->circle fairing below root
-    n_transition_sections: int = 4     # interior morph sections in the fairing
-    n_sections: int = 5                # spanwise airfoil sections (root..tip inclusive)
-    n_airfoil_points: int = 160        # polyline resolution on the airfoil
+    span: float                  # m, root (z=0) to tip
+    root_chord: float            # m
+    tip_chord: float             # m
+    thickness: float             # NACA00xx t/c
+    pivot_frac: float            # x/c of the rotation axis at every station
+    spar_length: float           # m, cylindrical portion below the fairing
+    transition_length: float     # m, height of airfoil->circle fairing below root
+    n_transition_sections: int   # interior morph sections in the fairing
+    n_sections: int              # spanwise airfoil sections (root..tip inclusive)
+    n_airfoil_points: int        # polyline resolution on the airfoil
 
     # Piecewise-linear taper profile: tuple of (z_frac, chord_frac) knots, both
     # monotonically increasing in z_frac. `chord_frac = chord(z) / root_chord`.
     # The first knot must be (0.0, 1.0); the last knot's z_frac must be 1.0
-    # and its chord_frac defines the tip. Default `None` means use the legacy
+    # and its chord_frac defines the tip. `None` means use the legacy
     # linear interpolation between `root_chord` and `tip_chord`.
     #
     # Example — entasis (gentle inboard, sharp outboard):
     #   taper_profile = ((0.0, 1.0), (0.8, 0.9), (1.0, 0.6))
-    taper_profile: tuple[tuple[float, float], ...] | None = None
+    taper_profile: tuple[tuple[float, float], ...] | None
 
     @property
     def spar_radius(self) -> float:
@@ -215,7 +215,7 @@ def oml_section_polyline(spec: WingSpec, z: float, n_pts: int | None = None) -> 
     )
 
 
-def build_wing_solid(spec: WingSpec = WingSpec()):
+def build_wing_solid(spec: WingSpec):
     """Loft the wing + fairing + cylindrical spar as a single solid.
 
     Sections are added top (tip) to bottom (spar base) so the loft proceeds in

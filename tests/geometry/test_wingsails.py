@@ -38,3 +38,8 @@ def test_small_matches_legacy_default():
 def test_are_wingspec_instances():
     for w in (small_wingsail, medium_wingsail, large_wingsail):
         assert isinstance(w, WingSpec)
+
+
+def test_wingspec_has_no_defaults():
+    with pytest.raises(TypeError):
+        WingSpec()

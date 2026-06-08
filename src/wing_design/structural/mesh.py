@@ -46,7 +46,7 @@ class TetMesh:
 
 
 def tet_mesh_wing(
-    spec: WingSpec = WingSpec(),
+    spec: WingSpec,
     *,
     target_element_size: float | None = None,
     min_element_size: float | None = None,
