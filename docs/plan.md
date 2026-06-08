@@ -342,6 +342,24 @@ ballooned to ~21 kg under the buckling constraint). The real layout levers are t
 **second diagonal beam family (F.2)** and skin tailoring, not longitudinal re-spacing.
 One-shot (not iterated); per-z-uniform arc_fractions.
 
+### Investigations
+
+**Hard tip coupling / gusset (2026-06-07).** Modeled a rigid tip joint (a clamp all
+beams seat into) as a clique of stiff connector beams tying the tip nodes
+(`beams.solve_beam_shell_tip_coupled`, reuses `solve_beam_shell`; tunable
+`gusset_radius`), to measure beam-to-beam stress transfer at the tip.
+`examples/31_tip_coupling.py` (uniform r=20 mm design, sweep gusset stiffness):
+skin-only → near-rigid gusset gives **peak beam σ −1%, σ-spread 3.75→3.38, tip
+deflection −14%, tip twist 0.197°→0.004° (~47× lower)**, saturating at a small gusset
+(20 mm ≈ rigid). **Finding:** a hard tip joint barely redistributes *beam* stress —
+the load-bearing skin already shares spanwise load between beams — but it is a powerful
+**torsional** restraint, near-eliminating tip section rotation. Since the sized design
+is twist-governed, a tip gusset is a candidate to relax that binding constraint and
+lighten the design (re-size-with-gusset is the natural follow-up). (Earlier attempt
+used ad-hoc Z penalty springs to pass a tip-Z-spread test; a probe showed the skin
+already makes tip-Z-spread ~0, so that test was meaningless — replaced with the clean
+model + this honest measurement.)
+
 ### Phase G — Filament-winding path planner
 
 - `wing_design.manufacturing.winding` — continuous winding passes forming the
@@ -421,3 +439,4 @@ src/wing_design/
 | Phase-E.4b ply datum | Ply angles measured against the span axis (per-triangle offset via `skin_datum_angles` + `laminate_stiffness_offset`; solver/recovery generalized to per-triangle stiffness). Opt-in via `LaminateSizingConfig.ply_angle_datum`. Coherent layup AND 26% lighter: 25.6→19.0 kg, optimum is 100% chordwise (90°) skin; design now uses both deflection + twist budgets. (19.0 kg is without buckling — datum+buckling is the real final combo.) |
 | Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
 | Phase-F.1 non-uniform spacing | Beams placed at equal-cumulative-skin-stress arc positions (`stress_weighted_targets` from `cross_section_stress_weights`); `arc_fractions` threaded through cross_section/splines/shell_model (default even, backward-compatible). One-shot; 2nd diagonal family deferred (F.2). Result: only ~1% lighter (skin stress mildly concentrated 1.8×, design is skin/buckling-dominated so beam re-spacing has low leverage) — the layout lever is F.2 / skin tailoring, not re-spacing. |
+| Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
