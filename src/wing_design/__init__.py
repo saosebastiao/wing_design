@@ -9,10 +9,14 @@ load the 5 m demonstration wingsail scenario.
 """
 from __future__ import annotations
 
-from .scenario import DesignParameters, default_scenario
+from .scenario import (
+    DesignParameters, default_scenario,
+    small_scenario, medium_scenario, large_scenario,
+)
 from .viz import show_in_viewer
 
-__all__ = ["DesignParameters", "default_scenario", "show_in_viewer"]
+__all__ = ["DesignParameters", "default_scenario", "show_in_viewer",
+           "small_scenario", "medium_scenario", "large_scenario"]
 
 
 def main() -> None:

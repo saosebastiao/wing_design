@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from .aero.cases import DESIGN_CASES, LoadCase
 from .geometry.wing import WingSpec
+from .geometry.wingsails import small_wingsail, medium_wingsail, large_wingsail
 from .materials.unidir import T700_EPOXY, UDPly
 
 
@@ -120,6 +121,52 @@ class DesignParameters:
     @property
     def rho_kgm3(self) -> float:
         return self.material.rho_kgm3
+
+
+# ---------------------------------------------------------------------------
+# Default scenario
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Named shared parameter sets (resolution / material knobs, size-independent)
+# ---------------------------------------------------------------------------
+
+STANDARD_MATERIAL_ISO = MaterialParameters(
+    skin_E_knockdown=0.5, nu_isotropic=0.32, sigma_allow_safety_factor=2.0)
+STANDARD_MESH = MeshParameters(target_element_size_m=0.05)
+STANDARD_AERO = AeroParameters(spanwise_resolution=16)
+STANDARD_FRAME_FIELD = Phase5FrameFieldParameters(
+    n_levels=24, sigma_floor_fraction=0.05, sigma_augment_fraction=1.0)
+STANDARD_SKIN = SkinParameters(t_baseline_m=0.003)
+
+
+def _scenario(geometry: WingSpec) -> DesignParameters:
+    return DesignParameters(
+        geometry=geometry,
+        material=T700_EPOXY,
+        material_iso=STANDARD_MATERIAL_ISO,
+        load_cases=DESIGN_CASES,
+        mesh=STANDARD_MESH,
+        aero=STANDARD_AERO,
+        frame_field=STANDARD_FRAME_FIELD,
+        skin_sizing=STANDARD_SKIN,
+    )
+
+
+def small_scenario() -> DesignParameters:
+    """Project working scenario at the 5 m demo wingsail (used by the test suite)."""
+    return _scenario(small_wingsail)
+
+
+def medium_scenario() -> DesignParameters:
+    """22 m wingsail scenario (used by the examples)."""
+    return _scenario(medium_wingsail)
+
+
+def large_scenario() -> DesignParameters:
+    """45 m wingsail scenario."""
+    return _scenario(large_wingsail)
 
 
 # ---------------------------------------------------------------------------
