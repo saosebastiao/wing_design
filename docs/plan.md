@@ -316,6 +316,23 @@ beams to the next catalog size, re-select, re-solve — 1 iteration here) restor
 feasibility. The FEA verify step is therefore essential, not optional. Full
 SLP+FEA-sensitivity MILP remains deferred.
 
+**Combined final design done (2026-06-07) — span-datum CLT skin + buckling together.**
+Earlier increments measured the two refinements separately (E.4b: 19.0 kg with a
+coherent span-datum layup but WITHOUT buckling; the buckling study: ~26.1 kg on the
+*isotropic* skin). `examples/32_final_design.py` co-sizes BOTH at once — a
+manufacturable span-datum CLT layup under beam-stress, skin-stress, tip-deflection,
+tip-twist AND closed-form buckling (Euler + panel, SF 1.5). Result: **30.15 kg**
+(beams 9.38 / skin 20.77 @ **1.52 mm**), **buckling-governed** (beam & panel
+utilization both = 1.0), twist slack (1.30°/5°), deflection slack (28.8/100 mm),
+layup 31% spanwise / 15% ±45 / 54% chordwise. This is *heavier* than either partial
+number because the two constraints compound: buckling forces a thick skin (skin = 2/3
+of mass) and a single coherent global datum layup is less free than per-triangle-local
+angles — manufacturability and buckling each cost real mass. **This 30.15 kg is the
+defensible, fully-constrained, manufacturable headline for the shell-beam wingsail.**
+Caveat: SLSQP is a local optimum (per-tri-local + buckling reached 26.06 kg), so a
+better basin may exist; a global/multi-start pass is the refinement if mass is
+critical.
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -439,4 +456,5 @@ src/wing_design/
 | Phase-E.4b ply datum | Ply angles measured against the span axis (per-triangle offset via `skin_datum_angles` + `laminate_stiffness_offset`; solver/recovery generalized to per-triangle stiffness). Opt-in via `LaminateSizingConfig.ply_angle_datum`. Coherent layup AND 26% lighter: 25.6→19.0 kg, optimum is 100% chordwise (90°) skin; design now uses both deflection + twist budgets. (19.0 kg is without buckling — datum+buckling is the real final combo.) |
 | Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
 | Phase-F.1 non-uniform spacing | Beams placed at equal-cumulative-skin-stress arc positions (`stress_weighted_targets` from `cross_section_stress_weights`); `arc_fractions` threaded through cross_section/splines/shell_model (default even, backward-compatible). One-shot; 2nd diagonal family deferred (F.2). Result: only ~1% lighter (skin stress mildly concentrated 1.8×, design is skin/buckling-dominated so beam re-spacing has low leverage) — the layout lever is F.2 / skin tailoring, not re-spacing. |
+| Combined final design | Span-datum CLT layup co-sized WITH buckling (`examples/32_final_design.py`) — both refinements together, not separately. 30.15 kg (beams 9.38 / skin 20.77 @ 1.52 mm), buckling-governed (beam & panel util = 1.0), twist/defl slack, layup 31/15/54% span/±45/chord. Heavier than the partial numbers (E.4b 19.0 no-buckling; isotropic+buckling 26.1) because manufacturable-datum + buckling compound. **This is the defensible fully-constrained headline.** SLSQP local optimum (per-tri-local+buckling hit 26.06) → multi-start is the refinement if mass-critical. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
