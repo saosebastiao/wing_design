@@ -47,3 +47,22 @@ def test_band_areas_sum_to_total():
     ba = skin_band_areas(m, bm, 3)
     assert ba.shape == (3,)
     assert np.isclose(ba.sum(), skin_areas(m).sum())
+
+
+from wing_design.structural.buckling import panel_buckling_utilization
+
+
+def test_panel_buckling_accepts_array_t():
+    # two compressive panels
+    ms = np.array([[-1.0e7, 0.0, 0.0], [-1.0e7, 0.0, 0.0]])
+    areas = np.array([0.01, 0.01])
+    D11 = 50.0
+    u_scalar = panel_buckling_utilization(ms, areas, D11=D11, t=0.002, kc=4.0, safety_factor=1.0)
+    u_array = panel_buckling_utilization(ms, areas, D11=D11, t=np.array([0.002, 0.002]),
+                                         kc=4.0, safety_factor=1.0)
+    assert np.allclose(u_scalar, u_array)
+    # With D11 held fixed, sigma_cr = kc*pi^2*D11/(b^2*t) so utilization scales as t
+    # element-wise: halving t halves utilization. (Confirms array-t broadcasting.)
+    u_thin = panel_buckling_utilization(ms, areas, D11=D11, t=np.array([0.002, 0.001]),
+                                        kc=4.0, safety_factor=1.0)
+    assert np.isclose(u_thin[1], 0.5 * u_thin[0])
