@@ -30,7 +30,7 @@ from ..structural.buckling import beam_euler_utilization, panel_buckling_utiliza
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_stress_C
 from .shell_model import BeamShellModel, skin_datum_angles
-from .shell_sizing import beam_lengths, beam_mass, skin_areas, skin_mass
+from .shell_sizing import beam_lengths, beam_mass, skin_areas, skin_band_areas, skin_band_map, skin_mass
 
 
 @dataclass(frozen=True)
@@ -46,12 +46,14 @@ class LaminateSizingConfig:
     euler_K: float = 1.0
     panel_kc: float = 4.0
     ply_angle_datum: tuple[float, float, float] | None = None
+    n_skin_bands: int = 1
 
 
 @dataclass(frozen=True)
 class LaminateSizingResult:
     radii: np.ndarray
     t_skin: float
+    t_bands: np.ndarray
     f0: float
     f45: float
     f90: float
@@ -81,10 +83,16 @@ def size_beam_shell_laminate(
     if not load_arrays:
         raise ValueError("load_arrays is empty")
     n = model.beam_elements.shape[0]
+    B = config.n_skin_bands
     Lb = beam_lengths(model)
     Atri = skin_areas(model)
     A_skin_area = float(Atri.sum())
-    x0 = np.concatenate([np.full(n, config.r_max), [config.t_max, 1.0 / 3.0, 1.0 / 3.0]])
+    band_of_tri = skin_band_map(model, B)
+    band_area = skin_band_areas(model, band_of_tri, B)
+    nx = n + B + 2
+    fi0 = n + B
+    fi45 = n + B + 1
+    x0 = np.concatenate([np.full(n, config.r_max), np.full(B, config.t_max), [1.0 / 3.0, 1.0 / 3.0]])
     datum_offsets_deg = (
         np.degrees(skin_datum_angles(model, config.ply_angle_datum))
         if config.ply_angle_datum is not None else None
@@ -97,23 +105,28 @@ def size_beam_shell_laminate(
         if hit is not None:
             return hit
         radii = x[:n]
-        t = float(x[n])
-        f0 = float(x[n + 1])
-        f45 = float(x[n + 2])
+        t_band_vec = x[n:n + B]
+        t_tri = t_band_vec[band_of_tri]
+        f0 = float(x[fi0])
+        f45 = float(x[fi45])
         f90 = max(0.0, 1.0 - f0 - f45)
         if datum_offsets_deg is None:
-            A_arg, D_arg, C_arg = laminate_stiffness(ply, f0=f0, f45=f45, f90=f90, thickness=t)
-            D11 = float(D_arg[0, 0])
+            band_mats = [laminate_stiffness(ply, f0=f0, f45=f45, f90=f90, thickness=float(tb))
+                         for tb in t_band_vec]
+            A_band = np.stack([m[0] for m in band_mats])
+            D_band = np.stack([m[1] for m in band_mats])
+            C_band = np.stack([m[2] for m in band_mats])
+            A_arg = A_band[band_of_tri]
+            D_arg = D_band[band_of_tri]
+            C_arg = C_band[band_of_tri]
         else:
-            mats = [laminate_stiffness_offset(ply, f0=f0, f45=f45, f90=f90, thickness=t, offset_deg=o)
-                    for o in datum_offsets_deg]
+            mats = [laminate_stiffness_offset(ply, f0=f0, f45=f45, f90=f90,
+                                              thickness=float(tt), offset_deg=float(o))
+                    for tt, o in zip(t_tri, datum_offsets_deg)]
             A_arg = np.stack([m[0] for m in mats])
             D_arg = np.stack([m[1] for m in mats])
             C_arg = np.stack([m[2] for m in mats])
-            # Per-triangle plate bending stiffness for panel buckling: each panel is
-            # checked against its OWN D11 (a scalar max would understate weak panels;
-            # panel_buckling_utilization broadcasts an array D11 element-wise).
-            D11 = D_arg[:, 0, 0]
+        D11 = D_arg[:, 0, 0]
         sections = [BeamSection.circular(float(r)) for r in radii]
         wb = np.zeros(n)
         ws = 0.0
@@ -136,7 +149,7 @@ def size_beam_shell_laminate(
             if config.buckling_safety_factor is not None:
                 bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
                                             K=config.euler_K, safety_factor=config.buckling_safety_factor)
-                pu = panel_buckling_utilization(skin_s, Atri, D11=D11, t=t,
+                pu = panel_buckling_utilization(skin_s, Atri, D11=D11, t=t_tri,
                                                 kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
@@ -147,12 +160,13 @@ def size_beam_shell_laminate(
     m_ref = beam_mass(model, np.full(n, config.r_max), rho=rho) + skin_mass(model, config.t_max, rho=rho)
 
     def mass(x):
-        return (rho * np.sum(np.pi * x[:n] ** 2 * Lb) + rho * x[n] * A_skin_area) / m_ref
+        m = rho * np.sum(np.pi * x[:n] ** 2 * Lb) + rho * np.sum(x[n:n + B] * band_area)
+        return m / m_ref
 
     def mass_grad(x):
-        g = np.zeros(n + 3)
+        g = np.zeros(nx)
         g[:n] = rho * 2.0 * np.pi * x[:n] * Lb / m_ref
-        g[n] = rho * A_skin_area / m_ref
+        g[n:n + B] = rho * band_area / m_ref
         return g
 
     def beam_con(x):
@@ -172,11 +186,12 @@ def size_beam_shell_laminate(
         return np.array([1.0 - t / config.tip_twist_max_deg])
 
     def frac_con(x):
-        return np.array([1.0 - (x[n + 1] + x[n + 2])])
+        return np.array([1.0 - (x[fi0] + x[fi45])])
 
     bounds = (
         [(config.r_min, config.r_max)] * n
-        + [(config.t_min, config.t_max), (0.0, 1.0), (0.0, 1.0)]
+        + [(config.t_min, config.t_max)] * B
+        + [(0.0, 1.0), (0.0, 1.0)]
     )
     constraints = [
         {"type": "ineq", "fun": beam_con},
@@ -202,23 +217,22 @@ def size_beam_shell_laminate(
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
     x = np.clip(res.x, lo, hi)
-    # Re-enforce the fraction simplex: if SLSQP ended marginally infeasible on
-    # frac_con (f0+f45 > 1), rescale so f90 = 1-f0-f45 >= 0 and the three sum to 1.
-    # Done before the final evaluate so reported stresses match the reported layup.
-    s = x[n + 1] + x[n + 2]
+    s = x[fi0] + x[fi45]
     if s > 1.0:
-        x[n + 1] /= s
-        x[n + 2] /= s
+        x[fi0] /= s
+        x[fi45] /= s
     wb, ws, d, t, bbu, pbu = evaluate(x)
     radii = x[:n]
-    t_skin = float(x[n])
-    f0 = float(x[n + 1])
-    f45 = float(x[n + 2])
+    t_bands = x[n:n + B].copy()
+    t_tri = t_bands[band_of_tri]
+    f0 = float(x[fi0])
+    f45 = float(x[fi45])
     f90 = max(0.0, 1.0 - f0 - f45)
     bm = beam_mass(model, radii, rho=rho)
-    sm = skin_mass(model, t_skin, rho=rho)
+    sm = float(rho * np.sum(t_tri * Atri))
+    t_skin_mean = float(np.sum(t_tri * Atri) / A_skin_area)
     return LaminateSizingResult(
-        radii=radii, t_skin=t_skin, f0=f0, f45=f45, f90=f90,
+        radii=radii, t_skin=t_skin_mean, t_bands=t_bands, f0=f0, f45=f45, f90=f90,
         mass_kg=bm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
         converged=bool(res.success), n_iter=int(res.nit),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
