@@ -8,6 +8,7 @@ from wing_design.beams.shell_model import (
     build_beam_shell_model,
     solve_beam_shell_model,
 )
+from wing_design.beams.layout import stress_weighted_targets
 
 
 def test_skin_triangulation_counts_and_validity():
@@ -62,3 +63,23 @@ def test_skin_datum_angles_shape_and_range():
     ang = skin_datum_angles(model, datum_dir=(0.0, 0.0, 1.0))
     assert ang.shape == (model.shell_tris.shape[0],)
     assert np.all(np.abs(ang) <= np.pi + 1e-9)
+
+
+def test_build_model_accepts_arc_fractions():
+    spec = WingSpec()
+    even = build_beam_shell_model(spec, n_beams=8, n_levels=5)
+    af = np.arange(8) / 8.0
+    same = build_beam_shell_model(spec, n_beams=8, n_levels=5, arc_fractions=af)
+    assert np.allclose(even.nodes, same.nodes)   # even fractions == default
+
+
+def test_nonuniform_model_solves():
+    spec = WingSpec()
+    af = stress_weighted_targets(np.array([1, 1, 5, 1, 1, 1, 3, 1.0]), 8)
+    model = build_beam_shell_model(spec, n_beams=8, n_levels=5, arc_fractions=af)
+    assert model.nodes.shape == (8 * 5, 3)
+    loads = np.zeros((model.nodes.shape[0], 6))
+    loads[model.tip_nodes, 2] = 20.0
+    res = solve_beam_shell_model(model, loads)
+    assert np.isfinite(res.displacements).all()
+    assert np.allclose(res.displacements[model.fixed_nodes], 0.0)

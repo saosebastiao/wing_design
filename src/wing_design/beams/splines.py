@@ -15,17 +15,26 @@ def default_z_levels(spec: WingSpec, n: int = 20) -> np.ndarray:
     return np.linspace(z_top, z_bottom, n)
 
 
-def form_beam_grid(spec: WingSpec, z_levels: np.ndarray, n_beams: int) -> np.ndarray:
+def form_beam_grid(
+    spec: WingSpec,
+    z_levels: np.ndarray,
+    n_beams: int,
+    arc_fractions: np.ndarray | None = None,
+) -> np.ndarray:
     """(n_beams, n_levels, 3) array of on-shell points.
 
     Entry ``[b, k]`` is the (x, y, z) location of form beam ``b`` at
     ``z_levels[k]``. Beam ordering matches ``beam_section_points`` (0 = TE,
     ``n_beams // 2`` = LE).
+
+    If ``arc_fractions`` is given (shape (n_beams,), values in [0, 1)) it is
+    forwarded to ``beam_section_points`` at every level to place beams at
+    non-uniform arc positions. Omit for the default even spacing.
     """
     n_levels = len(z_levels)
     grid = np.empty((n_beams, n_levels, 3))
     for k, z in enumerate(z_levels):
-        xy = beam_section_points(spec, float(z), n_beams)
+        xy = beam_section_points(spec, float(z), n_beams, arc_fractions=arc_fractions)
         grid[:, k, 0] = xy[:, 0]
         grid[:, k, 1] = xy[:, 1]
         grid[:, k, 2] = float(z)
