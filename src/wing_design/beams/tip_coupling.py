@@ -16,7 +16,7 @@ spring constant (12EI/L³ × rotational-flexibility factor ≈ 3EI/L³) too low 
 overcome the closed-tube shear already provided by the skin.  Instead, each
 clique edge is modelled as a pair of structural contributions:
 
-1. A full beam element (assembled via ``solve_beam_shell``) for in-plane and
+1. A full beam element (assembled directly into the global K) for in-plane and
    torsional coupling — these are the "n_beam … + clique" elements visible in the
    returned FrameResult.
 2. A **scalar Z-direction penalty spring** added on top of the global stiffness
@@ -84,6 +84,8 @@ def solve_beam_shell_tip_coupled(
         all_sections = list(beam_sections)
 
     # --- Assemble global stiffness matrix (beams + skin) -----------------
+    # SYNC WITH structural/beam_shell.py — keep these assembly loops in step
+    # with solve_beam_shell() until a shared _assemble_K helper is extracted.
     n_nodes = model.nodes.shape[0]
     ndof = 6 * n_nodes
     n_elem = all_elements.shape[0]
@@ -153,7 +155,9 @@ def solve_beam_shell_tip_coupled(
     u[free] = spla.spsolve(K[free][:, free].tocsc(), f[free])
     disp = u.reshape(n_nodes, 6)
 
-    # --- Recover beam internal forces (original beams only) --------------
+    # --- Recover beam internal forces (original longitudinal beams only) -
+    # Clique (gusset) elements are computed but not returned in FrameResult
+    # so downstream stress-checking callers see only design members.
     axial = np.zeros(n_elem)
     bending = np.zeros(n_elem)
     torsion = np.zeros(n_elem)
@@ -165,5 +169,5 @@ def solve_beam_shell_tip_coupled(
         bending[e] = max(np.hypot(floc[4], floc[5]), np.hypot(floc[10], floc[11]))
         torsion[e] = floc[9]
 
-    return FrameResult(displacements=disp, axial_force=axial,
-                       bending_moment=bending, torsion=torsion), n_beam
+    return FrameResult(displacements=disp, axial_force=axial[:n_beam],
+                       bending_moment=bending[:n_beam], torsion=torsion[:n_beam]), n_beam
