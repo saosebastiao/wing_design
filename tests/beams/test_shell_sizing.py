@@ -1,12 +1,12 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.shell_model import build_beam_shell_model
 from wing_design.beams.shell_sizing import beam_lengths, skin_areas, beam_mass, skin_mass, BeamShellSizingConfig, size_beam_shell
 
 
 def test_beam_lengths_match_geometry():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5)
     L = beam_lengths(model)
     assert L.shape[0] == model.beam_elements.shape[0]
@@ -15,7 +15,7 @@ def test_beam_lengths_match_geometry():
 
 
 def test_beam_mass_uniform():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5)
     L = beam_lengths(model)
     r, rho = 0.02, 1550.0
@@ -24,7 +24,7 @@ def test_beam_mass_uniform():
 
 
 def test_skin_mass_scales_with_thickness():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5)
     A = skin_areas(model).sum()
     rho = 1550.0
@@ -33,7 +33,7 @@ def test_skin_mass_scales_with_thickness():
 
 
 def test_size_beam_shell_reduces_mass_and_feasible():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=4, n_levels=3)
     n = model.beam_elements.shape[0]
     loads = np.zeros((model.nodes.shape[0], 6))
@@ -56,7 +56,7 @@ def test_size_beam_shell_reduces_mass_and_feasible():
 def test_size_beam_shell_binding_constraint():
     # Heavy load + tight allowable: a stress constraint must bind, so the optimizer
     # is pushed off minimum gauge (not the trivial all-min solution).
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=4, n_levels=3)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 5000.0
@@ -71,7 +71,7 @@ def test_size_beam_shell_binding_constraint():
 
 
 def test_buckling_constraint_respected():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=4)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 800.0

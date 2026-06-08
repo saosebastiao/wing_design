@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.splines import (
     default_z_levels,
     form_beam_grid,
@@ -10,7 +10,7 @@ from wing_design.beams.splines import (
 
 
 def test_z_levels_span_tip_to_keelstep():
-    spec = WingSpec()
+    spec = small_wingsail
     z = default_z_levels(spec, 10)
     assert z.shape == (10,)
     assert abs(z[0] - spec.span) < 1e-9
@@ -19,7 +19,7 @@ def test_z_levels_span_tip_to_keelstep():
 
 
 def test_grid_shape_and_z_consistency():
-    spec = WingSpec()
+    spec = small_wingsail
     z = default_z_levels(spec, 12)
     grid = form_beam_grid(spec, z, n_beams=16)
     assert grid.shape == (16, 12, 3)
@@ -28,7 +28,7 @@ def test_grid_shape_and_z_consistency():
 
 
 def test_splines_interpolate_their_points():
-    spec = WingSpec()
+    spec = small_wingsail
     z = default_z_levels(spec, 12)
     grid = form_beam_grid(spec, z, n_beams=16)
     splines = fit_beam_splines(grid, smoothing=0.0)

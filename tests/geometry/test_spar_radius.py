@@ -1,10 +1,10 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 
 
 def test_spar_radius_is_floored_inscribed_circle():
-    spec = WingSpec()  # NACA0018, root_chord=1, pivot 0.25c
+    spec = small_wingsail  # NACA0018, root_chord=1, pivot 0.25c
     # Max inscribed circle centered at the pivot ≈ local half-thickness ≈ 0.089 m,
     # floored to the nearest cm → 0.08 m.
     assert abs(spec.spar_radius - 0.08) < 1e-9
@@ -17,5 +17,5 @@ def test_spar_radius_is_floored_inscribed_circle():
 
 
 def test_spar_diameter_is_twice_radius():
-    spec = WingSpec()
+    spec = small_wingsail
     assert abs(spec.spar_diameter - 2.0 * spec.spar_radius) < 1e-12

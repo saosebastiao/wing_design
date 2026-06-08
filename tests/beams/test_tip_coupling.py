@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.shell_model import build_beam_shell_model, solve_beam_shell_model
 from wing_design.beams.tip_coupling import tip_clique_elements, solve_beam_shell_tip_coupled
 
@@ -13,7 +13,7 @@ def test_clique_element_count():
 
 
 def test_no_gusset_matches_plain_solve():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=6, n_levels=4, beam_radius=0.02)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 50.0
@@ -23,7 +23,7 @@ def test_no_gusset_matches_plain_solve():
 
 
 def test_gusset_solve_valid_and_sliced():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5, beam_radius=0.02)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 100.0
@@ -40,7 +40,7 @@ def test_gusset_couples_in_plane_tip_motion():
     # in-plane (chordwise, x) spread of tip-node displacement shrinks vs skin-only.
     # (Spanwise/z coupling is already provided by the skin, so the gusset's added
     # effect shows up in-plane.)
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5, beam_radius=0.02)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes[0], 0] = 500.0     # push ONE tip node chordwise

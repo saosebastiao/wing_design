@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.fea_model import build_beam_frame, project_panels_to_beam_nodes, solve_beam_frame
 from wing_design.aero.loads import PanelLoads
 from wing_design.beams.shell_model import (
@@ -20,7 +20,7 @@ def test_skin_triangulation_counts_and_validity():
 
 
 def test_model_builds_and_solves():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5, beam_radius=0.02)
     assert model.beam_elements.shape[0] == 8 * (5 - 1)
     assert model.shell_tris.shape[0] == 2 * 8 * (5 - 1)
@@ -32,7 +32,7 @@ def test_model_builds_and_solves():
 
 
 def test_skin_stiffer_than_ring_frame():
-    spec = WingSpec()
+    spec = small_wingsail
     nb, nl, r = 16, 6, 0.02
     model = build_beam_shell_model(spec, n_beams=nb, n_levels=nl, beam_radius=r)
     frame = build_beam_frame(spec, n_beams=nb, n_levels=nl, beam_radius=r)
@@ -58,7 +58,7 @@ def test_skin_stiffer_than_ring_frame():
 
 def test_skin_datum_angles_shape_and_range():
     from wing_design.beams.shell_model import skin_datum_angles
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5)
     ang = skin_datum_angles(model, datum_dir=(0.0, 0.0, 1.0))
     assert ang.shape == (model.shell_tris.shape[0],)
@@ -66,7 +66,7 @@ def test_skin_datum_angles_shape_and_range():
 
 
 def test_build_model_accepts_arc_fractions():
-    spec = WingSpec()
+    spec = small_wingsail
     even = build_beam_shell_model(spec, n_beams=8, n_levels=5)
     af = np.arange(8) / 8.0
     same = build_beam_shell_model(spec, n_beams=8, n_levels=5, arc_fractions=af)
@@ -74,7 +74,7 @@ def test_build_model_accepts_arc_fractions():
 
 
 def test_nonuniform_model_solves():
-    spec = WingSpec()
+    spec = small_wingsail
     af = stress_weighted_targets(np.array([1, 1, 5, 1, 1, 1, 3, 1.0]), 8)
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5, arc_fractions=af)
     assert model.nodes.shape == (8 * 5, 3)

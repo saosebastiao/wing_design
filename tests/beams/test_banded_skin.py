@@ -1,13 +1,13 @@
 import numpy as np
 import pytest
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.shell_model import build_beam_shell_model
 from wing_design.beams.shell_sizing import skin_areas, skin_band_map, skin_band_areas
 
 
 def _model(n_beams=8, n_levels=6):
-    return build_beam_shell_model(WingSpec(), n_beams=n_beams, n_levels=n_levels, beam_radius=0.02)
+    return build_beam_shell_model(small_wingsail, n_beams=n_beams, n_levels=n_levels, beam_radius=0.02)
 
 
 def test_band_map_single_band_all_zero():
@@ -68,7 +68,7 @@ def test_panel_buckling_accepts_array_t():
     assert np.isclose(u_thin[1], 0.5 * u_thin[0])
 
 
-from wing_design import default_scenario
+from wing_design.scenario import small_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig, build_beam_frame, build_beam_shell_model,
@@ -78,7 +78,7 @@ from wing_design.materials.unidir import T700_EPOXY
 
 
 def _scenario_small(n_beams=8, n_levels=5):
-    P = default_scenario()
+    P = small_scenario()
     spec = P.geometry
     model = build_beam_shell_model(spec, n_beams=n_beams, n_levels=n_levels, beam_radius=0.02,
         material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso,

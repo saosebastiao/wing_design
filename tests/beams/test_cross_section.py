@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec, oml_section_polyline
+from wing_design.geometry import small_wingsail, oml_section_polyline
 from wing_design.beams.cross_section import (
     resample_closed_polyline,
     beam_section_points,
@@ -8,7 +8,7 @@ from wing_design.beams.cross_section import (
 
 
 def test_oml_section_wing_region_is_airfoil():
-    spec = WingSpec()
+    spec = small_wingsail
     poly = oml_section_polyline(spec, z=0.0)
     # Root chord = 1.0, pivot at 0.25c: TE at +0.75, LE at -0.25.
     assert abs(poly[:, 0].max() - (1.0 - spec.pivot_frac) * spec.root_chord) < 1e-6
@@ -16,7 +16,7 @@ def test_oml_section_wing_region_is_airfoil():
 
 
 def test_oml_section_spar_region_is_circle():
-    spec = WingSpec()
+    spec = small_wingsail
     z = -(spec.transition_length + spec.spar_length * 0.5)  # deep in the spar
     poly = oml_section_polyline(spec, z=z)
     r = np.hypot(poly[:, 0], poly[:, 1])
@@ -40,7 +40,7 @@ def test_resample_square_midpoints():
 
 
 def test_beam_points_le_and_te_are_members():
-    spec = WingSpec()
+    spec = small_wingsail
     pts = beam_section_points(spec, z=0.0, n_beams=16)
     assert pts.shape == (16, 2)
     # Beam 0 sits at the TE, beam 8 at the LE (symmetric section, even count).

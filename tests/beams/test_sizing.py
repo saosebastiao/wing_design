@@ -1,18 +1,18 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.fea_model import build_beam_frame
 from wing_design.beams.sizing import element_lengths, n_longitudinal, frame_mass, SizingConfig, size_beams
 
 
 def test_n_longitudinal():
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=8, n_levels=5)
     assert n_longitudinal(frame) == 8 * (5 - 1)
 
 
 def test_element_lengths_match_geometry():
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=8, n_levels=5)
     L = element_lengths(frame)
     assert L.shape[0] == frame.elements.shape[0]
@@ -22,7 +22,7 @@ def test_element_lengths_match_geometry():
 
 
 def test_frame_mass_uniform_radius():
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=8, n_levels=5)
     nl = n_longitudinal(frame)
     L = element_lengths(frame)
@@ -39,7 +39,7 @@ def test_size_beams_reduces_mass_and_respects_stress():
     # Tiny frame + a small synthetic tip load. With generous deflection/twist
     # limits and a high stress allowable, the optimum drives every longitudinal
     # radius to r_min, so sized mass must be well below the r_max starting mass.
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=4, n_levels=3)
     nl = n_longitudinal(frame)
 

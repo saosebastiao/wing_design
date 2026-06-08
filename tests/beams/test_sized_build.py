@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.build import build_sized_lens_beams, build_sized_circular_beams, resample_segment_radii
 
 
@@ -10,7 +10,7 @@ def _radii(n_beams, n_levels):
 
 
 def test_sized_circular_beams_build():
-    spec = WingSpec()
+    spec = small_wingsail
     beams = build_sized_circular_beams(spec, _radii(8, 5), n_beams=8, n_levels=5)
     assert len(beams) == 8
     for b in beams:
@@ -18,7 +18,7 @@ def test_sized_circular_beams_build():
 
 
 def test_sized_lens_beams_build():
-    spec = WingSpec()
+    spec = small_wingsail
     beams = build_sized_lens_beams(spec, _radii(8, 5), n_beams=8, n_levels=5)
     assert len(beams) == 8
     for b in beams:

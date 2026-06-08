@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec, oml_section_polyline
+from wing_design.geometry import small_wingsail, oml_section_polyline
 
 
 def _xspan(spec, z):
@@ -9,13 +9,13 @@ def _xspan(spec, z):
 
 
 def test_transition_morph_endpoints():
-    spec = WingSpec()
+    spec = small_wingsail
     assert abs(_xspan(spec, 0.0) - spec.root_chord) < 1e-6
     assert abs(_xspan(spec, -spec.transition_length) - spec.spar_diameter) < 1e-6
 
 
 def test_transition_is_eased_at_junctions():
-    spec = WingSpec()
+    spec = small_wingsail
     T = spec.transition_length
     eps = T * 0.02
 

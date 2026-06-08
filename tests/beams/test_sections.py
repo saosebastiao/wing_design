@@ -1,12 +1,12 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.cross_section import beam_section_points
 from wing_design.beams.sections import oml_outward_normals, lens_section_polyline
 
 
 def test_normals_unit_and_outward():
-    spec = WingSpec()
+    spec = small_wingsail
     P = beam_section_points(spec, 1.0, 16)
     n = oml_outward_normals(spec, 1.0, 16)
     assert n.shape == (16, 2)

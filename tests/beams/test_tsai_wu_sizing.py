@@ -1,12 +1,12 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.beams.shell_model import build_beam_shell_model, solve_beam_shell_model
 from wing_design.structural.shell import recover_membrane_strain, recover_membrane_stress_C
 
 
 def test_recover_membrane_strain_matches_identity_C():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=5, beam_radius=0.02)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 0] = 200.0
@@ -17,7 +17,7 @@ def test_recover_membrane_strain_matches_identity_C():
     assert np.allclose(eps, eps_via_C, atol=1e-12)
 
 
-from wing_design import default_scenario
+from wing_design.scenario import small_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig, build_beam_frame, build_beam_shell_model,
@@ -27,7 +27,7 @@ from wing_design.materials.unidir import T700_EPOXY
 
 
 def _scenario_small(n_beams=8, n_levels=5):
-    P = default_scenario()
+    P = small_scenario()
     spec = P.geometry
     model = build_beam_shell_model(spec, n_beams=n_beams, n_levels=n_levels, beam_radius=0.02,
         material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso,

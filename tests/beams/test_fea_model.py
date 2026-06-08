@@ -1,6 +1,6 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.aero.loads import PanelLoads
 from wing_design.beams.fea_model import (
     build_beam_frame,
@@ -12,7 +12,7 @@ from wing_design.structural.projection import R_GEOM_FROM_AERO
 
 
 def test_frame_topology():
-    spec = WingSpec()
+    spec = small_wingsail
     nb, nl = 16, 10
     frame = build_beam_frame(spec, n_beams=nb, n_levels=nl)
     assert frame.nodes.shape == (nb * nl, 3)
@@ -31,7 +31,7 @@ def test_frame_topology():
 
 
 def test_projection_conserves_force():
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=16, n_levels=10)
     # one fake panel in the aero frame (span along +Y), out on the wing
     panels = PanelLoads(
@@ -49,7 +49,7 @@ def test_projection_conserves_force():
 
 
 def test_solve_runs_and_deflects():
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=16, n_levels=12)
     loads = np.zeros((frame.nodes.shape[0], 6))
     tip = [b * frame.n_levels + 0 for b in range(frame.n_beams)]  # level 0 = tip
@@ -62,7 +62,7 @@ def test_solve_runs_and_deflects():
 
 
 def test_summarize_frame_metrics():
-    spec = WingSpec()
+    spec = small_wingsail
     frame = build_beam_frame(spec, n_beams=16, n_levels=12)
     loads = np.zeros((frame.nodes.shape[0], 6))
     tip = [b * frame.n_levels + 0 for b in range(frame.n_beams)]

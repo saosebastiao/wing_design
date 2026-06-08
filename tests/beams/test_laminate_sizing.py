@@ -1,13 +1,13 @@
 import numpy as np
 
-from wing_design.geometry import WingSpec
+from wing_design.geometry import small_wingsail
 from wing_design.materials.unidir import T700_EPOXY
 from wing_design.beams.shell_model import build_beam_shell_model
 from wing_design.beams.laminate_sizing import LaminateSizingConfig, size_beam_shell_laminate
 
 
 def test_clt_cosizing_feasible_and_valid_fractions():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=4, n_levels=3)
     n = model.beam_elements.shape[0]
     loads = np.zeros((model.nodes.shape[0], 6))
@@ -30,7 +30,7 @@ def test_clt_tailors_layup_when_twist_binds():
     # A torsion-dominated load with a tight twist limit should drive the optimizer
     # to a ±45-rich layup (maximizing skin shear stiffness) — above the quasi-iso
     # 1/3 start it begins from.
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=4, n_levels=3)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 0] = 500.0   # chordwise
@@ -45,7 +45,7 @@ def test_clt_tailors_layup_when_twist_binds():
 
 
 def test_laminate_buckling_constraint_respected():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=4)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 800.0
@@ -62,7 +62,7 @@ def test_laminate_buckling_constraint_respected():
 
 
 def test_clt_datum_sizing_runs_and_valid():
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=4, n_levels=3)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 200.0
@@ -81,7 +81,7 @@ def test_clt_datum_sizing_runs_and_valid():
 def test_clt_datum_with_buckling_feasible():
     # The datum + buckling combination is the "final design" path; verify the
     # per-triangle D11 (array) feeds panel buckling correctly and stays feasible.
-    spec = WingSpec()
+    spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=4, n_levels=3)
     loads = np.zeros((model.nodes.shape[0], 6))
     loads[model.tip_nodes, 2] = 400.0
