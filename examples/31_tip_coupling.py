@@ -1,4 +1,4 @@
-"""Tip-coupling study: does a hard tip joint (gusset) redistribute stress between beams?
+"""Tip-coupling study on the medium wingsail: does a hard tip gusset redistribute load between beams?
 
 A fixed uniform-radius beam-shell design is solved under the load envelope with NO tip
 gusset (tip joined only through the skin) and with an increasingly stiff gusset (a
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     build_beam_frame,
@@ -23,7 +23,7 @@ from wing_design.structural.frame import von_mises_per_element
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

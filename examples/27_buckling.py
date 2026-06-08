@@ -1,4 +1,4 @@
-"""Buckling validity check: re-size the CLT design with vs without buckling.
+"""Re-size the medium wingsail CLT design with vs without buckling constraints to quantify their impact.
 
 The E.4 design (25.6 kg) was twist-governed with very thin members (0.7 mm skin,
 4-14 mm beams) and stresses far under allowable -- textbook buckling territory.
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig,
@@ -34,7 +34,7 @@ def _report(tag, r, cfg, defl_lim, twist_lim):
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

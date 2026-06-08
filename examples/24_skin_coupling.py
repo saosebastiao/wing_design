@@ -1,4 +1,4 @@
-"""Phase-E.1 spike: quantify the load-bearing skin's stiffness contribution.
+"""Quantify the load-bearing skin's stiffness contribution on the medium wingsail.
 
 Builds the Phase-B ring frame and the Phase-E beam-shell model (skin replaces rings)
 at the SAME beam radius, runs the LiftingLine load envelope, and compares tip
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     build_beam_frame,
@@ -21,7 +21,7 @@ from wing_design.beams import (
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels, r = 16, 12, 0.02
 

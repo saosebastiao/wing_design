@@ -1,4 +1,4 @@
-"""Per-spanwise-band skin thickness: does tapering the skin beat a uniform skin?
+"""Per-spanwise-band skin thickness on the medium wingsail: does tapering beat a uniform skin?
 
 Sizes the span-datum CLT design (as in examples/32) twice under identical constraints:
 uniform skin (n_skin_bands=1) vs 4 spanwise thickness bands. Prints the per-band
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig,
@@ -22,7 +22,7 @@ from wing_design.materials.unidir import T700_EPOXY
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

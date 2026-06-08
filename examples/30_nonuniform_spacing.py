@@ -1,4 +1,4 @@
-"""Phase-F.1 spike: stress-weighted (non-uniform) beam spacing vs even spacing.
+"""Stress-weighted vs even beam spacing for the medium wingsail to test whether load-driven clustering reduces mass.
 
 A baseline even-spacing solve gives the skin membrane-stress distribution around the
 cross-section; the N beams are then re-placed at equal-cumulative-stress arc positions
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     BeamShellSizingConfig,
@@ -31,7 +31,7 @@ def _report(tag, r, defl_lim, twist_lim):
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

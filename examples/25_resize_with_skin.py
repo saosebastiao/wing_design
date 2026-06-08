@@ -1,4 +1,4 @@
-"""Phase-E.2 spike: co-size beam radii + skin thickness with the skin load-bearing.
+"""Co-size beam radii and skin thickness for the medium wingsail with the skin load-bearing.
 
 Re-sizes the beam-shell structure (skin replaces rings) minimizing total beam+skin
 mass under beam-stress, skin-stress, tip-deflection and tip-twist constraints, then
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     BeamShellSizingConfig,
@@ -23,7 +23,7 @@ from wing_design.beams import (
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

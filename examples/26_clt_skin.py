@@ -1,4 +1,4 @@
-"""Phase-E.4 spike: CLT anisotropic skin, co-sizing the layup.
+"""CLT anisotropic skin co-sizing for the medium wingsail with ply-fraction as a design variable.
 
 The E.2 result was twist-governed with an isotropic-equivalent skin. Here the skin
 is a CLT laminate whose 0/±45/90 ply-area fractions are design variables co-sized
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     BeamShellSizingConfig,
@@ -25,7 +25,7 @@ from wing_design.materials.unidir import T700_EPOXY
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

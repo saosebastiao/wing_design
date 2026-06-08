@@ -1,4 +1,4 @@
-"""Final design: CLT co-sizing with BOTH the span ply-angle datum AND buckling.
+"""Final medium wingsail design: CLT co-sizing with span ply-angle datum AND buckling constraints.
 
 Earlier increments measured these separately: E.4b found 19.0 kg with a coherent
 span-datum layup but WITHOUT buckling; the buckling study added ~+2% on the isotropic
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig,
@@ -23,7 +23,7 @@ from wing_design.materials.unidir import T700_EPOXY
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

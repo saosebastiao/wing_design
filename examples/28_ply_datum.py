@@ -1,4 +1,4 @@
-"""E.4b spike: consistent ply-angle datum for the CLT skin.
+"""Establish a consistent span-axis ply-angle datum for the medium wingsail CLT skin.
 
 E.4 found the optimal layup was not a manufacturable prescription because ply angles
 were measured against each skin triangle's arbitrary local frame (~50/50 spanwise/
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig,
@@ -33,7 +33,7 @@ def _report(tag, r, defl_lim, twist_lim):
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 

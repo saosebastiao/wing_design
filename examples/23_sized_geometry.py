@@ -1,4 +1,4 @@
-"""Phase-D spike: manufacturable, sized form-beam geometry.
+"""Manufacturable sized form-beam geometry for the medium wingsail, exported as STEP.
 
 Derives the spar radius, sizes the beams via the Phase-C FEA-in-the-loop loop,
 builds inward-arc 'lens' beams sized to those areas (circular fallback if build123d
@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from build123d import Compound, export_step
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     SizingConfig,
@@ -28,7 +28,7 @@ from wing_design.geometry import build_wing_solid
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
     n_geo = 60   # build geometry at high resolution, decoupled from the sizing resolution

@@ -1,4 +1,4 @@
-"""E.3 spike: discretize beam radii to a manufacturable stock catalog (CP-SAT).
+"""Discretize the medium wingsail beam radii to a stock catalog via CP-SAT, showing the mass-vs-part-count trade.
 
 Sizes the beam-shell structure continuously (with buckling), then snaps the per-element
 radii to a stock catalog via a CP-SAT min-mass assignment with a cap of K distinct
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     BeamShellSizingConfig,
@@ -85,7 +85,7 @@ def select_and_repair(cont_radii, catalog, Lb, rho, K, model, t_skin, load_array
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
     sf_buck = 1.5

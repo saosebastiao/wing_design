@@ -1,4 +1,4 @@
-"""Phase-B spike: beam-frame FEA of the form-beam structure under the LL envelope.
+"""Beam-frame FEA of the medium wingsail form-beam structure under the LL load envelope.
 
 Builds the cantilevered space-frame (16 longitudinal form beams + transverse
 rings), runs the LiftingLine aero envelope, projects each case's panel loads onto
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     build_beam_frame,
@@ -20,7 +20,7 @@ from wing_design.beams import (
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
 
     frame = build_beam_frame(

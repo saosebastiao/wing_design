@@ -1,4 +1,4 @@
-"""Phase-C spike: FEA-in-the-loop sizing of the form-beam frame.
+"""FEA-in-the-loop sizing of the medium wingsail form-beam frame to minimum mass.
 
 Builds the Phase-B beam frame, projects the LiftingLine load envelope onto its
 nodes, then sizes every longitudinal element's radius by minimizing beam mass
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     SizingConfig,
@@ -27,7 +27,7 @@ from wing_design.structural import size_tube_spar
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
 
     frame = build_beam_frame(

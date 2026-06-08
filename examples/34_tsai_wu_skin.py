@@ -1,4 +1,4 @@
-"""Per-ply Tsai-Wu vs laminate-average von-Mises skin failure.
+"""Per-ply Tsai-Wu vs laminate-average von-Mises skin failure for the medium wingsail.
 
 Sizes the span-datum CLT design (as in examples/32, uniform skin) twice under identical
 constraints: the default von-Mises skin proxy vs a per-ply Tsai-Wu criterion (material
@@ -6,7 +6,7 @@ SF 2.0). Prints mass, layup, and the governing skin margin for each. FEA-only.
 """
 from __future__ import annotations
 
-from wing_design import default_scenario
+from wing_design import medium_scenario
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.beams import (
     LaminateSizingConfig,
@@ -19,7 +19,7 @@ from wing_design.materials.unidir import T700_EPOXY
 
 
 def main() -> None:
-    P = default_scenario()
+    P = medium_scenario()
     spec = P.geometry
     n_beams, n_levels = 16, 8
 
