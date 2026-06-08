@@ -121,3 +121,9 @@ def test_banded_feasible_and_not_heavier():
     bm = skin_band_map(model, 4)
     t_tri = ban.t_bands[bm]
     assert np.isclose(ban.skin_mass_kg, P.rho_kgm3 * np.sum(t_tri * skin_areas(model)), rtol=1e-6)
+
+
+def test_band_helpers_exported():
+    import wing_design.beams as b
+    assert hasattr(b, "skin_band_map")
+    assert hasattr(b, "skin_band_areas")

@@ -29,6 +29,8 @@ from .shell_sizing import (
     beam_mass,
     size_beam_shell,
     skin_areas,
+    skin_band_areas,
+    skin_band_map,
     skin_mass,
 )
 from .laminate_sizing import LaminateSizingConfig, LaminateSizingResult, size_beam_shell_laminate
@@ -73,6 +75,8 @@ __all__ = [
     "beam_mass",
     "size_beam_shell",
     "skin_areas",
+    "skin_band_map",
+    "skin_band_areas",
     "skin_mass",
     "LaminateSizingConfig",
     "LaminateSizingResult",
