@@ -8,6 +8,13 @@ from .unidir import (
     reduced_stiffness_Q,
     transformed_Qbar,
 )
+from .failure import (
+    laminate_min_strength_ratio,
+    ply_strength_ratio,
+    tsai_wu_coefficients,
+    tsai_wu_index,
+    tsai_wu_strength_ratio,
+)
 
 __all__ = [
     "T700_EPOXY",
@@ -17,4 +24,9 @@ __all__ = [
     "laminate_stiffness_offset",
     "reduced_stiffness_Q",
     "transformed_Qbar",
+    "tsai_wu_coefficients",
+    "tsai_wu_index",
+    "tsai_wu_strength_ratio",
+    "ply_strength_ratio",
+    "laminate_min_strength_ratio",
 ]

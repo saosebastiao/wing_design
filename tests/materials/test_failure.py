@@ -49,3 +49,10 @@ def test_laminate_min_skips_absent_orientations():
     r_0only = laminate_min_strength_ratio(PLY, eps, f0=1.0, f45=0.0, f90=0.0, offset_deg=0.0)
     assert r_0only >= r_all
     assert np.isclose(r_0only, ply_strength_ratio(PLY, eps, 0.0), rtol=1e-9)
+
+
+def test_failure_helpers_exported():
+    import wing_design.materials as m
+    for name in ("tsai_wu_index", "tsai_wu_strength_ratio", "tsai_wu_coefficients",
+                 "ply_strength_ratio", "laminate_min_strength_ratio"):
+        assert hasattr(m, name), name
