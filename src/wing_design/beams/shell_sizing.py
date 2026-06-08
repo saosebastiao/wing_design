@@ -68,6 +68,33 @@ def skin_areas(model: BeamShellModel) -> np.ndarray:
     return out
 
 
+def skin_band_map(model: BeamShellModel, n_bands: int) -> np.ndarray:
+    """(n_tris,) spanwise band index in [0, n_bands) for each skin triangle.
+
+    The ``n_levels - 1`` spanwise levels are split into ``n_bands`` contiguous,
+    near-equal groups; triangle ``e`` (at level ``(e//2)//n_beams``) inherits its
+    level's band. ``n_bands == 1`` returns all zeros. Band index increases with level
+    index (level 0 = tip end, since ``default_z_levels`` runs tip->keel).
+    """
+    n_seg_levels = model.n_levels - 1
+    if not (1 <= n_bands <= n_seg_levels):
+        raise ValueError(f"n_bands must be in [1, n_levels-1={n_seg_levels}], got {n_bands}")
+    level_band = np.empty(n_seg_levels, dtype=int)
+    for bi, group in enumerate(np.array_split(np.arange(n_seg_levels), n_bands)):
+        level_band[group] = bi
+    e = np.arange(model.shell_tris.shape[0])
+    level = (e // 2) // model.n_beams
+    return level_band[level]
+
+
+def skin_band_areas(model: BeamShellModel, band_of_tri: np.ndarray, n_bands: int) -> np.ndarray:
+    """(n_bands,) total skin-triangle area in each band."""
+    areas = skin_areas(model)
+    out = np.zeros(n_bands)
+    np.add.at(out, np.asarray(band_of_tri, dtype=int), areas)
+    return out
+
+
 def beam_mass(model: BeamShellModel, radii: np.ndarray, *, rho: float) -> float:
     """Total longitudinal-beam mass [kg]."""
     return float(rho * np.sum(np.pi * np.asarray(radii) ** 2 * beam_lengths(model)))
