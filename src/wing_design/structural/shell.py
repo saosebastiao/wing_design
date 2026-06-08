@@ -753,6 +753,38 @@ def recover_membrane_stress_C(
     return out
 
 
+def recover_membrane_strain(
+    nodes: np.ndarray, triangles: np.ndarray, displacements: np.ndarray,
+) -> np.ndarray:
+    """Per-triangle element-local membrane strain (M,3) = [exx, eyy, gxy] (engineering).
+
+    eps = Bm @ u_local; identical to recover_membrane_stress_C with C = identity. This
+    is the input to the per-ply Tsai-Wu check (materials.failure).
+    """
+    M = triangles.shape[0]
+    out = np.zeros((M, 3))
+    for e in range(M):
+        i, j, l = (int(v) for v in triangles[e])
+        R, local, area = _triangle_local_frame(nodes[i], nodes[j], nodes[l])
+        x1, y1 = local[0]; x2, y2 = local[1]; x3, y3 = local[2]
+        b = np.array([y2 - y3, y3 - y1, y1 - y2])
+        c = np.array([x3 - x2, x1 - x3, x2 - x1])
+        two_A = 2.0 * area
+        Bm = np.zeros((3, 6))
+        for k in range(3):
+            Bm[0, 2 * k + 0] = b[k] / two_A
+            Bm[1, 2 * k + 1] = c[k] / two_A
+            Bm[2, 2 * k + 0] = c[k] / two_A
+            Bm[2, 2 * k + 1] = b[k] / two_A
+        u_m = np.zeros(6)
+        for n_idx, gn in enumerate((i, j, l)):
+            u_local = R.T @ displacements[gn, 0:3]
+            u_m[2 * n_idx + 0] = u_local[0]
+            u_m[2 * n_idx + 1] = u_local[1]
+        out[e] = Bm @ u_m
+    return out
+
+
 def membrane_von_mises(stress: np.ndarray) -> np.ndarray:
     """Per-row plane-stress von Mises from (M, 3) [σxx, σyy, σxy] arrays."""
     sxx = stress[:, 0]
