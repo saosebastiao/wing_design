@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import minimize
 
-from ..materials.failure import laminate_min_strength_ratio
+from ..materials.failure import laminate_min_strength_ratio_batch
 from ..materials.unidir import UDPly, laminate_stiffness, laminate_stiffness_offset
 from ..structural.beam_shell import solve_beam_shell_laminate
 from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
@@ -151,11 +151,9 @@ def size_beam_shell_laminate(
             if config.skin_failure == "tsai_wu":
                 eps = recover_membrane_strain(model.nodes, model.shell_tris, res.displacements)
                 offs = datum_offsets_deg if datum_offsets_deg is not None else np.zeros(eps.shape[0])
-                for e in range(eps.shape[0]):
-                    R_e = laminate_min_strength_ratio(
-                        ply, eps[e], f0=f0, f45=f45, f90=f90, offset_deg=float(offs[e]))
-                    if R_e < worst_R:
-                        worst_R = R_e
+                R = laminate_min_strength_ratio_batch(
+                    ply, eps, f0=f0, f45=f45, f90=f90, offset_deg=offs)
+                worst_R = min(worst_R, float(R.min()))
             tip = model.tip_nodes
             md = max(md, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
             mt = max(mt, float(np.degrees(np.abs(res.displacements[tip, 5]).max())))
