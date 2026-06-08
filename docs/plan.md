@@ -333,6 +333,24 @@ Caveat: SLSQP is a local optimum (per-tri-local + buckling reached 26.06 kg), so
 better basin may exist; a global/multi-start pass is the refinement if mass is
 critical.
 
+**Per-band skin thickness done (2026-06-08) — clear win.** The CLT sizer's single
+uniform skin thickness is now an opt-in set of B contiguous spanwise thickness bands
+(`LaminateSizingConfig.n_skin_bands`, default 1 = unchanged; `beams.skin_band_map` maps
+each triangle to a band, per-triangle thickness drives CLT stiffness, panel buckling,
+and mass). Since the skin is ~2/3 of mass and uniform thickness is set by the worst
+(root) panel, the lightly-loaded tip carries excess material. `examples/33_banded_skin.py`
+compares uniform vs. 4 bands at equal constraints (span datum + buckling SF 1.5,
+n_beams=16, n_levels=8): **uniform 30.11 kg → banded 27.67 kg (−8.1%, −2.44 kg, all in
+the skin: 20.46→18.02)**, both converged & feasible (beam/panel buckling util = 1.0).
+The taper thins the tip and keeps the keel thick — band thicknesses (tip→keel)
+**0.96 / 1.29 / 1.57 / 1.55 mm** (mean 1.32). The **governing constraint flips from
+buckling (uniform) to twist (banded, tip twist pinned at 5.0°)**: banding lets the
+optimizer thin the tip skin until twist — not panel buckling — becomes binding.
+Banding needs more SLSQP iterations (4× the thickness DVs + tighter active set; ~354 vs
+70). Highest-leverage lever realized; per-ply Tsai-Wu and per-band *layup* remain
+deferred follow-ups. NB this −8.1% is on top of the 30.15 kg headline, i.e. a banded
+final design lands ~27.7 kg.
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -483,5 +501,6 @@ src/wing_design/
 | Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
 | Phase-F.1 non-uniform spacing | Beams placed at equal-cumulative-skin-stress arc positions (`stress_weighted_targets` from `cross_section_stress_weights`); `arc_fractions` threaded through cross_section/splines/shell_model (default even, backward-compatible). One-shot; 2nd diagonal family deferred (F.2). Result: only ~1% lighter (skin stress mildly concentrated 1.8×, design is skin/buckling-dominated so beam re-spacing has low leverage) — the layout lever is F.2 / skin tailoring, not re-spacing. |
 | Combined final design | Span-datum CLT layup co-sized WITH buckling (`examples/32_final_design.py`) — both refinements together, not separately. 30.15 kg (beams 9.38 / skin 20.77 @ 1.52 mm), buckling-governed (beam & panel util = 1.0), twist/defl slack, layup 31/15/54% span/±45/chord. Heavier than the partial numbers (E.4b 19.0 no-buckling; isotropic+buckling 26.1) because manufacturable-datum + buckling compound. **This is the defensible fully-constrained headline.** SLSQP local optimum (per-tri-local+buckling hit 26.06) → multi-start is the refinement if mass-critical. |
+| Per-band skin thickness | Skin thickness split into B contiguous spanwise bands (opt-in `n_skin_bands`, default 1 = uniform/unchanged; `beams.skin_band_map`), each a thickness DV in the SLSQP laminate loop; per-triangle thickness drives CLT stiffness, panel buckling, and mass; `t_skin` retained as the area-weighted mean. Uniform 30.11 kg → 4-band **27.67 kg (−8.1%)**, all saved in the skin; taper 0.96/1.29/1.57/1.55 mm tip→keel; governing constraint flips buckling→twist. Needs more SLSQP iters (~354 vs 70). Highest-leverage skin lever. Per-ply Tsai-Wu + per-band layup deferred. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
