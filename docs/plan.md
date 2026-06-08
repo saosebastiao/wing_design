@@ -359,6 +359,32 @@ ballooned to ~21 kg under the buckling constraint). The real layout levers are t
 **second diagonal beam family (F.2)** and skin tailoring, not longitudinal re-spacing.
 One-shot (not iterated); per-z-uniform arc_fractions.
 
+**F.2 investigated (2026-06-07) — diagonal/helix beam family; strong NEGATIVE result,
+clear lesson. Implementation was a throwaway measurement spike and was NOT merged —
+only this finding is kept.** A balanced both-hand grid-helix lattice (diagonals as
+chains on the existing structured node grid — no remesh) was tied into the combined
+beam-shell solver and co-sized with ONE shared diagonal-radius DV; the grid pitch was
+chosen to best track the baseline principal-stress field. A baseline-vs-diagonal
+comparison was run at equal constraints (span datum + buckling, SF 1.5, n_beams=16,
+n_levels=6): recommended **pitch 2** (mean principal alignment only **0.68**, 160
+diagonal elements). Result: **baseline 33.1 kg → diagonal 60.6 kg (+83%)**; the 160
+diagonals alone add **20.8 kg** at a buckling-forced **4.7 mm** radius, and tip twist
+went *up* slightly (1.25°→1.58°). **Finding:** the diagonal lattice is strongly
+mass-**counterproductive** here, for a physical reason consistent with F.1 and the
+buckling study — the design is **buckling-governed with large twist slack** (both
+designs sit at twist ≈1.3–1.6° vs. the 5° limit, beam & panel buckling util = 1.00).
+Diagonals are long compression-loaded members whose own Euler buckling forces a fat
+radius, so they bloat mass *without relieving a binding constraint* — there is no twist
+budget to recover. Diagonals would only pay off if twist were binding and the lattice
+carried tension. **Implication:** abandon (or radically thin/sparsify) the distributed
+diagonal lattice for this load/constraint regime; twist, when it matters, is far more
+cheaply killed at the tip (see the gusset investigation). Streamline-following diagonals
+(F.3) are unlikely to change the verdict while buckling dominates, so F.3 is **not**
+recommended unless a twist-governed variant emerges. The spike (helix topology,
+principal-stress alignment / pitch recommendation, the shared-`r_diag` sizing path, and
+a comparison example) was discarded after measuring; it can be reconstructed from this
+note and the approach above if a twist-governed case ever justifies it.
+
 ### Investigations
 
 **Hard tip coupling / gusset (2026-06-07).** Modeled a rigid tip joint (a clamp all
@@ -457,4 +483,5 @@ src/wing_design/
 | Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
 | Phase-F.1 non-uniform spacing | Beams placed at equal-cumulative-skin-stress arc positions (`stress_weighted_targets` from `cross_section_stress_weights`); `arc_fractions` threaded through cross_section/splines/shell_model (default even, backward-compatible). One-shot; 2nd diagonal family deferred (F.2). Result: only ~1% lighter (skin stress mildly concentrated 1.8×, design is skin/buckling-dominated so beam re-spacing has low leverage) — the layout lever is F.2 / skin tailoring, not re-spacing. |
 | Combined final design | Span-datum CLT layup co-sized WITH buckling (`examples/32_final_design.py`) — both refinements together, not separately. 30.15 kg (beams 9.38 / skin 20.77 @ 1.52 mm), buckling-governed (beam & panel util = 1.0), twist/defl slack, layup 31/15/54% span/±45/chord. Heavier than the partial numbers (E.4b 19.0 no-buckling; isotropic+buckling 26.1) because manufacturable-datum + buckling compound. **This is the defensible fully-constrained headline.** SLSQP local optimum (per-tri-local+buckling hit 26.06) → multi-start is the refinement if mass-critical. |
+| Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
