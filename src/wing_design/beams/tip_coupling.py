@@ -2,42 +2,24 @@
 
 Models a rigid tip joint (clamp/gusset) as a clique of very stiff connector beams
 among the tip nodes, appended to the model's longitudinal beams and solved by the
-existing combined beam+shell solver. Lets load transfer directly beam-to-beam at the
-tip (instead of only through skin shear). `gusset_radius` is the stiffness knob --
-larger = closer to rigid. Returns the real-beam count so callers can slice the
-original beams' internal forces (the coupling elements are not design members).
+existing combined beam+shell solver (`solve_beam_shell`). Lets load transfer directly
+beam-to-beam at the tip in addition to the skin's shear path. `gusset_radius` is the
+stiffness knob — larger = closer to rigid.
 
-Implementation note — Z-coupling springs
------------------------------------------
-All tip nodes share the same spanwise (Z) coordinate, so horizontal gusset beam
-elements couple the tip nodes in the XY-plane but their out-of-plane (Z) bending
-stiffness is mediated by rotational DOFs in series, leaving the effective Z
-spring constant (12EI/L³ × rotational-flexibility factor ≈ 3EI/L³) too low to
-overcome the closed-tube shear already provided by the skin.  Instead, each
-clique edge is modelled as a pair of structural contributions:
+The original longitudinal beams are the first `n_beam` elements; the clique elements
+follow and are NOT design members, so the returned `FrameResult` internal forces are
+sliced back to `[:n_beam]` for downstream stress checks.
 
-1. A full beam element (assembled directly into the global K) for in-plane and
-   torsional coupling — these are the "n_beam … + clique" elements visible in the
-   returned FrameResult.
-2. A **scalar Z-direction penalty spring** added on top of the global stiffness
-   matrix before solving: K[6i+2, 6i+2] += k_z, K[6j+2, 6j+2] += k_z,
-   K[6i+2, 6j+2] -= k_z, with k_z = E_beam · π r² / L (axial stiffness of a rod
-   of the same cross-section and length).  This directly couples the spanwise
-   displacement of every tip-node pair without rotational-DOF mediation.
-
-When gusset_radius is None no springs are added and no extra elements are appended,
-so the result is identical to the plain solve.
+Caveat (measured): the load-bearing skin already couples the tip nodes nearly rigidly
+in the spanwise direction, so the *additional* effect of an explicit gusset is modest —
+see `examples/31_tip_coupling.py`.
 """
 from __future__ import annotations
 
-import math
-
 import numpy as np
-import scipy.sparse as sp
-import scipy.sparse.linalg as spla
 
-from ..structural.frame import BeamSection, FrameResult, _element_rotation, local_beam_stiffness
-from ..structural.shell import tri_element_stiffness
+from ..structural.beam_shell import solve_beam_shell
+from ..structural.frame import BeamSection, FrameResult
 from .shell_model import BeamShellModel
 
 
@@ -57,117 +39,34 @@ def solve_beam_shell_tip_coupled(
 ) -> tuple[FrameResult, int]:
     """Solve the beam-shell model with a stiff tip gusset; return (result, n_beam).
 
-    ``gusset_radius`` None => no coupling (identical to the plain solve).  Otherwise
-    each pair among the tip nodes is connected by:
-
-    * A full beam element (``BeamSection.circular(gusset_radius)``) for in-plane and
-      torsional stiffness.
-    * A scalar Z-direction penalty spring (stiffness E_beam · π r² / L) that directly
-      enforces equal spanwise displacements across the tip ring regardless of the skin's
-      existing torsional coupling.
-
-    The first ``n_beam`` elements in the returned ``FrameResult`` are the original
-    longitudinal beams; clique elements follow and are **not** design members.
+    ``gusset_radius`` None ⇒ no coupling (identical to the plain solve). Otherwise a
+    clique of ``BeamSection.circular(gusset_radius)`` beams ties the tip nodes,
+    appended to the longitudinal beams and assembled by ``solve_beam_shell``. The
+    returned ``FrameResult`` internal forces are sliced to the first ``n_beam``
+    (design) beams; the clique elements are excluded.
     """
     n_beam = model.beam_elements.shape[0]
     if beam_sections is None:
         beam_sections = [model.section] * n_beam
 
-    clique: np.ndarray | None = None
-    if gusset_radius is not None:
+    if gusset_radius is None:
+        elements = model.beam_elements
+        sections = list(beam_sections)
+    else:
         clique = tip_clique_elements(model.tip_nodes)
-        gusset_sec = BeamSection.circular(float(gusset_radius))
-        all_elements = np.vstack([model.beam_elements, clique])
-        all_sections = list(beam_sections) + [gusset_sec] * clique.shape[0]
-    else:
-        all_elements = model.beam_elements
-        all_sections = list(beam_sections)
+        elements = np.vstack([model.beam_elements, clique])
+        sections = list(beam_sections) + [BeamSection.circular(float(gusset_radius))] * clique.shape[0]
 
-    # --- Assemble global stiffness matrix (beams + skin) -----------------
-    # SYNC WITH structural/beam_shell.py — keep these assembly loops in step
-    # with solve_beam_shell() until a shared _assemble_K helper is extracted.
-    n_nodes = model.nodes.shape[0]
-    ndof = 6 * n_nodes
-    n_elem = all_elements.shape[0]
-
-    rows: list[int] = []
-    cols: list[int] = []
-    vals: list[float] = []
-    transforms: list[np.ndarray] = []
-    klocals: list[np.ndarray] = []
-
-    for e in range(n_elem):
-        i, j = int(all_elements[e, 0]), int(all_elements[e, 1])
-        R, L = _element_rotation(model.nodes[i], model.nodes[j])
-        kloc = local_beam_stiffness(model.E_beam, model.G_beam, all_sections[e], L)
-        T = np.zeros((12, 12))
-        for blk in range(4):
-            T[3 * blk:3 * blk + 3, 3 * blk:3 * blk + 3] = R
-        kg = T.T @ kloc @ T
-        transforms.append(T)
-        klocals.append(kloc)
-        dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
-        for a_ in range(12):
-            for b_ in range(12):
-                rows.append(int(dofs[a_]))
-                cols.append(int(dofs[b_]))
-                vals.append(kg[a_, b_])
-
-    for t in range(model.shell_tris.shape[0]):
-        n0, n1, n2 = (int(model.shell_tris[t, 0]),
-                      int(model.shell_tris[t, 1]),
-                      int(model.shell_tris[t, 2]))
-        ke = tri_element_stiffness(
-            model.nodes[n0], model.nodes[n1], model.nodes[n2],
-            E=model.E_skin, nu=model.nu_skin, t=model.t_skin,
-        )
-        dofs = np.r_[6 * n0:6 * n0 + 6, 6 * n1:6 * n1 + 6, 6 * n2:6 * n2 + 6]
-        for a_ in range(18):
-            for b_ in range(18):
-                rows.append(int(dofs[a_]))
-                cols.append(int(dofs[b_]))
-                vals.append(ke[a_, b_])
-
-    # --- Z-direction penalty springs for gusset clique -------------------
-    if clique is not None:
-        A_gusset = math.pi * float(gusset_radius) ** 2
-        for pair in clique:
-            pi_idx, pj_idx = int(pair[0]), int(pair[1])
-            L = float(np.linalg.norm(model.nodes[pi_idx] - model.nodes[pj_idx]))
-            k_z = model.E_beam * A_gusset / L  # axial stiffness of a rod of this section
-            doi = 6 * pi_idx + 2   # uz DOF of node i
-            doj = 6 * pj_idx + 2   # uz DOF of node j
-            rows.extend([doi, doj, doi, doj])
-            cols.extend([doi, doj, doj, doi])
-            vals.extend([k_z, k_z, -k_z, -k_z])
-
-    K = sp.coo_matrix((vals, (rows, cols)), shape=(ndof, ndof)).tocsr()
-
-    # --- Boundary conditions and solve -----------------------------------
-    f = loads.reshape(-1).astype(float)
-    if len(model.fixed_nodes):
-        fixed_dofs = np.concatenate([6 * int(fn) + np.arange(6) for fn in model.fixed_nodes])
-    else:
-        fixed_dofs = np.array([], dtype=int)
-    free = np.setdiff1d(np.arange(ndof), fixed_dofs)
-
-    u = np.zeros(ndof)
-    u[free] = spla.spsolve(K[free][:, free].tocsc(), f[free])
-    disp = u.reshape(n_nodes, 6)
-
-    # --- Recover beam internal forces (original longitudinal beams only) -
-    # Clique (gusset) elements are computed but not returned in FrameResult
-    # so downstream stress-checking callers see only design members.
-    axial = np.zeros(n_elem)
-    bending = np.zeros(n_elem)
-    torsion = np.zeros(n_elem)
-    for e in range(n_elem):
-        i, j = int(all_elements[e, 0]), int(all_elements[e, 1])
-        ue = np.r_[u[6 * i:6 * i + 6], u[6 * j:6 * j + 6]]
-        floc = klocals[e] @ (transforms[e] @ ue)
-        axial[e] = floc[6]
-        bending[e] = max(np.hypot(floc[4], floc[5]), np.hypot(floc[10], floc[11]))
-        torsion[e] = floc[9]
-
-    return FrameResult(displacements=disp, axial_force=axial[:n_beam],
-                       bending_moment=bending[:n_beam], torsion=torsion[:n_beam]), n_beam
+    res = solve_beam_shell(
+        model.nodes, elements, sections, model.shell_tris,
+        E_beam=model.E_beam, G_beam=model.G_beam,
+        E_skin=model.E_skin, nu_skin=model.nu_skin, t_skin=model.t_skin,
+        fixed_nodes=model.fixed_nodes, loads=loads,
+    )
+    sliced = FrameResult(
+        displacements=res.displacements,
+        axial_force=res.axial_force[:n_beam],
+        bending_moment=res.bending_moment[:n_beam],
+        torsion=res.torsion[:n_beam],
+    )
+    return sliced, n_beam
