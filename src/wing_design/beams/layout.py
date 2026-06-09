@@ -31,6 +31,21 @@ def stress_weighted_targets(weights: np.ndarray, n: int) -> np.ndarray:
     return np.interp(target_w, cum, boundaries)
 
 
+def chord_symmetrize_weights(weights: np.ndarray) -> np.ndarray:
+    """Make per-perimeter-segment weights mirror-symmetric across the chord (max-of-mirror).
+
+    Segment ``b`` (between beams b and b+1) mirrors segment ``(n-1-b) % n`` across the
+    chord plane (the section is traversed TE->upper->LE->lower->TE). Returns
+    ``w_sym[b] = max(weights[b], weights[(n-1-b) % n])`` so stress-weighted placement
+    (``stress_weighted_targets``) yields a chord-symmetric beam layout that keeps the
+    radius-symmetry grouping (``beam_radius_groups``) active. Both-tack-conservative.
+    """
+    w = np.asarray(weights, dtype=float)
+    n = w.shape[0]
+    mirror = w[(n - 1 - np.arange(n)) % n]
+    return np.maximum(w, mirror)
+
+
 def cross_section_stress_weights(model: BeamShellModel, load_arrays: list[np.ndarray]) -> np.ndarray:
     """(n_beams,) per-perimeter-segment skin stress intensity from a baseline solve.
 
