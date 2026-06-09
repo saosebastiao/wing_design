@@ -430,6 +430,26 @@ unconstrained per-band coarse run could not converge. The sized beams taper mono
 (22 m)** wingsail — a ~2-tonne structure by surface area — not comparable to the small
 (5 m) ~30 kg headlines.
 
+**Analytic (adjoint) constraint Jacobian done (2026-06-09) — correct, modest speedup.**
+Opt-in `LaminateSizingConfig.use_analytic_jacobian` (default False; FD path byte-identical)
+supplies SLSQP analytic gradients for the objective + all six FEA constraints via the
+**adjoint** method, reusing one `splu(K_ff)` factorization (`structural.beam_shell.
+solve_beam_shell_laminate_factored` + `beams.sensitivity`). Every gradient is
+**FD-validated** (element ∂K/∂x primitives, adjoint engine, and each constraint to
+rel-err ≤ ~1e-4; 27 sensitivity/failure tests). TDD caught two real derivation gaps: the
+recovered internal force `floc=klocal(r)·T·u` adds a `∂klocal/∂r` term (radius gradient
+was 13× off without it), and `beam_con` is **vector-valued** (one row per beam element) so
+its Jacobian is the full `(n,nx)` matrix. `examples/38_analytic_speedup.py` (small problem,
+n_beams=12/n_levels=6, datum+buckling+4 bands): analytic and FD reach the **same feasible
+optimum** (31.15 vs 31.13 kg, buckling 1.0) with analytic **1.58× faster (489 s → 309 s)**.
+**The 1.58× is far below the ~n_DV× ceiling**, throttled by (a) the vector `beam_con` needing
+~n adjoint solves per gradient and (b) `∂K/∂x` re-assembled in pure-Python loops each adjoint
+(the design-dependent per-element derivative matrices aren't cached). The method is sound;
+the realized gain is implementation-bound. **Path to the big win (follow-up):** cache the
+per-element/per-triangle ∂K matrices once per design point (reused across `beam_con`'s n
+rows) and/or aggregate the beam-stress constraint (KS/max → 1 adjoint), and vectorize the
+assembly. Default stays FD until that lands.
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -586,5 +606,6 @@ src/wing_design/
 | Per-band skin layup | Opt-in `per_band_layup` — each n_skin_bands band gets its own (f0,f45,f90) DVs (L-group design vector, L fraction constraints; Tsai-Wu batch generalized to per-triangle fractions). Built + tested (120 tests, backward-compatible). Mass is fraction-independent → win is indirect (per-band mix → thinner bands). Headline UNQUANTIFIED: coarse comparison (1h04m) didn't converge and ended beam-buckling-infeasible; sensible fibre taper emerged. Expected small lever (buckling/stiffness-governed). Converged headline + independent layup-band-count deferred. |
 | Multi-start sizing | Serial parallel-ready `size_beam_shell_laminate_multistart`: N seeded starts (start 0 = default → never worse), best-feasible-by-mass selection (`laminate_result_is_feasible`); sizer gained an `x0` param + `laminate_design_bounds` helper. Machinery built + unit-tested via a stubbed sizer; NOT run at scale (cost). Parallel exec + full converged headline deferred. |
 | Beam symmetry + monotonic taper | Sizer DEFAULT: mirror-paired beams share one radius DV (`beam_radius_groups`, auto-detect symmetric placement + fallback), radius monotonic non-increasing keel→tip (algebraic constraints). ~Halves radius DVs → faster FD-Jacobian. Changes the default (prior headlines historical); `result.radii` still full length n. Full medium run converged feasible: 2316.6 kg (beams 585 / skin 1731), twist 5.0° / buck 1.0, 187 iters, 1 h 22 m; beams taper 35.7→4.0 mm symmetric. Sized geometry exported as STL (`exports/wingsail_sized_*.stl`). |
+| Analytic (adjoint) Jacobian | Opt-in `use_analytic_jacobian` (default off; FD byte-identical): adjoint analytic gradients for objective + all 6 FEA constraints, one reused `splu` factorization (`beams.sensitivity`, `solve_beam_shell_laminate_factored`). Every gradient FD-validated (≤~1e-4); TDD caught the ∂klocal/∂r internal-force term + the vector-valued beam_con. Same feasible optimum as FD; measured **1.58× faster** (489→309 s, small problem). Speedup implementation-bound (vector beam_con = n adjoint solves; uncached Python ∂K assembly) — follow-up: cache per-element ∂K + aggregate beam constraint for the big win. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
