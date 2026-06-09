@@ -26,7 +26,16 @@ from scipy.optimize import minimize
 
 from ..materials.failure import laminate_min_strength_ratio_batch
 from ..materials.unidir import UDPly, laminate_stiffness, laminate_stiffness_offset
-from ..structural.beam_shell import solve_beam_shell_laminate
+from ..structural.beam_shell import (
+    solve_beam_shell_laminate, solve_beam_shell_laminate_factored,
+    _recover_beam_forces as _recover_beam_forces_local,
+)
+from ..structural.frame import FrameResult, _element_rotation
+from .sensitivity import (
+    DesignSens, grad_beam_buckling, grad_skin_vm,
+    grad_panel_buckling, grad_skin_tsai_wu, grad_tip_defl, grad_tip_twist,
+    _active_beam_force, adjoint_lambda, lambdaT_dK_x, dkloc_dr,
+)
 from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
@@ -54,6 +63,7 @@ class LaminateSizingConfig:
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
     tsai_wu_safety_factor: float = 2.0
     per_band_layup: bool = False
+    use_analytic_jacobian: bool = False
 
 
 @dataclass(frozen=True)
@@ -320,6 +330,233 @@ def size_beam_shell_laminate(
         def panel_buck_con(x):
             return np.array([1.0 - evaluate(x)[5]])
         constraints += [{"type": "ineq", "fun": beam_buck_con}, {"type": "ineq", "fun": panel_buck_con}]
+
+    if config.use_analytic_jacobian:
+        from ..structural.beam_shell import FactoredBeamShell
+
+        beam_lengths_e = np.empty(n)
+        for e in range(n):
+            i, j = int(model.beam_elements[e, 0]), int(model.beam_elements[e, 1])
+            _R, Le = _element_rotation(model.nodes[i], model.nodes[j])
+            beam_lengths_e[e] = Le
+        layup_group_of_band = (
+            np.arange(B, dtype=int) if config.per_band_layup else np.zeros(B, dtype=int)
+        )
+
+        jac_cache: dict = {}
+
+        def _build_jac(x):
+            """Factor once, solve all load cases, build per-lc FactoredBeamShell + DesignSens."""
+            radii = x[:G][group_of_element]
+            t_band_vec = x[G:G + B]
+            t_tri = t_band_vec[band_of_tri]
+            f0b, f45b, f90b = band_fracs(x)
+            f0_tri = f0b[band_of_tri]
+            f45_tri = f45b[band_of_tri]
+            f90_tri = f90b[band_of_tri]
+            # Per-band Qeff and per-tri Qeff/offset (datum-aware), mirroring evaluate.
+            if datum_offsets_deg is None:
+                band_Q = [laminate_stiffness(ply, f0=float(f0b[b]), f45=float(f45b[b]),
+                                             f90=float(f90b[b]), thickness=float(t_band_vec[b]))[2]
+                          for b in range(B)]
+                Qeff_tri = np.stack(band_Q)[band_of_tri]
+                offset_tri = np.zeros(t_tri.shape[0])
+                A_band = [t_band_vec[b] * band_Q[b] for b in range(B)]
+                D_band = [(t_band_vec[b] ** 3 / 12.0) * band_Q[b] for b in range(B)]
+                A_arg = np.stack(A_band)[band_of_tri]
+                D_arg = np.stack(D_band)[band_of_tri]
+            else:
+                mats = [laminate_stiffness_offset(ply, f0=float(f0_tri[e]), f45=float(f45_tri[e]),
+                                                  f90=float(f90_tri[e]), thickness=float(t_tri[e]),
+                                                  offset_deg=float(o))
+                        for e, o in enumerate(datum_offsets_deg)]
+                A_arg = np.stack([m[0] for m in mats])
+                D_arg = np.stack([m[1] for m in mats])
+                Qeff_tri = np.stack([m[2] for m in mats])
+                offset_tri = np.asarray(datum_offsets_deg, dtype=float)
+
+            sections = [BeamSection.circular(float(r)) for r in radii]
+            # Factor once for load case 0, reuse the factorization for the rest.
+            fac0 = solve_beam_shell_laminate_factored(
+                model.nodes, model.beam_elements, sections, model.shell_tris,
+                E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
+                fixed_nodes=model.fixed_nodes, loads=load_arrays[0],
+            )
+            facs = [fac0]
+            for loads in load_arrays[1:]:
+                f = loads.reshape(-1).astype(float)
+                u = np.zeros(fac0.ndof)
+                u[fac0.free] = fac0.lu.solve(f[fac0.free])
+                disp = u.reshape(model.nodes.shape[0], 6)
+                axial, bending, torsion = _recover_beam_forces_local(
+                    model.beam_elements, n, u, fac0.transforms, fac0.klocals)
+                result = FrameResult(displacements=disp, axial_force=axial,
+                                     bending_moment=bending, torsion=torsion)
+                facs.append(FactoredBeamShell(
+                    result=result, lu=fac0.lu, K_ff=fac0.K_ff, free=fac0.free,
+                    ndof=fac0.ndof, u=u, beam_elements=model.beam_elements,
+                    transforms=fac0.transforms, klocals=fac0.klocals,
+                ))
+
+            ds = DesignSens(
+                model=model, G=G, B=B, L=L,
+                group_of_element=group_of_element,
+                band_of_tri=band_of_tri,
+                layup_group_of_band=layup_group_of_band,
+                radii_full=radii,
+                beam_lengths=beam_lengths_e,
+                t_tri=t_tri,
+                Qeff_tri=Qeff_tri,
+                offset_tri=offset_tri,
+                ply=ply,
+                f0_tri=(f0_tri if config.skin_failure == "tsai_wu" else None),
+                f45_tri=(f45_tri if config.skin_failure == "tsai_wu" else None),
+                f90_tri=(f90_tri if config.skin_failure == "tsai_wu" else None),
+            )
+            return facs, ds, sections
+
+        def _jac_lookup(x):
+            key = np.asarray(x, dtype=float).tobytes()
+            hit = jac_cache.get(key)
+            if hit is None:
+                hit = _build_jac(x)
+                jac_cache[key] = hit
+            return hit
+
+        def _binding_grad(x, grad_fn):
+            """Evaluate grad_fn over all load cases, pick the binding (min con) lc, return its row."""
+            facs, ds, _sections = _jac_lookup(x)
+            best_con = np.inf
+            best_grad = None
+            for fac in facs:
+                con, grad = grad_fn(fac, ds)
+                if con < best_con:
+                    best_con = con
+                    best_grad = grad
+            return best_grad
+
+        def _beam_vm_grad_one(fac, ds, e_star):
+            """∂(1 − vM_{e_star}/σ)/∂x as an (nx,) row, for a chosen beam element."""
+            sa = config.sigma_allow_Pa
+            floc, Mmat, dofs = _active_beam_force(fac, e_star)
+            r = float(ds.radii_full[e_star])
+            A = np.pi * r**2
+            Iz = np.pi * r**4 / 4.0
+            J = np.pi * r**4 / 2.0
+            axial = floc[6]
+            torsion = floc[9]
+            b0 = np.hypot(floc[4], floc[5])
+            b1 = np.hypot(floc[10], floc[11])
+            Mres = max(b0, b1)
+            sigma_n = abs(axial) / A + Mres * r / Iz
+            tau = abs(torsion) * r / J
+            vm = np.sqrt(sigma_n**2 + 3.0 * tau**2)
+            if vm == 0.0:
+                return np.zeros(nx)
+
+            dvm_dfloc = np.zeros(12)
+            sgn_ax = np.sign(axial) if axial != 0.0 else 0.0
+            sgn_tor = np.sign(torsion) if torsion != 0.0 else 0.0
+            dvm_dfloc[6] = (sigma_n / vm) * sgn_ax / A
+            dvm_dfloc[9] = (3.0 * tau / vm) * sgn_tor * r / J
+            if Mres > 0.0:
+                if b0 >= b1:
+                    fa, fb, ia, ib = floc[4], floc[5], 4, 5
+                else:
+                    fa, fb, ia, ib = floc[10], floc[11], 10, 11
+                coef = (sigma_n / vm) * (r / Iz)
+                dvm_dfloc[ia] = coef * (fa / Mres)
+                dvm_dfloc[ib] = coef * (fb / Mres)
+
+            dg_du = np.zeros(fac.ndof)
+            dg_du[dofs] = dvm_dfloc @ Mmat
+            lam = adjoint_lambda(fac, dg_du)
+            du_part = -lambdaT_dK_x(fac, ds, lam)
+
+            dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
+            dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
+            dvm_dr = (sigma_n * dsigma_n_dr + 3.0 * tau * dtau_dr) / vm
+            dk_dr = dkloc_dr(ds.model.E_beam, ds.model.G_beam, r,
+                             float(ds.beam_lengths[e_star]))
+            dfloc_dr = dk_dr @ fac.transforms[e_star] @ fac.u[dofs]
+            dvm_dr += dvm_dfloc @ dfloc_dr
+            du_part[int(ds.group_of_element[e_star])] += dvm_dr
+            return -du_part / sa
+
+        def beam_con_jac(x):
+            """Full (n, nx) Jacobian: row e is ∂(1 − vM_e/σ)/∂x at e's binding load case."""
+            facs, ds, sections = _jac_lookup(x)
+            # per-element binding lc = the lc achieving max vM_e (matches evaluate's max).
+            vm_lc = np.empty((len(facs), n))
+            for li, fac in enumerate(facs):
+                vm_lc[li] = von_mises_per_element(fac.result, sections)
+            binding = np.argmax(vm_lc, axis=0)
+            Jrows = np.empty((n, nx))
+            for e in range(n):
+                Jrows[e] = _beam_vm_grad_one(facs[int(binding[e])], ds, e)
+            return Jrows
+
+        def skin_con_jac(x):
+            if config.skin_failure == "tsai_wu":
+                row = _binding_grad(
+                    x, lambda fac, ds: grad_skin_tsai_wu(
+                        fac, ds, safety_factor=config.tsai_wu_safety_factor))
+            else:
+                row = _binding_grad(
+                    x, lambda fac, ds: grad_skin_vm(fac, ds, config.sigma_allow_Pa))
+            return row.reshape(1, nx)
+
+        def defl_con_jac(x):
+            def gf(fac, ds):
+                g, grad_g = grad_tip_defl(fac, ds)
+                return 1.0 - g / config.tip_defl_max_m, -grad_g / config.tip_defl_max_m
+            return _binding_grad(x, gf).reshape(1, nx)
+
+        def twist_con_jac(x):
+            def gf(fac, ds):
+                g, grad_g = grad_tip_twist(fac, ds)
+                return 1.0 - g / config.tip_twist_max_deg, -np.degrees(grad_g) / config.tip_twist_max_deg
+            return _binding_grad(x, gf).reshape(1, nx)
+
+        def frac_con_jac(x):
+            J = np.zeros((L, nx))
+            for g in range(L):
+                J[g, f0_lo + g] = -1.0
+                J[g, f45_lo + g] = -1.0
+            return J
+
+        def monotonic_con_jac(x):
+            J = np.zeros((mono_lo.size, nx))
+            for k in range(mono_lo.size):
+                J[k, int(mono_lo[k])] += 1.0
+                J[k, int(mono_hi[k])] += -1.0
+            return J
+
+        constraints[0]["jac"] = beam_con_jac
+        constraints[1]["jac"] = skin_con_jac
+        constraints[2]["jac"] = defl_con_jac
+        constraints[3]["jac"] = twist_con_jac
+        constraints[4]["jac"] = frac_con_jac
+        idx = 5
+        if mono_lo.size > 0:
+            constraints[idx]["jac"] = monotonic_con_jac
+            idx += 1
+        if config.buckling_safety_factor is not None:
+            def beam_buck_con_jac(x):
+                return _binding_grad(
+                    x, lambda fac, ds: grad_beam_buckling(
+                        fac, ds, euler_K=config.euler_K,
+                        safety_factor=config.buckling_safety_factor)).reshape(1, nx)
+
+            def panel_buck_con_jac(x):
+                return _binding_grad(
+                    x, lambda fac, ds: grad_panel_buckling(
+                        fac, ds, panel_kc=config.panel_kc,
+                        safety_factor=config.buckling_safety_factor, areas=Atri)).reshape(1, nx)
+
+            constraints[idx]["jac"] = beam_buck_con_jac
+            constraints[idx + 1]["jac"] = panel_buck_con_jac
+
     res = minimize(
         mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
         constraints=constraints,
