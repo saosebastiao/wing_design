@@ -147,10 +147,11 @@ def size_beam_shell_laminate(
             np.full(L, 1.0 / 3.0), np.full(L, 1.0 / 3.0),
         ])
     else:
-        lo_b, hi_b = laminate_design_bounds(model, config)
-        x0 = np.clip(np.asarray(x0, dtype=float), lo_b, hi_b).copy()
+        x0 = np.asarray(x0, dtype=float)
         if x0.shape != (nx,):
             raise ValueError(f"x0 must have length nx={nx}, got {x0.shape}")
+        lo_b, hi_b = laminate_design_bounds(model, config)
+        x0 = np.clip(x0, lo_b, hi_b).copy()
         # project layup groups onto the simplex (f0_g + f45_g <= 1)
         fg = x0[f0_lo:f0_lo + L]
         hg = x0[f45_lo:f45_lo + L]
@@ -407,9 +408,9 @@ def size_beam_shell_laminate_multistart(
             # so the stub receives a distinct x0 (the stub ignores it).
             return rng.uniform(0.0, 1.0, size=1)
         lo, hi = laminate_design_bounds(model, config)
-        n = model.beam_elements.shape[0]
-        f0_lo = n + B
-        f45_lo = n + B + L
+        _, G = beam_radius_groups(model)
+        f0_lo = G + B
+        f45_lo = G + B + L
         x = rng.uniform(lo, hi)
         fg = x[f0_lo:f0_lo + L]
         hg = x[f45_lo:f45_lo + L]

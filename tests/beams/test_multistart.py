@@ -142,3 +142,29 @@ def test_multistart_start0_is_default(monkeypatch):
     size_beam_shell_laminate_multistart(model, [], cfg, ply=None, rho=1600.0, n_starts=3, seed=1)
     assert x0s[0] is None                    # start 0 uses the sizer's default guess
     assert all(x is not None for x in x0s[1:])
+
+
+def test_multistart_random_starts_on_simplex(monkeypatch):
+    # Regression: make_start must project random starts onto the f0+f45<=1 simplex using
+    # the symmetric group count G (not n). Pre-fix, the slice indexed past the vector and
+    # the projection silently no-op'd, leaving off-simplex random starts.
+    import wing_design.beams.laminate_sizing as ls_mod2
+    from wing_design.beams.shell_sizing import beam_radius_groups
+    captured = []
+
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+        captured.append(x0)
+        return _result(mass_kg=10.0)
+
+    monkeypatch.setattr(ls_mod2, "size_beam_shell_laminate", fake)
+    P = small_scenario()
+    model = build_beam_shell_model(P.geometry, n_beams=8, n_levels=5, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso)
+    cfg = _cfg(n_skin_bands=2)
+    size_beam_shell_laminate_multistart(model, [], cfg, ply=None, rho=1600.0, n_starts=4, seed=3)
+    _, G = beam_radius_groups(model)
+    B, L = 2, 1
+    f0_lo, f45_lo = G + B, G + B + L
+    for x in captured[1:]:  # start 0 is None (default)
+        assert x is not None and x.shape[0] == G + B + 2 * L
+        assert np.all(x[f0_lo:f0_lo + L] + x[f45_lo:f45_lo + L] <= 1.0 + 1e-9)
