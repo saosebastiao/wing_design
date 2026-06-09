@@ -22,7 +22,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from wing_design.structural.frame import BeamSection, local_beam_stiffness
-from wing_design.structural.shell import tri_element_stiffness_laminate
+from wing_design.structural.shell import (
+    tri_element_stiffness_laminate, _triangle_local_frame,
+)
 from wing_design.materials.unidir import reduced_stiffness_Q, transformed_Qbar
 
 
@@ -304,6 +306,171 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor):
     daxial_dr = (dk_dr @ factored.transforms[e_star] @ factored.u[dofs])[6]
     dutil_dr += dutil_daxial * daxial_dr
     du_part[int(ds.group_of_element[e_star])] += dutil_dr
+
+    grad = -du_part
+    return con_value, grad
+
+
+# --- Skin membrane stress sensitivities -----------------------------------
+
+
+def _membrane_strain_map(p1, p2, p3):
+    """Return (Gt 3x18, area) mapping element 18 global DOFs -> element-local
+    membrane strain eps=[exx,eyy,gxy]. Replicates `recover_membrane_strain`.
+
+    Only the three translational DOFs per node participate: eps = Bm @ u_m,
+    with u_m[2k:2k+2] = (R^T u_trans_k)[:2]. So Gt scatters Bm @ S, where S maps
+    the 18-DOF element vector to the 6-vector u_m via per-node R^T (first 2 rows).
+    """
+    R, local, area = _triangle_local_frame(p1, p2, p3)
+    x1, y1 = local[0]; x2, y2 = local[1]; x3, y3 = local[2]
+    b = np.array([y2 - y3, y3 - y1, y1 - y2])
+    c = np.array([x3 - x2, x1 - x3, x2 - x1])
+    two_A = 2.0 * area
+    Bm = np.zeros((3, 6))
+    for k in range(3):
+        Bm[0, 2 * k + 0] = b[k] / two_A
+        Bm[1, 2 * k + 1] = c[k] / two_A
+        Bm[2, 2 * k + 0] = c[k] / two_A
+        Bm[2, 2 * k + 1] = b[k] / two_A
+    # S (6x18): per node, u_m rows = (R^T)[:2] applied to translational DOFs.
+    S = np.zeros((6, 18))
+    Rt = R.T
+    for nidx in range(3):
+        S[2 * nidx:2 * nidx + 2, 6 * nidx:6 * nidx + 3] = Rt[:2, :]
+    Gt = Bm @ S
+    return Gt, area
+
+
+def _active_tri_stress(factored, ds, t):
+    """Return (s 3-vec, eps 3-vec, Gt 3x18, area, dofs 18, C_t 3x3) for triangle t."""
+    tris = ds.model.shell_tris
+    nodes = ds.model.nodes
+    n0, n1, n2 = int(tris[t, 0]), int(tris[t, 1]), int(tris[t, 2])
+    Gt, area = _membrane_strain_map(nodes[n0], nodes[n1], nodes[n2])
+    dofs = np.r_[6 * n0:6 * n0 + 6, 6 * n1:6 * n1 + 6, 6 * n2:6 * n2 + 6]
+    u_tri = factored.u[dofs]
+    eps = Gt @ u_tri
+    C_t = ds.Qeff_tri[t]
+    s = C_t @ eps
+    return s, eps, Gt, area, dofs, C_t
+
+
+def grad_skin_vm(factored, ds, sigma_allow):
+    """skin von-Mises feasibility constraint gradient.
+
+    con = 1 − max_t(vM_t)/σ_allow, membrane stress is thickness-independent.
+    Returns (con_value, grad (nx,)).
+    """
+    tris = ds.model.shell_tris
+    M = tris.shape[0]
+    vms = np.empty(M)
+    cache = []
+    for t in range(M):
+        s, eps, Gt, area, dofs, C_t = _active_tri_stress(factored, ds, t)
+        sxx, syy, sxy = s
+        vm = np.sqrt(sxx**2 - sxx * syy + syy**2 + 3.0 * sxy**2)
+        vms[t] = vm
+        cache.append((s, eps, Gt, area, dofs, C_t, vm))
+
+    t_star = int(np.argmax(vms))
+    s, eps, Gt, area, dofs, C_t, vm = cache[t_star]
+    sxx, syy, sxy = s
+    con_value = 1.0 - vm / sigma_allow
+
+    # ∂vM/∂s
+    dg_ds = np.array([
+        (2.0 * sxx - syy) / (2.0 * vm),
+        (2.0 * syy - sxx) / (2.0 * vm),
+        3.0 * sxy / vm,
+    ])
+
+    # implicit: dg_du = scatter of dg_ds @ (C_t @ Gt) (18-vec) into ndof
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dg_ds @ (C_t @ Gt)
+    lam = adjoint_lambda(factored, dg_du)
+    du_part = -lambdaT_dK_x(factored, ds, lam)
+
+    # explicit f terms (no t term: membrane stress is thickness-independent)
+    b = int(ds.band_of_tri[t_star])
+    lg = int(ds.layup_group_of_band[b])
+    off = float(ds.offset_tri[t_star])
+    for which, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
+        dQ = dQeff_df(ds.ply, which=which, offset_deg=off)
+        ds_df = dQ @ eps                # ∂s/∂f|explicit
+        dvm_df = float(dg_ds @ ds_df)
+        du_part[base + lg] += dvm_df
+
+    grad = -du_part / sigma_allow
+    return con_value, grad
+
+
+def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas):
+    """skin (panel) buckling feasibility constraint gradient.
+
+    con = 1 − max_t(util_t), util = comp·SF/σcr, comp=max(0,−s_min),
+    s_min=mean−R, σcr = kc·π²·Qeff00·t²/(12 b²), b=√area. Returns (con_value, grad).
+    """
+    tris = ds.model.shell_tris
+    M = tris.shape[0]
+    SF = safety_factor
+    utils = np.empty(M)
+    cache = []
+    for t in range(M):
+        s, eps, Gt, area, dofs, C_t = _active_tri_stress(factored, ds, t)
+        sxx, syy, sxy = s
+        mean = 0.5 * (sxx + syy)
+        R = np.sqrt(0.25 * (sxx - syy) ** 2 + sxy**2)
+        s_min = mean - R
+        comp = max(0.0, -s_min)
+        tt = float(ds.t_tri[t])
+        Qeff00 = float(C_t[0, 0])
+        b2 = float(areas[t])           # b² = area
+        sigma_cr = panel_kc * np.pi**2 * Qeff00 * tt**2 / (12.0 * b2)
+        util = comp * SF / max(sigma_cr, 1e-30)
+        utils[t] = util
+        cache.append((s, eps, Gt, area, dofs, C_t, comp, R, sigma_cr, util, tt, Qeff00))
+
+    t_star = int(np.argmax(utils))
+    (s, eps, Gt, area, dofs, C_t, comp, R, sigma_cr, util, tt,
+     Qeff00) = cache[t_star]
+    sxx, syy, sxy = s
+    con_value = 1.0 - util
+
+    if comp == 0.0:
+        return con_value, np.zeros(ds.G + ds.B + 2 * ds.L)
+
+    # ∂comp/∂s with comp = R − mean (since s_min<0 here)
+    # ∂R/∂sxx = (sxx−syy)/(4R), ∂R/∂syy = −(sxx−syy)/(4R), ∂R/∂sxy = sxy/R
+    dR = np.array([
+        (sxx - syy) / (4.0 * R),
+        -(sxx - syy) / (4.0 * R),
+        sxy / R,
+    ]) if R > 0.0 else np.zeros(3)
+    dmean = np.array([0.5, 0.5, 0.0])
+    dcomp_ds = dR - dmean
+    dutil_ds = (SF / sigma_cr) * dcomp_ds
+
+    # implicit term
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dutil_ds @ (C_t @ Gt)
+    lam = adjoint_lambda(factored, dg_du)
+    du_part = -lambdaT_dK_x(factored, ds, lam)
+
+    # explicit t: util ∝ 1/σcr ∝ 1/t² ⇒ ∂util/∂t = −2·util/t
+    b = int(ds.band_of_tri[t_star])
+    du_part[ds.G + b] += -2.0 * util / tt
+
+    # explicit f: util = comp(f)·SF/σcr(f); σcr ∝ Qeff00(f); comp via ∂s/∂f.
+    lg = int(ds.layup_group_of_band[b])
+    off = float(ds.offset_tri[t_star])
+    for which, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
+        dQ = dQeff_df(ds.ply, which=which, offset_deg=off)
+        ds_df = dQ @ eps
+        dcomp_df = float(dcomp_ds @ ds_df)
+        dsigcr_df = float(dQ[0, 0]) * (sigma_cr / Qeff00)
+        dutil_df = (SF / sigma_cr) * dcomp_df - util * dsigcr_df / sigma_cr
+        du_part[base + lg] += dutil_df
 
     grad = -du_part
     return con_value, grad

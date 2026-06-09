@@ -310,3 +310,168 @@ def test_grad_beam_buckling_matches_fd():
         fd[i] = (beam_buck_con(xp) - beam_buck_con(xm)) / (2.0 * h)
 
     assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+# --- Task 5: skin von-Mises + panel buckling gradients (FD-validated) ---
+from wing_design.beams.sensitivity import grad_skin_vm, grad_panel_buckling
+from wing_design.structural.shell import (
+    recover_membrane_stress_C, membrane_von_mises, _triangle_local_frame,
+)
+from wing_design.structural.buckling import panel_buckling_utilization
+
+_SKIN_SIGMA_ALLOW = 6.0e8
+_PANEL_KC = 4.0
+_PANEL_SF = 1.5
+
+
+def _tri_areas(m):
+    areas = np.empty(m.shell_tris.shape[0])
+    for t in range(m.shell_tris.shape[0]):
+        n0, n1, n2 = (int(v) for v in m.shell_tris[t])
+        _R, _loc, a = _triangle_local_frame(m.nodes[n0], m.nodes[n1], m.nodes[n2])
+        areas[t] = a
+    return areas
+
+
+def _build_ds_off(m, group_of_element, G, M, beam_lengths, x, offset_deg):
+    ds = _build_ds(m, group_of_element, G, M, beam_lengths, x)
+    if offset_deg != 0.0:
+        from wing_design.materials.unidir import laminate_stiffness_offset
+        t = float(x[G]); f0 = float(x[G + 1]); f45 = float(x[G + 2])
+        f90 = 1.0 - f0 - f45
+        _A, _D, Qeff = laminate_stiffness_offset(
+            T700_EPOXY, f0=f0, f45=f45, f90=f90, thickness=t, offset_deg=offset_deg
+        )
+        ds.Qeff_tri = np.broadcast_to(Qeff, (M, 3, 3)).copy()
+        ds.offset_tri = np.full(M, offset_deg)
+    return ds
+
+
+def _decode_solve_off(m, group_of_element, G, beam_lengths, loads, x, offset_deg):
+    """Decode + solve, applying a ply-angle datum offset to the laminate."""
+    from wing_design.materials.unidir import laminate_stiffness_offset
+    r_groups = x[:G]
+    t = float(x[G]); f0 = float(x[G + 1]); f45 = float(x[G + 2])
+    f90 = 1.0 - f0 - f45
+    radii_full = r_groups[group_of_element]
+    secs = [BeamSection.circular(float(r)) for r in radii_full]
+    _A, _D, Qeff = laminate_stiffness_offset(
+        T700_EPOXY, f0=f0, f45=f45, f90=f90, thickness=t, offset_deg=offset_deg
+    )
+    A = t * Qeff; D = (t**3 / 12.0) * Qeff
+    fac = solve_beam_shell_laminate_factored(
+        m.nodes, m.beam_elements, secs, m.shell_tris,
+        E_beam=m.E_beam, G_beam=m.G_beam, A_skin=A, D_skin=D,
+        fixed_nodes=m.fixed_nodes, loads=loads,
+    )
+    return fac, Qeff
+
+
+def _skin_con_value(m, fac, Qeff, sigma_allow):
+    C = np.broadcast_to(Qeff, (m.shell_tris.shape[0], 3, 3)).copy()
+    s = recover_membrane_stress_C(m.nodes, m.shell_tris, fac.result.displacements, C=C)
+    return 1.0 - float(np.max(membrane_von_mises(s))) / sigma_allow
+
+
+def _panel_buck_con_value(m, fac, Qeff, t, areas, kc, SF):
+    C = np.broadcast_to(Qeff, (m.shell_tris.shape[0], 3, 3)).copy()
+    s = recover_membrane_stress_C(m.nodes, m.shell_tris, fac.result.displacements, C=C)
+    util = np.empty(m.shell_tris.shape[0])
+    for k in range(m.shell_tris.shape[0]):
+        D11 = (t**3 / 12.0) * float(Qeff[0, 0])
+        util[k] = panel_buckling_utilization(
+            s[k:k + 1], areas[k:k + 1], D11=D11, t=t, kc=kc, safety_factor=SF
+        )[0]
+    return 1.0 - float(np.max(util))
+
+
+def _skin_case():
+    """Tip load with strong chordwise + spanwise components -> nonzero skin stress
+    and clearly compressive panels."""
+    m, group_of_element, G, n, M, beam_lengths, _loads = _adjoint_case()
+    loads = np.zeros((m.nodes.shape[0], 6))
+    loads[m.tip_nodes, 2] = -1.2e5   # spanwise compression -> compressive panels
+    for a, node in enumerate(m.tip_nodes):
+        loads[node, 0] = 60.0 + 11.0 * a   # chordwise, distinct -> unique active tri
+    return m, group_of_element, G, n, M, beam_lengths, loads
+
+
+def _run_skin_vm(offset_deg):
+    m, group_of_element, G, n, M, beam_lengths, loads = _skin_case()
+    x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
+    nx = G + 1 + 2
+
+    fac0, Qeff0 = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, x0, offset_deg)
+    ds0 = _build_ds_off(m, group_of_element, G, M, beam_lengths, x0, offset_deg)
+
+    con0, grad = grad_skin_vm(fac0, ds0, _SKIN_SIGMA_ALLOW)
+    assert np.isclose(con0, _skin_con_value(m, fac0, Qeff0, _SKIN_SIGMA_ALLOW))
+
+    steps = np.concatenate([np.full(G, 1e-7), [1e-7, 1e-6, 1e-6]])
+    fd = np.zeros(nx)
+    for i in range(nx):
+        h = steps[i]
+        xp = x0.copy(); xp[i] += h
+        xm = x0.copy(); xm[i] -= h
+        facp, Qp = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, xp, offset_deg)
+        facm, Qm = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, xm, offset_deg)
+        fd[i] = (
+            _skin_con_value(m, facp, Qp, _SKIN_SIGMA_ALLOW)
+            - _skin_con_value(m, facm, Qm, _SKIN_SIGMA_ALLOW)
+        ) / (2.0 * h)
+    return grad, fd
+
+
+def test_grad_skin_vm_matches_fd():
+    grad, fd = _run_skin_vm(offset_deg=0.0)
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+def test_grad_skin_vm_matches_fd_offset():
+    grad, fd = _run_skin_vm(offset_deg=30.0)
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+def _run_panel_buckling(offset_deg):
+    m, group_of_element, G, n, M, beam_lengths, loads = _skin_case()
+    areas = _tri_areas(m)
+    x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
+    nx = G + 1 + 2
+
+    fac0, Qeff0 = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, x0, offset_deg)
+    ds0 = _build_ds_off(m, group_of_element, G, M, beam_lengths, x0, offset_deg)
+
+    con0, grad = grad_panel_buckling(
+        fac0, ds0, panel_kc=_PANEL_KC, safety_factor=_PANEL_SF, areas=areas
+    )
+    t0 = float(x0[G])
+    assert np.isclose(
+        con0, _panel_buck_con_value(m, fac0, Qeff0, t0, areas, _PANEL_KC, _PANEL_SF)
+    )
+    # ensure a clearly compressive active panel
+    assert con0 < 1.0
+
+    steps = np.concatenate([np.full(G, 1e-7), [1e-7, 1e-6, 1e-6]])
+    fd = np.zeros(nx)
+    for i in range(nx):
+        h = steps[i]
+        xp = x0.copy(); xp[i] += h
+        xm = x0.copy(); xm[i] -= h
+        facp, Qp = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, xp, offset_deg)
+        facm, Qm = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, xm, offset_deg)
+        tp = float(xp[G]); tm = float(xm[G])
+        fd[i] = (
+            _panel_buck_con_value(m, facp, Qp, tp, areas, _PANEL_KC, _PANEL_SF)
+            - _panel_buck_con_value(m, facm, Qm, tm, areas, _PANEL_KC, _PANEL_SF)
+        ) / (2.0 * h)
+    return grad, fd
+
+
+def test_grad_panel_buckling_matches_fd():
+    grad, fd = _run_panel_buckling(offset_deg=0.0)
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+def test_grad_panel_buckling_matches_fd_offset():
+    grad, fd = _run_panel_buckling(offset_deg=30.0)
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
