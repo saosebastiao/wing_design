@@ -57,3 +57,55 @@ def test_gusset_reduces_tip_twist_fixed_design():
     gus_tw = np.abs(gus.displacements[m.tip_nodes, 5]).max()
     assert gus_tw < 0.5 * base_tw            # large reduction
     assert base.axial_force.shape == gus.axial_force.shape == (m.beam_elements.shape[0],)  # recovery design-only
+
+
+from wing_design.beams import (LaminateSizingConfig, build_beam_frame, project_panels_to_beam_nodes,
+                               size_beam_shell_laminate, model_with_tip_gusset, beam_radius_groups)
+from wing_design.aero import build_airplane, sweep_envelope
+from wing_design.beams.laminate_sizing import laminate_result_is_feasible
+
+
+def _sizer_case(gusset=False, n_beams=8, n_levels=5):
+    P = small_scenario(); spec = P.geometry
+    m = build_beam_shell_model(spec, n_beams=n_beams, n_levels=n_levels, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso,
+        skin_thickness=P.skin_sizing.t_baseline_m,
+        **({"tip_gusset_radius": 0.05} if gusset else {}))
+    fr = build_beam_frame(spec, n_beams=n_beams, n_levels=n_levels, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso)
+    env = sweep_envelope(build_airplane(spec), P.load_cases, method="lifting_line",
+                         spanwise_resolution=P.aero.spanwise_resolution)
+    loads = [project_panels_to_beam_nodes(fr, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in env if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
+    cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa, tip_defl_max_m=0.02*spec.span,
+        tip_twist_max_deg=5.0, buckling_safety_factor=1.5, n_skin_bands=2)
+    return P, m, loads, cfg
+
+
+def test_sizer_with_gusset_feasible_not_heavier():
+    P, m, loads, cfg = _sizer_case(gusset=True)
+    Pn, mn, loadsn, cfgn = _sizer_case(gusset=False)
+    rn = size_beam_shell_laminate(mn, loadsn, cfgn, ply=Pn.material, rho=Pn.rho_kgm3, maxiter=60)
+    # warm-start from no-gusset solution: the stiff gusset shifts the landscape; cold start from r_max
+    # converges to a local minimum, but starting near the no-gusset optimum reaches the correct basin.
+    group_of_element, G = beam_radius_groups(m)
+    B = cfg.n_skin_bands
+    L = 1  # not per_band_layup
+    x0 = np.concatenate([
+        np.array([float(rn.radii[group_of_element == g].mean()) for g in range(G)]),
+        rn.t_bands,
+        rn.f0_bands[:L],
+        rn.f45_bands[:L],
+    ])
+    rg = size_beam_shell_laminate(m, loads, cfg, ply=P.material, rho=P.rho_kgm3, maxiter=200, x0=x0)
+    assert laminate_result_is_feasible(rg, cfg)
+    assert rg.mass_kg <= rn.mass_kg + 2.0     # twist relief shouldn't cost mass
+
+
+def test_analytic_jacobian_composes_with_gusset():
+    P, m, loads, cfg = _sizer_case(gusset=True)
+    cfg_an = LaminateSizingConfig(sigma_allow_Pa=cfg.sigma_allow_Pa, tip_defl_max_m=cfg.tip_defl_max_m,
+        tip_twist_max_deg=cfg.tip_twist_max_deg, buckling_safety_factor=1.5, n_skin_bands=2,
+        use_analytic_jacobian=True)
+    r = size_beam_shell_laminate(m, loads, cfg_an, ply=P.material, rho=P.rho_kgm3, maxiter=200)
+    assert laminate_result_is_feasible(r, cfg_an)

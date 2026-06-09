@@ -139,6 +139,9 @@ def size_beam_shell_laminate(
 ) -> LaminateSizingResult:
     if not load_arrays:
         raise ValueError("load_arrays is empty")
+    gusset_elements = model.tip_gusset_elements
+    gusset_section = (BeamSection.circular(model.tip_gusset_radius)
+                     if gusset_elements is not None else None)
     n = model.beam_elements.shape[0]
     B = config.n_skin_bands
     L = B if config.per_band_layup else 1
@@ -251,6 +254,7 @@ def size_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
                 E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
                 fixed_nodes=model.fixed_nodes, loads=loads,
+                gusset_elements=gusset_elements, gusset_section=gusset_section,
             )
             wb = np.maximum(wb, von_mises_per_element(res, sections))
             skin_s = recover_membrane_stress_C(model.nodes, model.shell_tris, res.displacements, C=C_arg)
@@ -381,6 +385,7 @@ def size_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
                 E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
                 fixed_nodes=model.fixed_nodes, loads=load_arrays[0],
+                gusset_elements=gusset_elements, gusset_section=gusset_section,
             )
             facs = [fac0]
             for loads in load_arrays[1:]:
