@@ -370,6 +370,32 @@ SLSQP `evaluate` × the FD-Jacobian's ~115 evaluates/iter); vectorize the inner 
 before using it in any larger sweep. First-ply only; smeared laminate (no
 stacking/delamination).
 
+**Tsai-Wu vectorized (2026-06-08).** The per-triangle Python loop in the Tsai-Wu check
+was replaced by a vectorized `laminate_min_strength_ratio_batch` (identical results;
+scalar delegates to it). **Lesson (corrected):** this gave only a *modest* speedup — a
+post-vectorization run of `examples/34` was still >1 h 18 m before being killed — because
+the dominant cost is the **FEA solve per `evaluate`** (`solve_beam_shell_laminate` called
+~(n_design_vars+1)× per SLSQP iteration by the finite-difference Jacobian × maxiter ×
+n_load_cases), NOT the per-ply inner loop. Sizing-run cost is gated by mesh size, maxiter,
+and DV count; an analytic/!FD Jacobian or fewer DVs would be the real lever.
+
+**Per-band skin layup done (2026-06-08) — built & tested; mass win unquantified.**
+Opt-in `LaminateSizingConfig.per_band_layup` gives each `n_skin_bands` spanwise band its
+own `(f0,f45,f90)` (default off = global layup; the Tsai-Wu batch was generalized to
+per-triangle fractions so it composes). Backward-compatible (full suite green, 120
+tests). Since skin mass is fraction-independent, any win is **indirect** (a band's fibre
+mix can meet the constraints at a thinner thickness). **Measurement inconclusive:** a
+coarse comparison (medium wingsail, n_beams=12/n_levels=6, 4 bands, datum+buckling,
+maxiter 120 global / 200 per-band) took **1 h 04 m** and *neither* run converged
+(both hit maxiter); the per-band run ended **beam-buckling-infeasible (util 1.70)**, so
+its −6.6% lower mass is not a valid feasible win. The per-band run did produce a sensible
+fibre **taper** (root band ≈48/23/29 spanwise-heavy, mid bands more ±45/chord), so the
+mechanism works, but a trustworthy headline needs a converged feasible run (more
+iterations / better conditioning) — deferred given cost. Consistent with the
+buckling/stiffness-governed picture (Tsai-Wu showed huge strength margin), per-band layup
+is expected to be a small, hard-to-realize lever. Independent layup-band-count and a
+global/multi-start pass remain deferred.
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -522,5 +548,7 @@ src/wing_design/
 | Combined final design | Span-datum CLT layup co-sized WITH buckling (`examples/32_final_design.py`) — both refinements together, not separately. 30.15 kg (beams 9.38 / skin 20.77 @ 1.52 mm), buckling-governed (beam & panel util = 1.0), twist/defl slack, layup 31/15/54% span/±45/chord. Heavier than the partial numbers (E.4b 19.0 no-buckling; isotropic+buckling 26.1) because manufacturable-datum + buckling compound. **This is the defensible fully-constrained headline.** SLSQP local optimum (per-tri-local+buckling hit 26.06) → multi-start is the refinement if mass-critical. |
 | Per-band skin thickness | Skin thickness split into B contiguous spanwise bands (opt-in `n_skin_bands`, default 1 = uniform/unchanged; `beams.skin_band_map`), each a thickness DV in the SLSQP laminate loop; per-triangle thickness drives CLT stiffness, panel buckling, and mass; `t_skin` retained as the area-weighted mean. Uniform 30.11 kg → 4-band **27.67 kg (−8.1%)**, all saved in the skin; taper 0.96/1.29/1.57/1.55 mm tip→keel; governing constraint flips buckling→twist. Needs more SLSQP iters (~354 vs 70). Highest-leverage skin lever. Per-ply Tsai-Wu + per-band layup deferred. |
 | Per-ply Tsai-Wu skin failure | Opt-in `skin_failure="tsai_wu"` (default von-Mises unchanged; `materials.failure`) — per-ply Tsai-Wu strength ratio R≥SF (F12=-0.5√(F11 F22), material SF 2.0) over present orientations, from per-triangle membrane strain (`recover_membrane_strain`). vs von-Mises proxy at equal constraints: 30.11→30.07 kg (−0.1%), layup ~unchanged, **min R = 7.01 ≫ SF 2.0** → skin is buckling/stiffness-governed, not strength-governed; the proxy was already adequate. Kept for strength-critical regimes. Measured cost ~2h11m (per-triangle loop × SLSQP FD-Jacobian — vectorize before large sweeps). First-ply only; smeared laminate. |
+| Tsai-Wu vectorized | Per-triangle Python loop replaced by vectorized `laminate_min_strength_ratio_batch` (identical results; scalar delegates). Modest speedup only — the dominant sizing cost is the FEA solve per `evaluate` × FD-Jacobian width × maxiter, not the inner loop. Real lever would be an analytic Jacobian or fewer DVs. |
+| Per-band skin layup | Opt-in `per_band_layup` — each n_skin_bands band gets its own (f0,f45,f90) DVs (L-group design vector, L fraction constraints; Tsai-Wu batch generalized to per-triangle fractions). Built + tested (120 tests, backward-compatible). Mass is fraction-independent → win is indirect (per-band mix → thinner bands). Headline UNQUANTIFIED: coarse comparison (1h04m) didn't converge and ended beam-buckling-infeasible; sensible fibre taper emerged. Expected small lever (buckling/stiffness-governed). Converged headline + independent layup-band-count deferred. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
