@@ -329,3 +329,82 @@ def size_beam_shell_laminate(
         max_panel_buckling_util=float(pbu),
         min_skin_strength_ratio=(float(worst_R) if config.skin_failure == "tsai_wu" else None),
     )
+
+
+@dataclass(frozen=True)
+class MultiStartResult:
+    best: LaminateSizingResult
+    best_start_index: int
+    n_starts: int
+    n_feasible: int
+    start_masses: tuple[float, ...]
+    start_feasible: tuple[bool, ...]
+
+
+def size_beam_shell_laminate_multistart(
+    model: BeamShellModel,
+    load_arrays,
+    config: LaminateSizingConfig,
+    *,
+    ply: UDPly,
+    rho: float,
+    n_starts: int = 8,
+    seed: int = 0,
+    maxiter: int = 80,
+    ftol: float = 1.0e-4,
+) -> MultiStartResult:
+    """Run the sizer from ``n_starts`` initial guesses; return the best feasible result.
+
+    Start 0 is the sizer's default guess (so the result is never worse than a single
+    start); starts 1.. are uniform-random within the design bounds (per-group
+    simplex-projected), from a seeded RNG (deterministic for a given ``seed``). The
+    start loop is a serial map (swappable for multiprocessing). Selection: min-mass among
+    feasible results (``laminate_result_is_feasible``); if none feasible, min-mass overall
+    with ``n_feasible == 0``.
+    """
+    if n_starts < 1:
+        raise ValueError(f"n_starts must be >= 1, got {n_starts}")
+    B = config.n_skin_bands
+    L = B if config.per_band_layup else 1
+    rng = np.random.default_rng(seed)
+
+    def make_start(k):
+        if k == 0:
+            return None
+        if model is None:
+            # model is None only in tests with a stubbed sizer; return a non-None sentinel
+            # so the stub receives a distinct x0 (the stub ignores it).
+            return rng.uniform(0.0, 1.0, size=1)
+        lo, hi = laminate_design_bounds(model, config)
+        n = model.beam_elements.shape[0]
+        f0_lo = n + B
+        f45_lo = n + B + L
+        x = rng.uniform(lo, hi)
+        fg = x[f0_lo:f0_lo + L]
+        hg = x[f45_lo:f45_lo + L]
+        scale = np.where(fg + hg > 1.0, fg + hg, 1.0)
+        x[f0_lo:f0_lo + L] = fg / scale
+        x[f45_lo:f45_lo + L] = hg / scale
+        return x
+
+    starts = [make_start(k) for k in range(n_starts)]
+    # Serial map (swap for multiprocessing.Pool.map later without interface change).
+    results = [
+        size_beam_shell_laminate(model, load_arrays, config, ply=ply, rho=rho,
+                                 maxiter=maxiter, ftol=ftol, x0=s)
+        for s in starts
+    ]
+    feasible = [laminate_result_is_feasible(r, config) for r in results]
+    masses = [float(r.mass_kg) for r in results]
+
+    feasible_idx = [i for i, ok in enumerate(feasible) if ok]
+    pool = feasible_idx if feasible_idx else list(range(n_starts))
+    best_idx = min(pool, key=lambda i: masses[i])
+    return MultiStartResult(
+        best=results[best_idx],
+        best_start_index=int(best_idx),
+        n_starts=int(n_starts),
+        n_feasible=int(len(feasible_idx)),
+        start_masses=tuple(masses),
+        start_feasible=tuple(bool(b) for b in feasible),
+    )

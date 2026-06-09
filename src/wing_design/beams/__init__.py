@@ -36,6 +36,7 @@ from .shell_sizing import (
 from .laminate_sizing import (
     LaminateSizingConfig, LaminateSizingResult, size_beam_shell_laminate,
     laminate_design_bounds, laminate_result_is_feasible,
+    MultiStartResult, size_beam_shell_laminate_multistart,
 )
 from .fidelity import spline_surface_error
 from .sections import lens_section_polyline, oml_outward_normals
@@ -86,6 +87,8 @@ __all__ = [
     "size_beam_shell_laminate",
     "laminate_design_bounds",
     "laminate_result_is_feasible",
+    "MultiStartResult",
+    "size_beam_shell_laminate_multistart",
     "spline_surface_error",
     "lens_section_polyline",
     "oml_outward_normals",

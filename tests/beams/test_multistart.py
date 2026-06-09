@@ -78,3 +78,66 @@ def test_x0_roundtrip_backward_compat():
     default = np.concatenate([np.full(n, cfg.r_max), np.full(1, cfg.t_max), [1/3], [1/3]])
     b = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=15, x0=default)
     assert np.allclose(a.radii, b.radii) and np.isclose(a.mass_kg, b.mass_kg)
+
+
+import wing_design.beams.laminate_sizing as ls_mod
+from wing_design.beams import size_beam_shell_laminate_multistart, MultiStartResult
+
+
+def test_multistart_selects_best_feasible(monkeypatch):
+    # stub returns canned results by call order; start 2 is lightest-but-infeasible.
+    masses = [10.0, 8.0, 6.0, 9.0]
+    feas =   [True, True, False, True]
+    calls = {"i": 0}
+
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+        i = calls["i"]; calls["i"] += 1
+        buck = 1.7 if not feas[i] else 0.9
+        return _result(mass_kg=masses[i], max_beam_buckling_util=buck)
+
+    monkeypatch.setattr(ls_mod, "size_beam_shell_laminate", fake)
+    cfg = _cfg(buckling_safety_factor=1.5)
+    res = size_beam_shell_laminate_multistart(None, None, cfg, ply=None, rho=1600.0,
+                                              n_starts=4, seed=0, maxiter=5)
+    assert isinstance(res, MultiStartResult)
+    assert res.n_starts == 4 and res.n_feasible == 3
+    assert res.best.mass_kg == 8.0          # lightest FEASIBLE (6.0 was infeasible)
+    assert res.best_start_index == 1
+    assert len(res.start_masses) == 4 and len(res.start_feasible) == 4
+
+
+def test_multistart_deterministic(monkeypatch):
+    seen = []
+
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+        # mass depends on x0 so different starts differ; record x0 to check determinism
+        seen.append(None if x0 is None else float(np.sum(x0)))
+        m = 10.0 if x0 is None else float(5.0 + np.sum(x0))
+        return _result(mass_kg=m)
+
+    monkeypatch.setattr(ls_mod, "size_beam_shell_laminate", fake)
+    cfg = _cfg(n_skin_bands=2)
+    P = small_scenario()
+    model = build_beam_shell_model(P.geometry, n_beams=8, n_levels=5, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso)
+    r1 = size_beam_shell_laminate_multistart(model, [], cfg, ply=None, rho=1600.0, n_starts=3, seed=42)
+    r2 = size_beam_shell_laminate_multistart(model, [], cfg, ply=None, rho=1600.0, n_starts=3, seed=42)
+    assert r1.best_start_index == r2.best_start_index
+    assert r1.start_masses == r2.start_masses
+
+
+def test_multistart_start0_is_default(monkeypatch):
+    x0s = []
+
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+        x0s.append(x0)
+        return _result(mass_kg=10.0)
+
+    monkeypatch.setattr(ls_mod, "size_beam_shell_laminate", fake)
+    cfg = _cfg(n_skin_bands=2)
+    P = small_scenario()
+    model = build_beam_shell_model(P.geometry, n_beams=8, n_levels=5, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso)
+    size_beam_shell_laminate_multistart(model, [], cfg, ply=None, rho=1600.0, n_starts=3, seed=1)
+    assert x0s[0] is None                    # start 0 uses the sizer's default guess
+    assert all(x is not None for x in x0s[1:])
