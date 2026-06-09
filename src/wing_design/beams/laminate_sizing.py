@@ -78,6 +78,41 @@ class LaminateSizingResult:
     min_skin_strength_ratio: float | None
 
 
+def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
+    """(lo, hi) bound arrays for the sizer design vector [radii(n), t_band(B), f0_grp(L), f45_grp(L)]."""
+    n = model.beam_elements.shape[0]
+    B = config.n_skin_bands
+    L = B if config.per_band_layup else 1
+    lo = np.concatenate([np.full(n, config.r_min), np.full(B, config.t_min), np.zeros(2 * L)])
+    hi = np.concatenate([np.full(n, config.r_max), np.full(B, config.t_max), np.ones(2 * L)])
+    return lo, hi
+
+
+def laminate_result_is_feasible(
+    result: "LaminateSizingResult", config: LaminateSizingConfig, *, tol: float = 1.0e-3,
+) -> bool:
+    """True iff every active sizing constraint holds within relative ``tol``."""
+    if result.max_beam_vm_Pa > config.sigma_allow_Pa * (1.0 + tol):
+        return False
+    if config.skin_failure == "tsai_wu":
+        r = result.min_skin_strength_ratio
+        if r is None or r < config.tsai_wu_safety_factor * (1.0 - tol):
+            return False
+    else:
+        if result.max_skin_vm_Pa > config.sigma_allow_Pa * (1.0 + tol):
+            return False
+    if result.tip_defl_m > config.tip_defl_max_m * (1.0 + tol):
+        return False
+    if result.tip_twist_deg > config.tip_twist_max_deg * (1.0 + tol):
+        return False
+    if config.buckling_safety_factor is not None:
+        if result.max_beam_buckling_util > 1.0 + tol:
+            return False
+        if result.max_panel_buckling_util > 1.0 + tol:
+            return False
+    return True
+
+
 def size_beam_shell_laminate(
     model: BeamShellModel,
     load_arrays: list[np.ndarray],
@@ -87,6 +122,7 @@ def size_beam_shell_laminate(
     rho: float,
     maxiter: int = 80,
     ftol: float = 1.0e-4,
+    x0: np.ndarray | None = None,
 ) -> LaminateSizingResult:
     if not load_arrays:
         raise ValueError("load_arrays is empty")
@@ -101,10 +137,22 @@ def size_beam_shell_laminate(
     nx = n + B + 2 * L
     f0_lo = n + B
     f45_lo = n + B + L
-    x0 = np.concatenate([
-        np.full(n, config.r_max), np.full(B, config.t_max),
-        np.full(L, 1.0 / 3.0), np.full(L, 1.0 / 3.0),
-    ])
+    if x0 is None:
+        x0 = np.concatenate([
+            np.full(n, config.r_max), np.full(B, config.t_max),
+            np.full(L, 1.0 / 3.0), np.full(L, 1.0 / 3.0),
+        ])
+    else:
+        lo_b, hi_b = laminate_design_bounds(model, config)
+        x0 = np.clip(np.asarray(x0, dtype=float), lo_b, hi_b).copy()
+        if x0.shape != (nx,):
+            raise ValueError(f"x0 must have length nx={nx}, got {x0.shape}")
+        # project layup groups onto the simplex (f0_g + f45_g <= 1)
+        fg = x0[f0_lo:f0_lo + L]
+        hg = x0[f45_lo:f45_lo + L]
+        scale = np.where(fg + hg > 1.0, fg + hg, 1.0)
+        x0[f0_lo:f0_lo + L] = fg / scale
+        x0[f45_lo:f45_lo + L] = hg / scale
     datum_offsets_deg = (
         np.degrees(skin_datum_angles(model, config.ply_angle_datum))
         if config.ply_angle_datum is not None else None
@@ -225,11 +273,8 @@ def size_beam_shell_laminate(
         f45_grp = x[f45_lo:f45_lo + L]
         return 1.0 - (np.asarray(f0_grp, dtype=float) + np.asarray(f45_grp, dtype=float))
 
-    bounds = (
-        [(config.r_min, config.r_max)] * n
-        + [(config.t_min, config.t_max)] * B
-        + [(0.0, 1.0)] * (2 * L)
-    )
+    lo_b, hi_b = laminate_design_bounds(model, config)
+    bounds = [(float(lo_b[i]), float(hi_b[i])) for i in range(nx)]
     constraints = [
         {"type": "ineq", "fun": beam_con},
         {"type": "ineq", "fun": skin_con},

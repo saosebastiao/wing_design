@@ -1,0 +1,80 @@
+import numpy as np
+import pytest
+
+from wing_design.scenario import small_scenario
+from wing_design.beams import (
+    LaminateSizingConfig, LaminateSizingResult, build_beam_frame, build_beam_shell_model,
+    project_panels_to_beam_nodes, size_beam_shell_laminate,
+    laminate_design_bounds, laminate_result_is_feasible,
+)
+from wing_design.aero import build_airplane, sweep_envelope
+from wing_design.materials.unidir import T700_EPOXY
+
+
+def _cfg(**kw):
+    base = dict(sigma_allow_Pa=1.0e9, tip_defl_max_m=0.1, tip_twist_max_deg=5.0)
+    base.update(kw)
+    return LaminateSizingConfig(**base)
+
+
+def _result(**kw):
+    base = dict(
+        radii=np.array([0.01]), t_skin=0.002, t_bands=np.array([0.002]),
+        f0=0.33, f45=0.34, f90=0.33,
+        f0_bands=np.array([0.33]), f45_bands=np.array([0.34]), f90_bands=np.array([0.33]),
+        mass_kg=10.0, beam_mass_kg=4.0, skin_mass_kg=6.0, converged=True, n_iter=10,
+        max_beam_vm_Pa=1.0e8, max_skin_vm_Pa=1.0e8, tip_defl_m=0.05, tip_twist_deg=2.0,
+        max_beam_buckling_util=0.9, max_panel_buckling_util=0.9, min_skin_strength_ratio=None,
+    )
+    base.update(kw)
+    return LaminateSizingResult(**base)
+
+
+def _small():
+    P = small_scenario()
+    spec = P.geometry
+    model = build_beam_shell_model(spec, n_beams=8, n_levels=5, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso,
+        skin_thickness=P.skin_sizing.t_baseline_m)
+    frame = build_beam_frame(spec, n_beams=8, n_levels=5, beam_radius=0.02,
+        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso)
+    airplane = build_airplane(spec)
+    env = sweep_envelope(airplane, P.load_cases, method="lifting_line",
+                         spanwise_resolution=P.aero.spanwise_resolution)
+    loads = [project_panels_to_beam_nodes(frame, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in env if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
+    return P, spec, model, loads
+
+
+def test_design_bounds_shape():
+    P, spec, model, loads = _small()
+    cfg = _cfg(n_skin_bands=3, per_band_layup=True)
+    lo, hi = laminate_design_bounds(model, cfg)
+    n = model.beam_elements.shape[0]
+    assert lo.shape == hi.shape == (n + 3 + 2 * 3,)
+    assert np.all(lo < hi)
+    # fraction entries bounded [0,1]
+    assert np.all(lo[n + 3:] == 0.0) and np.all(hi[n + 3:] == 1.0)
+
+
+def test_feasible_check_true_and_false():
+    cfg = _cfg(buckling_safety_factor=1.5)
+    assert laminate_result_is_feasible(_result(), cfg) is True
+    assert laminate_result_is_feasible(_result(max_beam_buckling_util=1.7), cfg) is False
+    assert laminate_result_is_feasible(_result(tip_twist_deg=9.9), cfg) is False
+    # tsai_wu skin: needs min_skin_strength_ratio >= SF
+    cfg_tw = _cfg(skin_failure="tsai_wu", tsai_wu_safety_factor=2.0)
+    assert laminate_result_is_feasible(_result(min_skin_strength_ratio=2.5), cfg_tw) is True
+    assert laminate_result_is_feasible(_result(min_skin_strength_ratio=1.2), cfg_tw) is False
+
+
+def test_x0_roundtrip_backward_compat():
+    P, spec, model, loads = _small()
+    cfg = _cfg(sigma_allow_Pa=P.sigma_allow_Pa, tip_defl_max_m=0.02 * spec.span,
+               tip_twist_max_deg=5.0)
+    a = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=15)
+    lo, hi = laminate_design_bounds(model, cfg)
+    n = model.beam_elements.shape[0]
+    default = np.concatenate([np.full(n, cfg.r_max), np.full(1, cfg.t_max), [1/3], [1/3]])
+    b = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=15, x0=default)
+    assert np.allclose(a.radii, b.radii) and np.isclose(a.mass_kg, b.mass_kg)

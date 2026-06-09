@@ -33,7 +33,10 @@ from .shell_sizing import (
     skin_band_map,
     skin_mass,
 )
-from .laminate_sizing import LaminateSizingConfig, LaminateSizingResult, size_beam_shell_laminate
+from .laminate_sizing import (
+    LaminateSizingConfig, LaminateSizingResult, size_beam_shell_laminate,
+    laminate_design_bounds, laminate_result_is_feasible,
+)
 from .fidelity import spline_surface_error
 from .sections import lens_section_polyline, oml_outward_normals
 from .sizing import (
@@ -81,6 +84,8 @@ __all__ = [
     "LaminateSizingConfig",
     "LaminateSizingResult",
     "size_beam_shell_laminate",
+    "laminate_design_bounds",
+    "laminate_result_is_feasible",
     "spline_surface_error",
     "lens_section_polyline",
     "oml_outward_normals",
