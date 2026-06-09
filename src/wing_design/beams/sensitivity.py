@@ -167,6 +167,148 @@ def lambdaT_dK_x(factored, ds, lam):
     return out
 
 
+def _active_beam_force(factored, e):
+    """Recover (floc 12-vector, M=klocals@T, dofs) for beam element e (match beam_shell.py)."""
+    be = factored.beam_elements
+    i, j = int(be[e, 0]), int(be[e, 1])
+    dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
+    M = factored.klocals[e] @ factored.transforms[e]   # 12x12, ∂floc/∂u_e
+    ue = factored.u[dofs]
+    floc = M @ ue
+    return floc, M, dofs
+
+
+def grad_beam_vm(factored, ds, sigma_allow):
+    """beam von-Mises feasibility constraint gradient.
+
+    con = 1 − max_e(vM_e)/σ_allow. Returns (con_value, grad (nx,)).
+    """
+    be = factored.beam_elements
+    n = be.shape[0]
+    # find active element (max vM) using the documented force recovery
+    vms = np.empty(n)
+    cache = []
+    for e in range(n):
+        floc, M, dofs = _active_beam_force(factored, e)
+        r = float(ds.radii_full[e])
+        A = np.pi * r**2
+        Iz = np.pi * r**4 / 4.0
+        J = np.pi * r**4 / 2.0
+        axial = floc[6]
+        torsion = floc[9]
+        b0 = np.hypot(floc[4], floc[5])
+        b1 = np.hypot(floc[10], floc[11])
+        Mres = max(b0, b1)
+        sigma_n = abs(axial) / A + Mres * r / Iz
+        tau = abs(torsion) * r / J
+        vm = np.sqrt(sigma_n**2 + 3.0 * tau**2)
+        vms[e] = vm
+        cache.append((floc, M, dofs, r, A, Iz, J, axial, torsion, b0, b1, Mres,
+                      sigma_n, tau, vm))
+
+    e_star = int(np.argmax(vms))
+    (floc, M, dofs, r, A, Iz, J, axial, torsion, b0, b1, Mres,
+     sigma_n, tau, vm) = cache[e_star]
+
+    con_value = 1.0 - vm / sigma_allow
+
+    # ∂vM/∂floc (12-vector)
+    dvm_dfloc = np.zeros(12)
+    sgn_ax = np.sign(axial) if axial != 0.0 else 0.0
+    sgn_tor = np.sign(torsion) if torsion != 0.0 else 0.0
+    # axial (index 6)
+    dvm_dfloc[6] = (sigma_n / vm) * sgn_ax / A
+    # torsion (index 9)
+    dvm_dfloc[9] = (3.0 * tau / vm) * sgn_tor * r / J
+    # bending: active end only
+    if Mres > 0.0:
+        if b0 >= b1:
+            fa, fb = floc[4], floc[5]
+            ia, ib = 4, 5
+        else:
+            fa, fb = floc[10], floc[11]
+            ia, ib = 10, 11
+        coef = (sigma_n / vm) * (r / Iz)
+        dvm_dfloc[ia] = coef * (fa / Mres)
+        dvm_dfloc[ib] = coef * (fb / Mres)
+
+    # implicit term: dg_du = scatter of (∂vM/∂floc) @ M into ndof
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dvm_dfloc @ M
+    lam = adjoint_lambda(factored, dg_du)
+    du_part = -lambdaT_dK_x(factored, ds, lam)
+
+    # explicit ∂vM/∂r for the group of e*. Two pieces:
+    #  (1) section A,Iz,J depend on r (the stress formula);
+    #  (2) the recovered internal force floc = klocals(r)·T·u_e also depends on r,
+    #      because klocals scales with the section. Both feed vM at fixed u.
+    dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
+    dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
+    dvm_dr = (sigma_n * dsigma_n_dr + 3.0 * tau * dtau_dr) / vm
+    # piece (2): dfloc/dr = (∂klocals/∂r)·T·u_e ; chain through ∂vM/∂floc
+    dk_dr = dkloc_dr(ds.model.E_beam, ds.model.G_beam, r,
+                     float(ds.beam_lengths[e_star]))
+    dfloc_dr = dk_dr @ factored.transforms[e_star] @ factored.u[dofs]
+    dvm_dr += dvm_dfloc @ dfloc_dr
+    du_part[int(ds.group_of_element[e_star])] += dvm_dr
+
+    grad = -du_part / sigma_allow
+    return con_value, grad
+
+
+def grad_beam_buckling(factored, ds, *, euler_K, safety_factor):
+    """beam Euler-buckling feasibility constraint gradient.
+
+    con = 1 − max_e(util_e), util = comp·SF/Pcr, comp=max(0,−axial),
+    Pcr = π²·E·Iy/(K·L)², Iy=πr⁴/4. Returns (con_value, grad (nx,)).
+    """
+    be = factored.beam_elements
+    n = be.shape[0]
+    E = ds.model.E_beam
+    utils = np.empty(n)
+    cache = []
+    for e in range(n):
+        floc, M, dofs = _active_beam_force(factored, e)
+        r = float(ds.radii_full[e])
+        L = float(ds.beam_lengths[e])
+        axial = floc[6]
+        comp = max(0.0, -axial)
+        Iy = np.pi * r**4 / 4.0
+        Pcr = np.pi**2 * E * Iy / (euler_K * L) ** 2
+        util = comp * safety_factor / max(Pcr, 1e-30)
+        utils[e] = util
+        cache.append((floc, M, dofs, r, axial, comp, Pcr, util))
+
+    e_star = int(np.argmax(utils))
+    floc, M, dofs, r, axial, comp, Pcr, util = cache[e_star]
+
+    con_value = 1.0 - util
+
+    if comp == 0.0:
+        return con_value, np.zeros(ds.G + ds.B + 2 * ds.L)
+
+    # ∂util/∂axial = SF/Pcr · ∂comp/∂axial = SF/Pcr · (−1)  (axial<0 here)
+    dutil_daxial = -safety_factor / Pcr
+    # ∂axial/∂u_e* = M[6,:]
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dutil_daxial * M[6, :]
+    lam = adjoint_lambda(factored, dg_du)
+    du_part = -lambdaT_dK_x(factored, ds, lam)
+
+    # explicit ∂util/∂r for the group of e*. Two pieces:
+    #  (1) Pcr ∝ r⁴ ⇒ util ∝ r^−4 ⇒ ∂util/∂r = −4·util/r;
+    #  (2) the recovered axial = floc[6] = (klocals(r)·T·u_e)[6] also depends on r.
+    L = float(ds.beam_lengths[e_star])
+    dutil_dr = -4.0 * util / r
+    dk_dr = dkloc_dr(E, ds.model.G_beam, r, L)
+    daxial_dr = (dk_dr @ factored.transforms[e_star] @ factored.u[dofs])[6]
+    dutil_dr += dutil_daxial * daxial_dr
+    du_part[int(ds.group_of_element[e_star])] += dutil_dr
+
+    grad = -du_part
+    return con_value, grad
+
+
 def grad_tip_defl(factored, ds):
     """g = max tip ||u_trans||; returns (g, grad (nx,)). Explicit term is 0."""
     u = factored.u.reshape(-1, 6)

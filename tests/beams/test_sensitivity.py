@@ -219,3 +219,94 @@ def test_grad_defl_twist_match_fd():
 
     assert np.allclose(grad_defl, fd_defl, rtol=2e-4, atol=1e-4 * np.abs(fd_defl).max())
     assert np.allclose(grad_twist, fd_twist, rtol=2e-4, atol=1e-4 * np.abs(fd_twist).max())
+
+
+# --- Task 4: beam von-Mises + Euler buckling gradients (FD-validated) ---
+from wing_design.beams.sensitivity import grad_beam_vm, grad_beam_buckling
+from wing_design.structural.frame import von_mises_per_element
+from wing_design.structural.buckling import beam_euler_utilization
+
+_SIGMA_ALLOW = 6.0e8
+_EULER_K = 1.0
+_SF = 1.5
+
+
+def _buckling_case():
+    """Like _adjoint_case but a load that compresses some beams (so buckling is active)."""
+    m, group_of_element, G, n, M, beam_lengths, _loads = _adjoint_case()
+    # Span is +Z (clamped at min z, tip at max z). A tip load with a strong −Z
+    # (spanwise, toward root) component compresses the longitudinal beams; the
+    # chordwise (+X) component creates bending/torsion so vM is nonzero. The
+    # asymmetric per-node X push breaks buckling ties between the beams.
+    loads = np.zeros((m.nodes.shape[0], 6))
+    loads[m.tip_nodes, 2] = -8.0e4   # spanwise compression
+    for a, node in enumerate(m.tip_nodes):
+        loads[node, 0] = 40.0 + 7.0 * a  # chordwise, distinct per beam -> unique active
+    return m, group_of_element, G, n, M, beam_lengths, loads
+
+
+def _sections_of(radii_full):
+    return [BeamSection.circular(float(r)) for r in radii_full]
+
+
+def test_grad_beam_vm_matches_fd():
+    m, group_of_element, G, n, M, beam_lengths, loads = _buckling_case()
+    x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
+    nx = G + 1 + 2
+
+    fac0, _ = _decode_solve(m, group_of_element, G, beam_lengths, loads, x0)
+    ds0 = _build_ds(m, group_of_element, G, M, beam_lengths, x0)
+
+    con0, grad = grad_beam_vm(fac0, ds0, _SIGMA_ALLOW)
+
+    def beam_con(x):
+        fac, _ = _decode_solve(m, group_of_element, G, beam_lengths, loads, x)
+        radii = x[:G][group_of_element]
+        secs = _sections_of(radii)
+        return 1.0 - float(np.max(von_mises_per_element(fac.result, secs))) / _SIGMA_ALLOW
+
+    assert np.isclose(con0, beam_con(x0))
+
+    steps = np.concatenate([np.full(G, 1e-7), [1e-7, 1e-6, 1e-6]])
+    fd = np.zeros(nx)
+    for i in range(nx):
+        h = steps[i]
+        xp = x0.copy(); xp[i] += h
+        xm = x0.copy(); xm[i] -= h
+        fd[i] = (beam_con(xp) - beam_con(xm)) / (2.0 * h)
+
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+def test_grad_beam_buckling_matches_fd():
+    m, group_of_element, G, n, M, beam_lengths, loads = _buckling_case()
+    x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
+    nx = G + 1 + 2
+
+    fac0, _ = _decode_solve(m, group_of_element, G, beam_lengths, loads, x0)
+    ds0 = _build_ds(m, group_of_element, G, M, beam_lengths, x0)
+
+    con0, grad = grad_beam_buckling(fac0, ds0, euler_K=_EULER_K, safety_factor=_SF)
+
+    def beam_buck_con(x):
+        fac, _ = _decode_solve(m, group_of_element, G, beam_lengths, loads, x)
+        radii = x[:G][group_of_element]
+        util = beam_euler_utilization(
+            fac.result.axial_force, radii, beam_lengths,
+            E=m.E_beam, K=_EULER_K, safety_factor=_SF,
+        )
+        return 1.0 - float(np.max(util))
+
+    assert np.isclose(con0, beam_buck_con(x0))
+    # ensure compression is actually active
+    assert np.min(fac0.result.axial_force) < 0.0
+
+    steps = np.concatenate([np.full(G, 1e-7), [1e-7, 1e-6, 1e-6]])
+    fd = np.zeros(nx)
+    for i in range(nx):
+        h = steps[i]
+        xp = x0.copy(); xp[i] += h
+        xm = x0.copy(); xm[i] -= h
+        fd[i] = (beam_buck_con(xp) - beam_buck_con(xm)) / (2.0 * h)
+
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
