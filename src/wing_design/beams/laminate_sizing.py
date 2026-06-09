@@ -50,6 +50,7 @@ class LaminateSizingConfig:
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
     tsai_wu_safety_factor: float = 2.0
+    per_band_layup: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,9 @@ class LaminateSizingResult:
     f0: float
     f45: float
     f90: float
+    f0_bands: np.ndarray
+    f45_bands: np.ndarray
+    f90_bands: np.ndarray
     mass_kg: float
     beam_mass_kg: float
     skin_mass_kg: float
@@ -88,19 +92,37 @@ def size_beam_shell_laminate(
         raise ValueError("load_arrays is empty")
     n = model.beam_elements.shape[0]
     B = config.n_skin_bands
+    L = B if config.per_band_layup else 1
     Lb = beam_lengths(model)
     Atri = skin_areas(model)
     A_skin_area = float(Atri.sum())
     band_of_tri = skin_band_map(model, B)
     band_area = skin_band_areas(model, band_of_tri, B)
-    nx = n + B + 2
-    fi0 = n + B
-    fi45 = n + B + 1
-    x0 = np.concatenate([np.full(n, config.r_max), np.full(B, config.t_max), [1.0 / 3.0, 1.0 / 3.0]])
+    nx = n + B + 2 * L
+    f0_lo = n + B
+    f45_lo = n + B + L
+    x0 = np.concatenate([
+        np.full(n, config.r_max), np.full(B, config.t_max),
+        np.full(L, 1.0 / 3.0), np.full(L, 1.0 / 3.0),
+    ])
     datum_offsets_deg = (
         np.degrees(skin_datum_angles(model, config.ply_angle_datum))
         if config.ply_angle_datum is not None else None
     )
+
+    def band_fracs(x):
+        """Per-band (length B) f0/f45/f90 from the L layup groups."""
+        f0_grp = x[f0_lo:f0_lo + L]
+        f45_grp = x[f45_lo:f45_lo + L]
+        if config.per_band_layup:
+            f0b = np.asarray(f0_grp, dtype=float)
+            f45b = np.asarray(f45_grp, dtype=float)
+        else:
+            f0b = np.full(B, float(f0_grp[0]))
+            f45b = np.full(B, float(f45_grp[0]))
+        f90b = np.maximum(0.0, 1.0 - f0b - f45b)
+        return f0b, f45b, f90b
+
     cache: dict = {}
 
     def evaluate(x):
@@ -111,12 +133,14 @@ def size_beam_shell_laminate(
         radii = x[:n]
         t_band_vec = x[n:n + B]
         t_tri = t_band_vec[band_of_tri]
-        f0 = float(x[fi0])
-        f45 = float(x[fi45])
-        f90 = max(0.0, 1.0 - f0 - f45)
+        f0b, f45b, f90b = band_fracs(x)
+        f0_tri = f0b[band_of_tri]
+        f45_tri = f45b[band_of_tri]
+        f90_tri = f90b[band_of_tri]
         if datum_offsets_deg is None:
-            band_mats = [laminate_stiffness(ply, f0=f0, f45=f45, f90=f90, thickness=float(tb))
-                         for tb in t_band_vec]
+            band_mats = [laminate_stiffness(ply, f0=float(f0b[b]), f45=float(f45b[b]),
+                                            f90=float(f90b[b]), thickness=float(t_band_vec[b]))
+                         for b in range(B)]
             A_band = np.stack([m[0] for m in band_mats])
             D_band = np.stack([m[1] for m in band_mats])
             C_band = np.stack([m[2] for m in band_mats])
@@ -124,9 +148,10 @@ def size_beam_shell_laminate(
             D_arg = D_band[band_of_tri]
             C_arg = C_band[band_of_tri]
         else:
-            mats = [laminate_stiffness_offset(ply, f0=f0, f45=f45, f90=f90,
-                                              thickness=float(tt), offset_deg=float(o))
-                    for tt, o in zip(t_tri, datum_offsets_deg)]
+            mats = [laminate_stiffness_offset(ply, f0=float(f0_tri[e]), f45=float(f45_tri[e]),
+                                              f90=float(f90_tri[e]), thickness=float(t_tri[e]),
+                                              offset_deg=float(o))
+                    for e, o in enumerate(datum_offsets_deg)]
             A_arg = np.stack([m[0] for m in mats])
             D_arg = np.stack([m[1] for m in mats])
             C_arg = np.stack([m[2] for m in mats])
@@ -152,7 +177,7 @@ def size_beam_shell_laminate(
                 eps = recover_membrane_strain(model.nodes, model.shell_tris, res.displacements)
                 offs = datum_offsets_deg if datum_offsets_deg is not None else np.zeros(eps.shape[0])
                 R = laminate_min_strength_ratio_batch(
-                    ply, eps, f0=f0, f45=f45, f90=f90, offset_deg=offs)
+                    ply, eps, f0=f0_tri, f45=f45_tri, f90=f90_tri, offset_deg=offs)
                 worst_R = min(worst_R, float(R.min()))
             tip = model.tip_nodes
             md = max(md, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
@@ -196,12 +221,14 @@ def size_beam_shell_laminate(
         return np.array([1.0 - evaluate(x)[3] / config.tip_twist_max_deg])
 
     def frac_con(x):
-        return np.array([1.0 - (x[fi0] + x[fi45])])
+        f0_grp = x[f0_lo:f0_lo + L]
+        f45_grp = x[f45_lo:f45_lo + L]
+        return 1.0 - (np.asarray(f0_grp, dtype=float) + np.asarray(f45_grp, dtype=float))
 
     bounds = (
         [(config.r_min, config.r_max)] * n
         + [(config.t_min, config.t_max)] * B
-        + [(0.0, 1.0), (0.0, 1.0)]
+        + [(0.0, 1.0)] * (2 * L)
     )
     constraints = [
         {"type": "ineq", "fun": beam_con},
@@ -225,22 +252,30 @@ def size_beam_shell_laminate(
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
     x = np.clip(res.x, lo, hi)
-    s = x[fi0] + x[fi45]
-    if s > 1.0:
-        x[fi0] /= s
-        x[fi45] /= s
+    # Per-group simplex re-projection: if f0_g + f45_g > 1, rescale that group.
+    fg = x[f0_lo:f0_lo + L].copy()
+    hg = x[f45_lo:f45_lo + L].copy()
+    scale = np.where(fg + hg > 1.0, fg + hg, 1.0)
+    x[f0_lo:f0_lo + L] = fg / scale
+    x[f45_lo:f45_lo + L] = hg / scale
     wb, ws, d, t, bbu, pbu, worst_R = evaluate(x)
     radii = x[:n]
     t_bands = x[n:n + B].copy()
     t_tri = t_bands[band_of_tri]
-    f0 = float(x[fi0])
-    f45 = float(x[fi45])
-    f90 = max(0.0, 1.0 - f0 - f45)
+    f0b, f45b, f90b = band_fracs(x)
+    f0_tri = f0b[band_of_tri]
+    f45_tri = f45b[band_of_tri]
+    f90_tri = f90b[band_of_tri]
     bm = beam_mass(model, radii, rho=rho)
     sm = float(rho * np.sum(t_tri * Atri))
     t_skin_mean = float(np.sum(t_tri * Atri) / A_skin_area)
+    f0_mean = float(np.sum(f0_tri * Atri) / A_skin_area)
+    f45_mean = float(np.sum(f45_tri * Atri) / A_skin_area)
+    f90_mean = float(np.sum(f90_tri * Atri) / A_skin_area)
     return LaminateSizingResult(
-        radii=radii, t_skin=t_skin_mean, t_bands=t_bands, f0=f0, f45=f45, f90=f90,
+        radii=radii, t_skin=t_skin_mean, t_bands=t_bands,
+        f0=f0_mean, f45=f45_mean, f90=f90_mean,
+        f0_bands=f0b, f45_bands=f45b, f90_bands=f90b,
         mass_kg=bm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
         converged=bool(res.success), n_iter=int(res.nit),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
