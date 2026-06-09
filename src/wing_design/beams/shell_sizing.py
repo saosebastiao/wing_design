@@ -95,6 +95,52 @@ def skin_band_areas(model: BeamShellModel, band_of_tri: np.ndarray, n_bands: int
     return out
 
 
+def beam_radius_groups(model: BeamShellModel) -> tuple[np.ndarray, int]:
+    """Map each beam-element to a radius design-variable group, exploiting chord symmetry.
+
+    Beams are ordered TE(0) -> LE(n_beams//2) around a chord-symmetric section, so beam
+    ``b`` mirrors ``(n_beams - b) % n_beams``. When the beam node positions are actually
+    mirror-symmetric across the chord plane (y -> -y) -- the default even arc-spacing --
+    mirror-paired beams SHARE radii: element ``(b,k)`` maps to group
+    ``rank(rep(b))*(n_levels-1) + k`` where ``rep(b) = min(b, mirror(b))``. Returns
+    ``(group_of_element (n,), n_groups)``. If placement is NOT mirror-symmetric (e.g.
+    non-uniform arc_fractions) it falls back to one group per element
+    (``arange(n), n``), so callers can stay symmetry-on by default safely.
+    """
+    nb = model.n_beams
+    nl = model.n_levels
+    seg = nl - 1
+    n = model.beam_elements.shape[0]
+    nodes = model.nodes
+    scale = float(np.abs(nodes).max()) if nodes.size else 1.0
+    tol = 1.0e-6 * max(1.0, scale)
+
+    symmetric = True
+    for b in range(nb):
+        mb = (nb - b) % nb
+        for k in range(nl):
+            pb = nodes[b * nl + k]
+            pm = nodes[mb * nl + k]
+            if (abs(pb[0] - pm[0]) > tol or abs(pb[2] - pm[2]) > tol
+                    or abs(pb[1] + pm[1]) > tol):
+                symmetric = False
+                break
+        if not symmetric:
+            break
+
+    if not symmetric:
+        return np.arange(n, dtype=int), n
+
+    reps = sorted({min(b, (nb - b) % nb) for b in range(nb)})
+    rank = {r: i for i, r in enumerate(reps)}
+    group_of_element = np.empty(n, dtype=int)
+    for b in range(nb):
+        ui = rank[min(b, (nb - b) % nb)]
+        for k in range(seg):
+            group_of_element[b * seg + k] = ui * seg + k
+    return group_of_element, len(reps) * seg
+
+
 def beam_mass(model: BeamShellModel, radii: np.ndarray, *, rho: float) -> float:
     """Total longitudinal-beam mass [kg]."""
     return float(rho * np.sum(np.pi * np.asarray(radii) ** 2 * beam_lengths(model)))
