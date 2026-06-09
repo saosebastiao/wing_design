@@ -7,6 +7,7 @@ from wing_design.beams import (
     project_panels_to_beam_nodes, size_beam_shell_laminate,
     laminate_design_bounds, laminate_result_is_feasible,
 )
+from wing_design.beams.shell_sizing import beam_radius_groups
 from wing_design.aero import build_airplane, sweep_envelope
 from wing_design.materials.unidir import T700_EPOXY
 
@@ -50,11 +51,11 @@ def test_design_bounds_shape():
     P, spec, model, loads = _small()
     cfg = _cfg(n_skin_bands=3, per_band_layup=True)
     lo, hi = laminate_design_bounds(model, cfg)
-    n = model.beam_elements.shape[0]
-    assert lo.shape == hi.shape == (n + 3 + 2 * 3,)
+    _, G = beam_radius_groups(model)
+    assert lo.shape == hi.shape == (G + 3 + 2 * 3,)
     assert np.all(lo < hi)
-    # fraction entries bounded [0,1]
-    assert np.all(lo[n + 3:] == 0.0) and np.all(hi[n + 3:] == 1.0)
+    # fraction entries (the last 2*L) bounded [0,1]
+    assert np.all(lo[G + 3:] == 0.0) and np.all(hi[G + 3:] == 1.0)
 
 
 def test_feasible_check_true_and_false():
@@ -74,8 +75,8 @@ def test_x0_roundtrip_backward_compat():
                tip_twist_max_deg=5.0)
     a = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=15)
     lo, hi = laminate_design_bounds(model, cfg)
-    n = model.beam_elements.shape[0]
-    default = np.concatenate([np.full(n, cfg.r_max), np.full(1, cfg.t_max), [1/3], [1/3]])
+    _, G = beam_radius_groups(model)
+    default = np.concatenate([np.full(G, cfg.r_max), np.full(1, cfg.t_max), [1/3], [1/3]])
     b = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=15, x0=default)
     assert np.allclose(a.radii, b.radii) and np.isclose(a.mass_kg, b.mass_kg)
 

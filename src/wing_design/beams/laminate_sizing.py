@@ -31,7 +31,10 @@ from ..structural.buckling import beam_euler_utilization, panel_buckling_utiliza
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
 from .shell_model import BeamShellModel, skin_datum_angles
-from .shell_sizing import beam_lengths, beam_mass, skin_areas, skin_band_areas, skin_band_map, skin_mass
+from .shell_sizing import (
+    beam_lengths, beam_mass, beam_radius_groups, skin_areas, skin_band_areas,
+    skin_band_map, skin_mass,
+)
 
 
 @dataclass(frozen=True)
@@ -79,12 +82,12 @@ class LaminateSizingResult:
 
 
 def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
-    """(lo, hi) bound arrays for the sizer design vector [radii(n), t_band(B), f0_grp(L), f45_grp(L)]."""
-    n = model.beam_elements.shape[0]
+    """(lo, hi) bounds for [r_group(G), t_band(B), f0_grp(L), f45_grp(L)]."""
+    _, G = beam_radius_groups(model)
     B = config.n_skin_bands
     L = B if config.per_band_layup else 1
-    lo = np.concatenate([np.full(n, config.r_min), np.full(B, config.t_min), np.zeros(2 * L)])
-    hi = np.concatenate([np.full(n, config.r_max), np.full(B, config.t_max), np.ones(2 * L)])
+    lo = np.concatenate([np.full(G, config.r_min), np.full(B, config.t_min), np.zeros(2 * L)])
+    hi = np.concatenate([np.full(G, config.r_max), np.full(B, config.t_max), np.ones(2 * L)])
     return lo, hi
 
 
@@ -129,17 +132,18 @@ def size_beam_shell_laminate(
     n = model.beam_elements.shape[0]
     B = config.n_skin_bands
     L = B if config.per_band_layup else 1
+    group_of_element, G = beam_radius_groups(model)
     Lb = beam_lengths(model)
     Atri = skin_areas(model)
     A_skin_area = float(Atri.sum())
     band_of_tri = skin_band_map(model, B)
     band_area = skin_band_areas(model, band_of_tri, B)
-    nx = n + B + 2 * L
-    f0_lo = n + B
-    f45_lo = n + B + L
+    nx = G + B + 2 * L
+    f0_lo = G + B
+    f45_lo = G + B + L
     if x0 is None:
         x0 = np.concatenate([
-            np.full(n, config.r_max), np.full(B, config.t_max),
+            np.full(G, config.r_max), np.full(B, config.t_max),
             np.full(L, 1.0 / 3.0), np.full(L, 1.0 / 3.0),
         ])
     else:
@@ -157,6 +161,25 @@ def size_beam_shell_laminate(
         np.degrees(skin_datum_angles(model, config.ply_angle_datum))
         if config.ply_angle_datum is not None else None
     )
+
+    # Monotonic taper: per radius-unit, radius non-increasing keel->tip. Group DV index
+    # = unit*(n_levels-1) + segment; order consecutive segments by their midpoint z.
+    seg = model.n_levels - 1
+    U = G // seg
+    level_z = model.nodes[:model.n_levels, 2]
+    seg_z = 0.5 * (level_z[:-1] + level_z[1:])
+    mono_lo_list: list[int] = []
+    mono_hi_list: list[int] = []
+    for u in range(U):
+        for k in range(seg - 1):
+            ia = u * seg + k
+            ib = u * seg + (k + 1)
+            if seg_z[k] >= seg_z[k + 1]:   # segment k is tip-ward (higher z)
+                mono_lo_list.append(ib); mono_hi_list.append(ia)
+            else:
+                mono_lo_list.append(ia); mono_hi_list.append(ib)
+    mono_lo = np.asarray(mono_lo_list, dtype=int)
+    mono_hi = np.asarray(mono_hi_list, dtype=int)
 
     def band_fracs(x):
         """Per-band (length B) f0/f45/f90 from the L layup groups."""
@@ -178,8 +201,8 @@ def size_beam_shell_laminate(
         hit = cache.get(key)
         if hit is not None:
             return hit
-        radii = x[:n]
-        t_band_vec = x[n:n + B]
+        radii = x[:G][group_of_element]
+        t_band_vec = x[G:G + B]
         t_tri = t_band_vec[band_of_tri]
         f0b, f45b, f90b = band_fracs(x)
         f0_tri = f0b[band_of_tri]
@@ -244,13 +267,16 @@ def size_beam_shell_laminate(
     m_ref = beam_mass(model, np.full(n, config.r_max), rho=rho) + skin_mass(model, config.t_max, rho=rho)
 
     def mass(x):
-        m = rho * np.sum(np.pi * x[:n] ** 2 * Lb) + rho * np.sum(x[n:n + B] * band_area)
+        radii = x[:G][group_of_element]
+        m = rho * np.sum(np.pi * radii ** 2 * Lb) + rho * np.sum(x[G:G + B] * band_area)
         return m / m_ref
 
     def mass_grad(x):
         g = np.zeros(nx)
-        g[:n] = rho * 2.0 * np.pi * x[:n] * Lb / m_ref
-        g[n:n + B] = rho * band_area / m_ref
+        radii = x[:G][group_of_element]
+        per_elem = rho * 2.0 * np.pi * radii * Lb / m_ref
+        np.add.at(g, group_of_element, per_elem)   # scatter element grads into the G groups
+        g[G:G + B] = rho * band_area / m_ref
         return g
 
     def beam_con(x):
@@ -273,6 +299,9 @@ def size_beam_shell_laminate(
         f45_grp = x[f45_lo:f45_lo + L]
         return 1.0 - (np.asarray(f0_grp, dtype=float) + np.asarray(f45_grp, dtype=float))
 
+    def monotonic_con(x):
+        return x[mono_lo] - x[mono_hi]   # >= 0 : keel-side radius >= tip-side radius
+
     lo_b, hi_b = laminate_design_bounds(model, config)
     bounds = [(float(lo_b[i]), float(hi_b[i])) for i in range(nx)]
     constraints = [
@@ -282,6 +311,8 @@ def size_beam_shell_laminate(
         {"type": "ineq", "fun": twist_con},
         {"type": "ineq", "fun": frac_con},
     ]
+    if mono_lo.size > 0:
+        constraints.append({"type": "ineq", "fun": monotonic_con})
     if config.buckling_safety_factor is not None:
         def beam_buck_con(x):
             return np.array([1.0 - evaluate(x)[4]])
@@ -304,8 +335,8 @@ def size_beam_shell_laminate(
     x[f0_lo:f0_lo + L] = fg / scale
     x[f45_lo:f45_lo + L] = hg / scale
     wb, ws, d, t, bbu, pbu, worst_R = evaluate(x)
-    radii = x[:n]
-    t_bands = x[n:n + B].copy()
+    radii = x[:G][group_of_element]
+    t_bands = x[G:G + B].copy()
     t_tri = t_bands[band_of_tri]
     f0b, f45b, f90b = band_fracs(x)
     f0_tri = f0b[band_of_tri]
