@@ -123,6 +123,8 @@ def _assemble_beam_shell_laminate(
     D_skin: np.ndarray,
     fixed_nodes: np.ndarray,
     drilling_factor: float = 1.0e-4,
+    gusset_elements: np.ndarray | None = None,
+    gusset_section: "BeamSection | None" = None,
 ):
     """Assemble the global stiffness matrix for a beam+CLT-shell structure.
 
@@ -163,6 +165,25 @@ def _assemble_beam_shell_laminate(
                 rows.append(int(dofs[a_]))
                 cols.append(int(dofs[b_]))
                 vals.append(kg[a_, b_])
+
+    # Gusset elements — assembled into K but excluded from transforms/klocals
+    if gusset_elements is not None:
+        if gusset_section is None:
+            raise ValueError("gusset_section required when gusset_elements given")
+        for e in range(gusset_elements.shape[0]):
+            i, j = int(gusset_elements[e, 0]), int(gusset_elements[e, 1])
+            R, L = _element_rotation(nodes[i], nodes[j])
+            kloc = local_beam_stiffness(E_beam, G_beam, gusset_section, L)
+            T = np.zeros((12, 12))
+            for blk in range(4):
+                T[3 * blk:3 * blk + 3, 3 * blk:3 * blk + 3] = R
+            kg = T.T @ kloc @ T
+            dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
+            for a_ in range(12):
+                for b_ in range(12):
+                    rows.append(int(dofs[a_]))
+                    cols.append(int(dofs[b_]))
+                    vals.append(kg[a_, b_])
 
     # Shell (skin) triangles — CLT laminate stiffness
     for tri_idx in range(shell_tris.shape[0]):
@@ -242,6 +263,8 @@ def solve_beam_shell_laminate(
     fixed_nodes: np.ndarray,
     loads: np.ndarray,
     drilling_factor: float = 1.0e-4,
+    gusset_elements: np.ndarray | None = None,
+    gusset_section: "BeamSection | None" = None,
 ) -> FrameResult:
     """Solve a clamped beam+shell structure with a CLT laminate skin; recover per-beam internal forces.
 
@@ -265,6 +288,7 @@ def solve_beam_shell_laminate(
         nodes, beam_elements, beam_sections, shell_tris,
         E_beam=E_beam, G_beam=G_beam, A_skin=A_skin, D_skin=D_skin,
         fixed_nodes=fixed_nodes, drilling_factor=drilling_factor,
+        gusset_elements=gusset_elements, gusset_section=gusset_section,
     )
 
     f = loads.reshape(-1).astype(float)
@@ -294,6 +318,8 @@ def solve_beam_shell_laminate_factored(
     fixed_nodes: np.ndarray,
     loads: np.ndarray,
     drilling_factor: float = 1.0e-4,
+    gusset_elements: np.ndarray | None = None,
+    gusset_section: "BeamSection | None" = None,
 ) -> FactoredBeamShell:
     """Like `solve_beam_shell_laminate`, but returns a `FactoredBeamShell` with the LU factorization.
 
@@ -306,6 +332,7 @@ def solve_beam_shell_laminate_factored(
         nodes, beam_elements, beam_sections, shell_tris,
         E_beam=E_beam, G_beam=G_beam, A_skin=A_skin, D_skin=D_skin,
         fixed_nodes=fixed_nodes, drilling_factor=drilling_factor,
+        gusset_elements=gusset_elements, gusset_section=gusset_section,
     )
 
     f = loads.reshape(-1).astype(float)
