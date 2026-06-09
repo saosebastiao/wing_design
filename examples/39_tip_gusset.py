@@ -59,9 +59,13 @@ def main() -> None:
              for ar in envelope if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
 
     defl_lim, twist_lim = 0.02 * spec.span, 5.0
+    # Analytic Jacobian: exact gradients converge much better than noisy FD near the
+    # active beam-buckling constraint (the gusset frees the twist budget, so the optimizer
+    # pushes beams thin and buckling becomes the binding constraint).
     cfg = LaminateSizingConfig(
         sigma_allow_Pa=P.sigma_allow_Pa, tip_defl_max_m=defl_lim, tip_twist_max_deg=twist_lim,
-        ply_angle_datum=(0.0, 0.0, 1.0), buckling_safety_factor=1.5, n_skin_bands=nb_bands)
+        ply_angle_datum=(0.0, 0.0, 1.0), buckling_safety_factor=1.5, n_skin_bands=nb_bands,
+        use_analytic_jacobian=True)
 
     print("sizing free tip (no gusset)...")
     off = size_beam_shell_laminate(base, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=300)
