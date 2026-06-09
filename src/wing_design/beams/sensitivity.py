@@ -26,6 +26,12 @@ from wing_design.structural.shell import (
     tri_element_stiffness_laminate, _triangle_local_frame,
 )
 from wing_design.materials.unidir import reduced_stiffness_Q, transformed_Qbar
+from wing_design.materials.failure import (
+    reduced_stiffness_Q as _ply_Q,
+    _strain_to_ply_axes,
+    tsai_wu_strength_ratio,
+    tsai_wu_strength_ratio_grad,
+)
 
 
 def central_diff(f, x0, h):
@@ -110,6 +116,12 @@ class DesignSens:
     offset_tri: np.ndarray            # (M,) degrees
     ply: object
     drilling_factor: float = 1.0e-4
+    # per-triangle layup fractions (needed to identify the present orientations for
+    # the per-ply Tsai-Wu skin constraint). Optional: only the Tsai-Wu gradient uses
+    # them. If None, all four orientations are treated as present.
+    f0_tri: np.ndarray = None         # (M,)
+    f45_tri: np.ndarray = None        # (M,)
+    f90_tri: np.ndarray = None        # (M,)
 
 
 def adjoint_lambda(factored, dg_du):
@@ -473,6 +485,83 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas):
         du_part[base + lg] += dutil_df
 
     grad = -du_part
+    return con_value, grad
+
+
+def _Teps(theta_deg):
+    """Engineering-strain rotation matrix (3x3): eps_ply = Teps @ eps_local."""
+    th = np.radians(theta_deg)
+    c, s = np.cos(th), np.sin(th)
+    return np.array([
+        [c * c, s * s, s * c],
+        [s * s, c * c, -s * c],
+        [-2.0 * s * c, 2.0 * s * c, c * c - s * s],
+    ])
+
+
+def grad_skin_tsai_wu(factored, ds, *, safety_factor):
+    """Per-ply Tsai-Wu skin feasibility constraint gradient.
+
+    con = min_R/SF − 1, where min_R is the minimum Tsai-Wu strength ratio over all
+    triangles and all *present* ply orientations (gated by the per-triangle layup
+    fractions, shifted by the datum offset). Returns (con_value, grad (nx,)).
+
+    The explicit term is zero: at fixed strain, R depends on u and the (discrete)
+    active orientation only, not continuously on the thickness/fraction design vars.
+    """
+    tris = ds.model.shell_tris
+    nodes = ds.model.nodes
+    M = tris.shape[0]
+    SF = safety_factor
+    ply = ds.ply
+    Q = _ply_Q(ply)
+    eps_tol = 1.0e-9
+
+    # present-orientation fractions per triangle (default: all present)
+    if ds.f0_tri is None:
+        f0a = np.ones(M); f45a = np.ones(M); f90a = np.ones(M)
+    else:
+        f0a = np.asarray(ds.f0_tri, dtype=float)
+        f45a = np.asarray(ds.f45_tri, dtype=float)
+        f90a = np.asarray(ds.f90_tri, dtype=float)
+
+    best_R = np.inf
+    best = None  # (t, theta_deg, Gt, dofs, eps)
+    for t in range(M):
+        n0, n1, n2 = int(tris[t, 0]), int(tris[t, 1]), int(tris[t, 2])
+        Gt, _area = _membrane_strain_map(nodes[n0], nodes[n1], nodes[n2])
+        dofs = np.r_[6 * n0:6 * n0 + 6, 6 * n1:6 * n1 + 6, 6 * n2:6 * n2 + 6]
+        eps = Gt @ factored.u[dofs]
+        off = float(ds.offset_tri[t])
+        orientations = (
+            (0.0, f0a[t]), (45.0, f45a[t]), (-45.0, f45a[t]), (90.0, f90a[t]),
+        )
+        for base, frac in orientations:
+            if frac <= eps_tol:
+                continue
+            theta = base + off
+            sigma = Q @ _strain_to_ply_axes(eps, theta)
+            R = tsai_wu_strength_ratio(sigma, ply)
+            if R < best_R:
+                best_R = R
+                best = (t, theta, Gt, dofs, eps)
+
+    t_star, theta_star, Gt, dofs, eps = best
+    con_value = best_R / SF - 1.0
+
+    # σ123* and ∂R/∂σ123
+    sigma_star = Q @ _strain_to_ply_axes(eps, theta_star)
+    dR_dsigma = tsai_wu_strength_ratio_grad(sigma_star, ply)  # (3,)
+
+    # ∂σ123/∂u_tri = Q @ Teps(θ*) @ Gt  -> dR/du_tri (18,)
+    dR_du = dR_dsigma @ (Q @ _Teps(theta_star) @ Gt)
+
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dR_du
+    lam = adjoint_lambda(factored, dg_du)
+    dR_dx = -lambdaT_dK_x(factored, ds, lam)  # explicit term is zero
+
+    grad = dR_dx / SF
     return con_value, grad
 
 

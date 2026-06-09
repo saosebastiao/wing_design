@@ -475,3 +475,58 @@ def test_grad_panel_buckling_matches_fd():
 def test_grad_panel_buckling_matches_fd_offset():
     grad, fd = _run_panel_buckling(offset_deg=30.0)
     assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+# --- Task 6: per-ply Tsai-Wu skin gradient (FD-validated) ---
+from wing_design.beams.sensitivity import grad_skin_tsai_wu
+from wing_design.materials.failure import laminate_min_strength_ratio_batch
+from wing_design.structural.shell import recover_membrane_strain
+
+_TSAI_SF = 1.5
+
+
+def _skin_tsai_con_value(m, fac, f0, f45, f90, offsets, SF):
+    """min over triangles of laminate_min_strength_ratio_batch / SF − 1."""
+    eps = recover_membrane_strain(m.nodes, m.shell_tris, fac.result.displacements)
+    R = laminate_min_strength_ratio_batch(
+        T700_EPOXY, eps, f0=f0, f45=f45, f90=f90, offset_deg=offsets,
+    )
+    return float(np.min(R)) / SF - 1.0
+
+
+def test_grad_skin_tsai_wu_matches_fd():
+    # DATUM offset so ply angles are nonzero; layup with all orientations present.
+    offset_deg = 25.0
+    m, group_of_element, G, n, M, beam_lengths, loads = _skin_case()
+    x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
+    nx = G + 1 + 2
+    offsets = np.full(M, offset_deg)
+
+    fac0, _Qeff0 = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, x0, offset_deg)
+    ds0 = _build_ds_off(m, group_of_element, G, M, beam_lengths, x0, offset_deg)
+    # attach per-triangle fractions (all four orientations present at f0=f45=1/3)
+    f0v = float(x0[G + 1]); f45v = float(x0[G + 2]); f90v = 1.0 - f0v - f45v
+    ds0.f0_tri = np.full(M, f0v)
+    ds0.f45_tri = np.full(M, f45v)
+    ds0.f90_tri = np.full(M, f90v)
+
+    con0, grad = grad_skin_tsai_wu(fac0, ds0, safety_factor=_TSAI_SF)
+    ref = _skin_tsai_con_value(m, fac0, f0v, f45v, f90v, offsets, _TSAI_SF)
+    assert np.isclose(con0, ref), (con0, ref)
+
+    steps = np.concatenate([np.full(G, 1e-7), [1e-7, 1e-6, 1e-6]])
+    fd = np.zeros(nx)
+    for i in range(nx):
+        h = steps[i]
+        xp = x0.copy(); xp[i] += h
+        xm = x0.copy(); xm[i] -= h
+        facp, _ = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, xp, offset_deg)
+        facm, _ = _decode_solve_off(m, group_of_element, G, beam_lengths, loads, xm, offset_deg)
+        f0p = float(xp[G + 1]); f45p = float(xp[G + 2]); f90p = 1.0 - f0p - f45p
+        f0m = float(xm[G + 1]); f45m = float(xm[G + 2]); f90m = 1.0 - f0m - f45m
+        fd[i] = (
+            _skin_tsai_con_value(m, facp, f0p, f45p, f90p, offsets, _TSAI_SF)
+            - _skin_tsai_con_value(m, facm, f0m, f45m, f90m, offsets, _TSAI_SF)
+        ) / (2.0 * h)
+
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())

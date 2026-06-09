@@ -3,6 +3,7 @@ import numpy as np
 from wing_design.materials.unidir import T700_EPOXY
 from wing_design.materials.failure import (
     tsai_wu_coefficients, tsai_wu_index, tsai_wu_strength_ratio,
+    tsai_wu_strength_ratio_grad,
     ply_strength_ratio, laminate_min_strength_ratio,
 )
 
@@ -93,6 +94,24 @@ def test_batch_handles_zero_and_shear_rows():
     batch = laminate_min_strength_ratio_batch(PLY, eps, f0=1.0, f45=0.0, f90=0.0, offset_deg=np.zeros(2))
     assert batch[0] >= 1.0e8
     assert np.isfinite(batch[1]) and batch[1] > 0
+
+
+def test_strength_ratio_grad_matches_fd():
+    rng = np.random.default_rng(3)
+    # representative material-axis stress magnitudes (Pa) with all components active
+    scales = np.array([6.0e8, 4.0e7, 5.0e7])
+    for _ in range(6):
+        sigma = rng.normal(size=3) * scales
+        ana = tsai_wu_strength_ratio_grad(sigma, PLY)
+        fd = np.zeros(3)
+        for k in range(3):
+            h = 1.0e-3 * max(abs(sigma[k]), 1.0e3)
+            sp = sigma.copy(); sp[k] += h
+            sm = sigma.copy(); sm[k] -= h
+            fd[k] = (
+                tsai_wu_strength_ratio(sp, PLY) - tsai_wu_strength_ratio(sm, PLY)
+            ) / (2.0 * h)
+        assert np.allclose(ana, fd, rtol=1e-6, atol=1e-6 * np.abs(fd).max())
 
 
 def test_batch_array_fractions_match_per_element():
