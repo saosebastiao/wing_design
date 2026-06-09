@@ -9,6 +9,8 @@ the ring connectors as the transverse/torsional load path.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
@@ -109,7 +111,7 @@ def solve_beam_shell(
                        bending_moment=bending, torsion=torsion)
 
 
-def solve_beam_shell_laminate(
+def _assemble_beam_shell_laminate(
     nodes: np.ndarray,
     beam_elements: np.ndarray,
     beam_sections: list[BeamSection],
@@ -120,26 +122,13 @@ def solve_beam_shell_laminate(
     A_skin: np.ndarray,
     D_skin: np.ndarray,
     fixed_nodes: np.ndarray,
-    loads: np.ndarray,
     drilling_factor: float = 1.0e-4,
-) -> FrameResult:
-    """Solve a clamped beam+shell structure with a CLT laminate skin; recover per-beam internal forces.
+):
+    """Assemble the global stiffness matrix for a beam+CLT-shell structure.
 
-    Mirrors `solve_beam_shell` exactly, except the skin triangles are assembled
-    using `tri_element_stiffness_laminate` with the CLT membrane stiffness matrix
-    ``A_skin`` and bending stiffness matrix ``D_skin`` instead of the isotropic
-    (E, nu, t) parameterisation.
-
-    ``A_skin`` may be (3,3) [N/m] — one matrix applied to all triangles — or
-    (M,3,3) — one per-triangle membrane stiffness matrix.  Likewise ``D_skin``
-    may be (3,3) [N·m] or (M,3,3).  Mixed shapes (one uniform, one per-tri) are
-    supported.  The beam assembly, boundary-condition elimination, linear solve,
-    and beam-force recovery are identical to `solve_beam_shell`, so when
-    ``A_skin = t·Dm`` and ``D_skin = (t³/12)·Dm`` the two solvers produce
-    numerically identical results.
-
-    `shell_tris` is (M, 3) int node indices (may be empty (0,3)).  `loads` is (N, 6).
-    Degenerate (collinear) shell triangles raise from `tri_element_stiffness_laminate`.
+    Returns ``(K, free, fixed_dofs, ndof, n_beam, transforms, klocals)`` where
+    ``K`` is a CSR sparse matrix, ``free``/``fixed_dofs`` are DOF index arrays,
+    ``transforms`` and ``klocals`` are per-beam-element lists for force recovery.
     """
     A_skin = np.asarray(A_skin, dtype=float)
     D_skin = np.asarray(D_skin, dtype=float)
@@ -195,17 +184,23 @@ def solve_beam_shell_laminate(
 
     K = sp.coo_matrix((vals, (rows, cols)), shape=(ndof, ndof)).tocsr()
 
-    f = loads.reshape(-1).astype(float)
     if len(fixed_nodes):
         fixed_dofs = np.concatenate([6 * int(fn) + np.arange(6) for fn in fixed_nodes])
     else:
         fixed_dofs = np.array([], dtype=int)
     free = np.setdiff1d(np.arange(ndof), fixed_dofs)
 
-    u = np.zeros(ndof)
-    u[free] = spla.spsolve(K[free][:, free].tocsc(), f[free])
-    disp = u.reshape(n_nodes, 6)
+    return K, free, fixed_dofs, ndof, n_beam, transforms, klocals
 
+
+def _recover_beam_forces(
+    beam_elements: np.ndarray,
+    n_beam: int,
+    u: np.ndarray,
+    transforms: list,
+    klocals: list,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Recover per-beam-element internal forces from the displacement vector."""
     axial = np.zeros(n_beam)
     bending = np.zeros(n_beam)
     torsion = np.zeros(n_beam)
@@ -216,6 +211,127 @@ def solve_beam_shell_laminate(
         axial[e] = floc[6]
         bending[e] = max(np.hypot(floc[4], floc[5]), np.hypot(floc[10], floc[11]))
         torsion[e] = floc[9]
+    return axial, bending, torsion
+
+
+@dataclass
+class FactoredBeamShell:
+    """Result of `solve_beam_shell_laminate_factored`, carrying the LU factorization."""
+    result: FrameResult
+    lu: object                  # splu of K_ff
+    K_ff: object                # csc K_ff (for adjoint matvecs / tests)
+    free: np.ndarray
+    ndof: int
+    u: np.ndarray               # full ndof displacement vector
+    # per-element data for sensitivity assembly:
+    beam_elements: np.ndarray
+    transforms: list
+    klocals: list
+
+
+def solve_beam_shell_laminate(
+    nodes: np.ndarray,
+    beam_elements: np.ndarray,
+    beam_sections: list[BeamSection],
+    shell_tris: np.ndarray,
+    *,
+    E_beam: float,
+    G_beam: float,
+    A_skin: np.ndarray,
+    D_skin: np.ndarray,
+    fixed_nodes: np.ndarray,
+    loads: np.ndarray,
+    drilling_factor: float = 1.0e-4,
+) -> FrameResult:
+    """Solve a clamped beam+shell structure with a CLT laminate skin; recover per-beam internal forces.
+
+    Mirrors `solve_beam_shell` exactly, except the skin triangles are assembled
+    using `tri_element_stiffness_laminate` with the CLT membrane stiffness matrix
+    ``A_skin`` and bending stiffness matrix ``D_skin`` instead of the isotropic
+    (E, nu, t) parameterisation.
+
+    ``A_skin`` may be (3,3) [N/m] — one matrix applied to all triangles — or
+    (M,3,3) — one per-triangle membrane stiffness matrix.  Likewise ``D_skin``
+    may be (3,3) [N·m] or (M,3,3).  Mixed shapes (one uniform, one per-tri) are
+    supported.  The beam assembly, boundary-condition elimination, linear solve,
+    and beam-force recovery are identical to `solve_beam_shell`, so when
+    ``A_skin = t·Dm`` and ``D_skin = (t³/12)·Dm`` the two solvers produce
+    numerically identical results.
+
+    `shell_tris` is (M, 3) int node indices (may be empty (0,3)).  `loads` is (N, 6).
+    Degenerate (collinear) shell triangles raise from `tri_element_stiffness_laminate`.
+    """
+    K, free, _fixed_dofs, ndof, n_beam, transforms, klocals = _assemble_beam_shell_laminate(
+        nodes, beam_elements, beam_sections, shell_tris,
+        E_beam=E_beam, G_beam=G_beam, A_skin=A_skin, D_skin=D_skin,
+        fixed_nodes=fixed_nodes, drilling_factor=drilling_factor,
+    )
+
+    f = loads.reshape(-1).astype(float)
+
+    u = np.zeros(ndof)
+    u[free] = spla.spsolve(K[free][:, free].tocsc(), f[free])
+    disp = u.reshape(nodes.shape[0], 6)
+
+    axial, bending, torsion = _recover_beam_forces(
+        beam_elements, n_beam, u, transforms, klocals
+    )
 
     return FrameResult(displacements=disp, axial_force=axial,
                        bending_moment=bending, torsion=torsion)
+
+
+def solve_beam_shell_laminate_factored(
+    nodes: np.ndarray,
+    beam_elements: np.ndarray,
+    beam_sections: list[BeamSection],
+    shell_tris: np.ndarray,
+    *,
+    E_beam: float,
+    G_beam: float,
+    A_skin: np.ndarray,
+    D_skin: np.ndarray,
+    fixed_nodes: np.ndarray,
+    loads: np.ndarray,
+    drilling_factor: float = 1.0e-4,
+) -> FactoredBeamShell:
+    """Like `solve_beam_shell_laminate`, but returns a `FactoredBeamShell` with the LU factorization.
+
+    Uses `spla.splu(K_ff)` instead of `spla.spsolve`, so the factorization can be
+    reused for adjoint sensitivity solves without refactorizing per design variable.
+    The returned `FactoredBeamShell.result` is numerically identical to the output
+    of `solve_beam_shell_laminate` with the same arguments.
+    """
+    K, free, _fixed_dofs, ndof, n_beam, transforms, klocals = _assemble_beam_shell_laminate(
+        nodes, beam_elements, beam_sections, shell_tris,
+        E_beam=E_beam, G_beam=G_beam, A_skin=A_skin, D_skin=D_skin,
+        fixed_nodes=fixed_nodes, drilling_factor=drilling_factor,
+    )
+
+    f = loads.reshape(-1).astype(float)
+
+    K_ff = K[free][:, free].tocsc()
+    lu = spla.splu(K_ff)
+
+    u = np.zeros(ndof)
+    u[free] = lu.solve(f[free])
+    disp = u.reshape(nodes.shape[0], 6)
+
+    axial, bending, torsion = _recover_beam_forces(
+        beam_elements, n_beam, u, transforms, klocals
+    )
+
+    result = FrameResult(displacements=disp, axial_force=axial,
+                         bending_moment=bending, torsion=torsion)
+
+    return FactoredBeamShell(
+        result=result,
+        lu=lu,
+        K_ff=K_ff,
+        free=free,
+        ndof=ndof,
+        u=u,
+        beam_elements=beam_elements,
+        transforms=transforms,
+        klocals=klocals,
+    )
