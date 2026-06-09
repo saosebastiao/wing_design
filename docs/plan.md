@@ -450,6 +450,24 @@ per-element/per-triangle ∂K matrices once per design point (reused across `bea
 rows) and/or aggregate the beam-stress constraint (KS/max → 1 adjoint), and vectorize the
 assembly. Default stays FD until that lands.
 
+**Tip gusset in the sizer done (2026-06-09) — NEGATIVE result (heavier).** A rigid,
+massless tip-gusset (stiff connector-beam clique among the tip-ring nodes) is now opt-in
+in the laminate sizer (`build_beam_shell_model(tip_gusset_radius=...)` /
+`model_with_tip_gusset`; assembled into K but excluded from beam-force recovery, so it
+composes with the analytic Jacobian for free — the gusset is constant stiffness). At a
+fixed design it cuts tip twist ~23× (and the investigation showed ~50×). But sizing the
+medium wingsail **with** the gusset, warm-started from the free-tip optimum and run with
+the analytic Jacobian (both converged feasible, buckling 1.0): free-tip **2264.6 kg →
+gusset 2453.1 kg (+8.3%)**, even though it eliminates tip twist (5.0°→0.03°) and stiffens
+the tip (defl 156→71 mm). **Why heavier:** the design is buckling-governed; the rigid tip
+coupling **redistributes load** so the free-tip optimum becomes infeasible with the gusset
+(members overloaded) and the optimizer must add material. Twist, though pinned at the
+limit, was not the mass driver — killing it frees nothing while the coupling costs
+material. Confirms the original tip-coupling investigation (a twist/stiffness lever, not a
+mass lever). **Recommendation:** don't use the tip gusset for mass; keep it opt-in for
+twist/aeroelastic-stiffness purposes. (Aside: the analytic free-tip run found 2264.6 vs
+the FD 2316.6 kg — exact gradients reached a ~2% better basin.)
+
 ### Phase F — Frame-field-driven layout
 
 The retained Arora frame field finally drives geometry.
@@ -607,5 +625,6 @@ src/wing_design/
 | Multi-start sizing | Serial parallel-ready `size_beam_shell_laminate_multistart`: N seeded starts (start 0 = default → never worse), best-feasible-by-mass selection (`laminate_result_is_feasible`); sizer gained an `x0` param + `laminate_design_bounds` helper. Machinery built + unit-tested via a stubbed sizer; NOT run at scale (cost). Parallel exec + full converged headline deferred. |
 | Beam symmetry + monotonic taper | Sizer DEFAULT: mirror-paired beams share one radius DV (`beam_radius_groups`, auto-detect symmetric placement + fallback), radius monotonic non-increasing keel→tip (algebraic constraints). ~Halves radius DVs → faster FD-Jacobian. Changes the default (prior headlines historical); `result.radii` still full length n. Full medium run converged feasible: 2316.6 kg (beams 585 / skin 1731), twist 5.0° / buck 1.0, 187 iters, 1 h 22 m; beams taper 35.7→4.0 mm symmetric. Sized geometry exported as STL (`exports/wingsail_sized_*.stl`). |
 | Analytic (adjoint) Jacobian | Opt-in `use_analytic_jacobian` (default off; FD byte-identical): adjoint analytic gradients for objective + all 6 FEA constraints, one reused `splu` factorization (`beams.sensitivity`, `solve_beam_shell_laminate_factored`). Every gradient FD-validated (≤~1e-4); TDD caught the ∂klocal/∂r internal-force term + the vector-valued beam_con. Same feasible optimum as FD; measured **1.58× faster** (489→309 s, small problem). Speedup implementation-bound (vector beam_con = n adjoint solves; uncached Python ∂K assembly) — follow-up: cache per-element ∂K + aggregate beam constraint for the big win. |
+| Tip gusset in the sizer | Opt-in rigid massless tip-node clique (`build_beam_shell_model(tip_gusset_radius=...)`/`model_with_tip_gusset`), assembled into K but excluded from force recovery → composes with the analytic Jacobian (constant stiffness). **Negative for mass:** medium free-tip 2264.6 → gusset 2453.1 kg (+8.3%), both feasible/converged, despite twist 5.0°→0.03° and tip defl 156→71 mm. Buckling-governed design + rigid coupling redistributes load → must add material. Twist not the mass driver. Keep opt-in for twist/stiffness, not mass. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
