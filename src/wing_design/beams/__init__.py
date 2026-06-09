@@ -20,7 +20,7 @@ from .fea_model import (
     solve_beam_frame,
     summarize_frame,
 )
-from .shell_model import BeamShellModel, build_beam_shell_model, skin_datum_angles, skin_triangles, solve_beam_shell_model
+from .shell_model import BeamShellModel, build_beam_shell_model, model_with_tip_gusset, skin_datum_angles, skin_triangles, solve_beam_shell_model
 from .tip_coupling import tip_clique_elements, solve_beam_shell_tip_coupled
 from .shell_sizing import (
     BeamShellSizingConfig,
@@ -71,6 +71,7 @@ __all__ = [
     "summarize_frame",
     "BeamShellModel",
     "build_beam_shell_model",
+    "model_with_tip_gusset",
     "skin_datum_angles",
     "skin_triangles",
     "solve_beam_shell_model",

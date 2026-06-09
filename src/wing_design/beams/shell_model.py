@@ -7,6 +7,7 @@ anisotropy and skin-stress-driven re-sizing are later Phase-E increments.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -52,6 +53,8 @@ class BeamShellModel:
     E_skin: float
     nu_skin: float
     t_skin: float
+    tip_gusset_elements: np.ndarray | None = None
+    tip_gusset_radius: float | None = None
 
 
 def build_beam_shell_model(
@@ -65,6 +68,7 @@ def build_beam_shell_model(
     nu: float = 0.32,
     skin_thickness: float = 0.003,
     arc_fractions: np.ndarray | None = None,
+    tip_gusset_radius: float | None = None,
 ) -> BeamShellModel:
     """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing."""
     if n_levels < 2:
@@ -86,6 +90,8 @@ def build_beam_shell_model(
 
     E = material.isotropic_equivalent_modulus(knockdown=knockdown)
     G = E / (2.0 * (1.0 + nu))
+    from .tip_coupling import tip_clique_elements  # local import to avoid circular dependency
+    tip_gusset_elements = tip_clique_elements(tip_nodes) if tip_gusset_radius is not None else None
     return BeamShellModel(
         nodes=nodes,
         beam_elements=beam_elements,
@@ -100,7 +106,16 @@ def build_beam_shell_model(
         E_skin=E,
         nu_skin=nu,
         t_skin=skin_thickness,
+        tip_gusset_elements=tip_gusset_elements,
+        tip_gusset_radius=tip_gusset_radius,
     )
+
+
+def model_with_tip_gusset(model: BeamShellModel, radius: float) -> BeamShellModel:
+    """Return a copy of model with a rigid tip-gusset clique (radius = connector-beam radius)."""
+    from .tip_coupling import tip_clique_elements  # local import to avoid circular dependency
+    return dataclasses.replace(model, tip_gusset_radius=float(radius),
+                               tip_gusset_elements=tip_clique_elements(model.tip_nodes))
 
 
 def skin_datum_angles(model: BeamShellModel, datum_dir=(0.0, 0.0, 1.0)) -> np.ndarray:
