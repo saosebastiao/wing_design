@@ -1,8 +1,16 @@
 # Wing Design — Development Plan
 
 The design specification lives in
-[`guided_generative_design.md`](./guided_generative_design.md). This file is the
-**incremental build sequence** that implements it.
+[`guided_generative_design.md`](./guided_generative_design.md). The build history —
+phase-by-phase analyses, findings, and the decisions log from the original shell-beam
+build-out (Phases 1–F, complete) — is archived in [`findings.md`](./findings.md).
+The audit-driven improvement backlog behind this plan is
+[`improvement_backlog.md`](./improvement_backlog.md), which also records the intended
+**manufacturing concept** (RTM'd / filament-wound beams, wrapped joints, hoop-wound
+prestressed skin) that several phases below build toward.
+
+This file is the **incremental build sequence** for the next stage: validity
+hardening, manufacturability, and the performance harvest.
 
 ## Goal
 
@@ -16,26 +24,20 @@ wound skin is modeled as a **load-bearing shell**.
 The repo is meant to evolve from a 5 m demo wingsail to a process applicable from
 ~1 m FPV drone wings up to >100 m wind turbine blades.
 
-## Direction change (2026-06-04)
+## Where we are (2026-06-09)
 
-The original plan generated an **interior volumetric truss** (Arora stress-aligned
-frame field → global parametrization → isocurve tracing → Jiang ALP). That method
-is **retired as the structural approach** in favor of **shell-following form
-beams** sized against the real FEA. Decisions taken:
+The shell-beam pipeline is built end-to-end and sized FEA-in-the-loop. Defensible
+headlines: small (5 m) **30.15 kg** fully constrained / **27.67 kg** with 4 thickness
+bands; medium (22 m) **2264.6 kg** (analytic Jacobian). The design is robustly
+**panel-buckling/stiffness-governed — strength never binds** (Tsai-Wu R = 7.0 vs
+required 2.0), and beam-layout levers are mined out (all negative or marginal).
 
-| Decision | Choice |
-| --- | --- |
-| Structural concept | **Beams on the OML** (shell-following), not an interior volumetric truss. |
-| Frame field | **Kept.** Diagnostic now; drives non-uniform beam spacing + direction in Phase F. |
-| Beam layout (early) | **Even** arc-length spacing around the OML perimeter. |
-| Cross-section sizing | **FEA-in-the-loop** (fully-stressed / optimality-criteria; MILP catalog later). |
-| Skin role | **Load-bearing structural shell** (supersedes the earlier fairing-only decision). |
-| Build-out strategy | **Thin end-to-end spike first**, then deepen weak links. |
-
-Retired modules (interior-truss path): `truss.extract` isocurve tracing, ALP,
-manufacturability filters. The frame-field/parametrization code survives for
-Phase F. See [`guided_generative_design.md` → Future optimizations](./guided_generative_design.md#future-optimizations--directions)
-item 9 for keeping the old path reachable as a comparison baseline.
+Both governing constraints sit at utilization 1.0 on **closed-form approximations**,
+so the plan below first firms up validity (some fixes will move the honest baseline
+*up*), then exploits the huge strength margin and the manufacturing concept's hollow /
+prestressed options (the step-change levers change *what kind of section resists
+buckling*, not where material sits). The analytic adjoint Jacobian is merged (1.98×
+vs FD, exact). Full record: [`findings.md`](./findings.md).
 
 ## Working specification (first design point)
 
@@ -52,7 +54,7 @@ item 9 for keeping the old path reachable as a comparison baseline.
 | `shell_thickness` | 3 mm |
 | Material (primary) | UD carbon / epoxy (E1 ≈ 130 GPa, anisotropic) |
 
-## Pipeline (target end state)
+## Pipeline (as built)
 
 ```
    build123d            AeroSandbox            3D linear FEA
@@ -60,7 +62,7 @@ item 9 for keeping the old path reachable as a comparison baseline.
                          per load case               │
                                                      ▼
                                     stress-aligned frame field R(x)
-                                  (diagnostic now; layout driver later)
+                                          (diagnostic)
                                                      │
        ┌─────────────────────────────────────────────┘
        ▼
@@ -81,516 +83,92 @@ item 9 for keeping the old path reachable as a comparison baseline.
 ## Phases
 
 Each phase ends in a runnable example under `examples/` and a passing smoke test.
-We spike end-to-end at low fidelity before deepening any one phase.
+**Findings are recorded in [`findings.md`](./findings.md)** (not here), with measured
+wall-clock for every sizing run. Backlog references (V#/M#/P#) point into
+[`improvement_backlog.md`](./improvement_backlog.md).
 
-### Foundation — Phases 1–5 (done)
+### Phase V — Validity hardening
 
-Kept as-is from the prior build; these are the inputs to the shell-beam pipeline.
+Make the model behave like the real structure before harvesting levers. Three of
+these fixes may move the honest baseline *up*; lever gains must be measured against a
+trustworthy baseline, not the current one.
 
-- **Phase 1 — Wing geometry.** `geometry.airfoil` (NACA 4-digit symmetric),
-  `geometry.wing` (lofted OML + spar/transition). `examples/01_wing_solid.py`.
-- **Phase 2 — Aero loads.** `aero.model` (ASB `Wing` from `WingSpec`),
-  `aero.cases` (load-case envelope), `aero.loads` (per-panel → OML traction).
-  `examples/02_aero_envelope.py`.
-- **Phase 3 — Coupled beam baseline.** `materials.unidir` (UD ply + CLT),
-  `structural.beam` (tapered-tube `Opti` sizing). `examples/03_spar_sizing.py`.
-  *Mass/stress/tip-deflection baseline every later phase must beat.*
-- **Phase 4 — Volumetric FEA.** `structural.mesh` (gmsh tets),
-  `structural.fea` (linear elastic σ(x)), `structural.shell`,
-  `structural.projection`. `examples/04_volumetric_fea.py`.
-- **Phase 5 — Stress-aligned frame field.** `truss.frame_field`,
-  `truss.parametrization`, `truss.streamline`, `truss.surface_streamlines`.
-  `examples/05_stress_lines.py`, `06_frame_field.py`, `15_shell_stress_lines.py`.
-  **Retained as diagnostic; reused as the Phase F layout driver.**
+- **V.1 Shadow prices.** Extract the SLSQP Lagrange multipliers (computed, currently
+  discarded) and report kg-per-unit for each limit (twist 5°, deflection 2% span,
+  buckling SF 1.5) — tells us which *requirement* to renegotiate first. (P#8)
+- **V.2 Mesh-convergence study of the optimized design.** Sweep n_levels (and spot-check
+  n_beams) at fixed constraints; quantifies the element-length-Euler mesh dependence,
+  which currently rewards refinement unconservatively. (V#9, V#3)
+- **V.3 Eigenvalue buckling check (K + Kσ).** Linear buckling solve of the current
+  optimum: curvature credit, stiffness-direction match, combined loading, global
+  ovalization modes — validates or relaxes *both* binding closed-form checks. Includes
+  the cheap parametric hoop-pretension post-processing probe to bound the prestress
+  prize before P.2. (V#1, V#2)
+- **V.4 Self-weight + inertial/heel load cases.** First-order for the 2.3-tonne medium
+  cantilever. (V#5)
+- **V.5 Distributed panel pressure + skin bending stress in the failure check.**
+  Panels currently receive no pressure; DKT bending moments are recovered but unused.
+  (V#4)
+- **V.6 Re-baseline.** Re-run the small and medium headlines with V.4/V.5 active; all
+  Phase-P levers are measured against these numbers.
 
-### Phase A — Form-beam geometry spike
+Enabler on call: **KS aggregation of the vector beam constraint** (collapses n adjoint
+back-substitutions to 1) — pull in whenever V/P runs feel slow. (P#7)
 
-First step of the new pipeline: get shell-following beams + skin + assembly
-built end-to-end at crude fidelity.
+Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
+Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built
+pass; root/bearing compliance → M.5. (V#6, V#7, V#10, V#11)
 
-- `wing_design.beams.splines` — sample the **full** OML (wing + transition + spar
-  to keel-step) at chosen `z` levels: LE spline, TE spline, and 14 arc-spaced
-  splines (even arc-length around each cross-section). Fit cubic B-splines through
-  the on-surface points (`scipy.splprep`).
-- `wing_design.beams.build` — at each spline point, inward beam arc with a
-  **fixed crude radius**; loft each beam bottom→top.
-- `wing_design.beams.wrap` — connect beam-arc endpoints per `z` level → loft →
-  thicken by `shell_thickness`.
-- `wing_design.beams.assembly` — beams + skin into one assembly; export STEP.
+### Phase M — Manufacturability
 
-**Deliverable: `examples/20_form_beams.py` → STEP of the shell-beam wingsail
-(unsized).**
+Encode the manufacturing concept's constraints so designs stay buildable. M.1–M.2 gate
+any "as-built" headline claim; later items can interleave with Phase P.
 
-### Phase B — Structural-eval spike
+- **M.1 Beam buildability classification.** At the geometry stage, tag each beam
+  RTM-vs-wound (path convexity / fiber bridging) and solid-vs-hollow (straightness);
+  reject or re-route infeasible sections before mold design. (M#4)
+- **M.2 Ply discretization.** Round band thicknesses/layup fractions to integer ply
+  counts (~0.25 mm/ply) with a mandatory first-layer hoop wind floor; FEA re-verify via
+  the existing bump-and-reverify pattern. (M#1, M#2)
+- **M.3 Windable-angle constraints.** Constrain layup fractions to windable angle sets
+  per region; longer-term, Phase G's planner feeds the as-wound orientation map back
+  into the CLT. (M#3)
+- **M.4 Bondline + as-built mass.** Wrapped-joint/bondline checks (shear flow, peel —
+  post-processing on the existing solution) and an as-built mass model (wound Vf,
+  turnaround overlaps, joints, hardware); report ideal vs as-built mass separately.
+  (M#5, M#7, V#8)
+- **M.5 Root socket model.** Replace the rigid clamp with the slot-and-bond socket
+  (finite stiffness + bond-area check); size the engagement length from recovered root
+  reactions. (M#8, V#11)
 
-- `wing_design.beams.fea_model` — assemble a structural FEA model from the
-  splines: **beam elements** along each form-beam (cantilevered at the keel-step)
-  + **load-bearing skin shell** between beams, isotropic-equivalent properties.
-- Solve under the existing `aero.cases` load cases; report stress, tip
-  deflection, twist.
+### Phase P — Performance harvest
 
-**Deliverable: `examples/21_beam_fea.py` → per-load-case stress/deflection
-metrics for the unsized structure.**
+One lever at a time, each against the V.6 re-baselined numbers, finding recorded
+before the next lever starts.
 
-**Status: done (2026-06-04).** Beam elements implemented as a fresh in-house 3D
-Euler–Bernoulli frame solver (`structural.frame`); the skin's transverse shear
-transfer is stood in for by **ring connectors** between adjacent beams at each
-z-level, not yet a coupled shell (deferred to a later deepen). Loads applied via
-full panel-force projection onto the nearest beam node (`beams.fea_model`). The
-unsized 20 mm-radius frame is far over-stiff (tip deflection ≈ 0.2 % span, member
-σ_vm ≲ 20 MPa vs. ~400+ MPa allowable) — the baseline Phase C thins down.
-
-### Phase C — FEA-in-the-loop sizing spike
-
-- `wing_design.beams.sizing` — fully-stressed-design / optimality-criteria loop:
-  set each beam's per-station cross-section area from its computed stress, re-solve
-  Phase-B FEA, iterate to a stress/deflection-feasible structure; minimize mass.
-
-**Deliverable: `examples/22_sized_beams.py` → sized assembly with mass that beats
-the Phase-3 tube-spar baseline, all constraints satisfied.**
-
-**Status: done (2026-06-04).** Per-element longitudinal radii sized by SLSQP
-(`beams.sizing.size_beams`) minimizing beam mass s.t. per-element von Mises +
-tip-deflection + tip-twist constraints, re-solving the Phase-B frame FEA each
-step (rings held at a fixed minimum radius; their stress is reported, not sized).
-Deliverable: `examples/22_sized_beams.py`. Caveat logged: the tube-spar baseline
-is a single bending member, so its mass is reported for context but is not
-directly comparable to the full form-beam frame.
-
-**Key finding:** the sized frame is **stiffness-driven, not strength-driven** —
-tip deflection sits exactly on its limit while the worst longitudinal stress is
-~42 MPa against a 1100 MPa allowable (≈26× margin). So sizing UD beams to a
-deflection target leaves them hugely over-strength; the mass-efficient stiffness
-lever is the **load-bearing skin** (Phase D shell coupling), not thicker beams.
-(SLSQP needed objective/constraint normalization to O(1) — the raw Pa-vs-metre
-scale gap made the QP ill-conditioned and the solver quit early at an infeasible
-point.)
-
-### Phase D — Deepen geometry
-
-- Promote `spar_diameter` → derived `spar_radius()` (max inscribed circle at
-  pivot, floored to cm) on `WingSpec`.
-- Add fillets: `spar_transition_fillet_r` (30 mm), `root_transition_fillet_r`
-  (50 mm), `te_fillet_r` (5 mm, continuous-winding limit).
-- Spline-fit fidelity: tune `z`-level count + smoothing tolerance against an
-  on-surface error metric.
-- Solve beam-arc radius for the **target area** from sizing (replace Phase-A's
-  fixed crude radius).
-
-**Deliverable: manufacturable, correctly-filleted geometry whose beams hit their
-sized areas.**
-
-**Status: done (2026-06-05).** `spar_radius` derived (80 mm / 160 mm dia at the
-pivot). Beams built as inward-arc **lens** sections sized to the Phase-C radii
-(`beams.build_sized_lens_beams`; circular fallback unused — lens lofts cleanly,
-16/16 beams). `examples/23_sized_geometry.py` runs the full Phase-C SLSQP sizing
-(mass ≈ 45 kg, radii 4–40 mm) and exports `exports/sized_geometry_v0.step`.
-The TE fillet (`te_fillet_r`) is deliberately not attempted: the sharp trailing
-edge is a continuous-winding feature handled in manufacturing, not a solid round.
-
-**Deferred items resolved (2026-06-05).**
-(1) *Manufacturable junctions by construction.* Post-hoc filleting proved
-impossible — build123d 0.10.0's OCC kernel cannot blend the morphing airfoil→circle
-loft at any radius (`max_fillet` fails outright), though `fillet` works on a plain
-box. The cause is a slope crease where the linearly-morphing fairing met the
-constant airfoil and the constant spar cylinder. Fixed at the source: the morph now
-uses **smoothstep easing** (`_transition_blend`, zero slope at both junctions), so
-the surface is crease-free and no fillet is needed. `apply_wing_fillets` was retired.
-(2) *On-surface fidelity.* Decoupled geometry resolution from sizing resolution —
-sizing stays at 8 levels (SLSQP speed) while the geometry is built at **60 levels**
-via `resample_segment_radii`, cutting worst on-surface error from **289 mm → 113 mm**.
-The residual now lives mid-transition (smoothstep is steepest there); **transition-
-dense z-levels** would target it further — recorded as the remaining refinement.
-
-### Phase E — Deepen structural
-
-- Anisotropic skin via CLT (`materials.unidir`) replacing isotropic-equivalent.
-- Discrete cross-section **catalog via MILP** (OR-Tools) with co-linear grouping;
-  sequential linear programming using FEA sensitivities.
-- Buckling (panel eigenvalue) and twist-deflection constraints in the sizing loop.
-
-**Deliverable: sized structure with discrete stock cross-sections + anisotropic
-skin, buckling-checked.**
-
-**Status: E.1 done (2026-06-05).** Load-bearing skin coupled into the structural
-model: DKT+CST shell panels assembled between beam nodes via `structural.solve_beam_shell`
-(`beams.build_beam_shell_model`), with the **skin replacing the ring connectors**.
-Isotropic-equivalent skin (3 mm). `examples/24_skin_coupling.py` measures the skin
-making the structure ~2.4x stiffer (tip deflection) than the ring frame at equal
-beam radius (n_levels=12) — confirming the Phase-C/D finding that the skin, not
-thicker beams, is the mass-efficient stiffness lever. (The factor is resolution-
-dependent: ~8.6x at n_levels=6, ~2.4x at n_levels=12 — more ring levels add ring
-stiffness, so the closed-skin advantage over discrete rings narrows as the mesh
-refines; the skin always wins.)
-
-**Status: E.2 done (2026-06-06).** Co-sized per-element beam radii **and** a uniform
-skin thickness against the combined beam+shell FEA (`beams.size_beam_shell`),
-minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist
-constraints (skin membrane stress recovered each solve via `structural.recover_membrane_stress`).
-`examples/25_resize_with_skin.py` (n_levels=8): the load-bearing skin cuts structural
-mass from the Phase-C beams-only **43.5 kg → 27.5 kg (37% lighter)** — beams 17.8 kg
-(radii 4–14 mm) + skin 9.7 kg (0.71 mm), converged & feasible.
-
-**Key finding:** with the skin carrying load the structure becomes **twist-governed**
-— tip twist sits exactly on its 5° limit while tip deflection is slack (49 mm of
-100) and stresses are tiny (beam 18 MPa, skin 73 MPa vs 1100 allowable). So the next
-mass lever is torsional stiffness (skin shear path / fibre angle), not beam or skin
-gauge. This motivates **CLT anisotropic skin** (E.4 — tailor ±45° plies for shear)
-and revisiting the twist limit.
-
-**Status: E.4 done (2026-06-06).** CLT anisotropic skin: a symmetric-balanced
-laminate (smeared bending D) whose membrane `A`/bending `D` feed
-`tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; the layup area
-fractions (0/±45/90) are co-sized as design variables with beam radii + skin
-thickness (`beams.size_beam_shell_laminate`), minimizing mass under beam-vm,
-skin-vm, tip-deflection and tip-twist constraints. `examples/26_clt_skin.py`
-(n_levels=8): CLT cuts mass **27.5 kg (E.2 isotropic) → 25.6 kg (7% lighter)**,
-converged & feasible.
-
-**What is real:** the 7% mass gain is a valid optimum of the posed problem — CLT
-anisotropy lets the optimizer drop skin stiffness in unneeded directions, shrinking
-the beams (17.8→14.7 kg) while holding twist (the active constraint) with slightly
-thicker skin (0.71→0.79 mm). Stiffness and stress use the same per-triangle Qeff
-self-consistently, so the converged result is sound. A dedicated test confirms the
-optimizer *does* drive the layup toward ±45° when twist is the sole binding lever.
-
-**Important limitation (do NOT read the optimal layup as a manufacturable layup):**
-ply angles are defined relative to **each skin triangle's local frame** (e1 along
-its first edge), and the tiling's triangle frames are split ~50/50 spanwise vs
-chordwise (measured mean |cos∠(local-x, span)| = 0.49). So `(f0,f45,f90)` are not
-consistent global fibre directions — the converged "all-0°" is "0° per arbitrary
-local edge," not a coherent spanwise layup. A fixed-geometry sweep shows the layup
-effect is modest and that 90° is simply the worst orientation (highest deflection
-and twist); the exact `(1,0,0)` corner is somewhat arbitrary among the non-90°
-options. Per-ply Tsai-Wu failure (vs laminate-average vm) and per-band layup
-would refine it further.
-
-**E.4b done (2026-06-07) — consistent span datum; layup now manufacturable AND 26%
-lighter.** `LaminateSizingConfig.ply_angle_datum=(0,0,1)` measures ply angles against
-the span axis: each triangle's laminate is built with its plies offset by the
-triangle's local-frame angle to the datum (`skin_datum_angles` + `laminate_stiffness_offset`;
-solver + stress recovery generalized to per-triangle stiffness). The optimized layup
-is now coherent (0°=spanwise). Re-running the co-sizing (`examples/28_ply_datum.py`):
-the span-datum optimum is **19.0 kg** with a clean manufacturable layup — **100%
-chordwise (90°) skin** — vs the incoherent per-tri-local 25.6 kg. It is **26% lighter**
-because a consistent datum lets the optimizer coherently exploit anisotropy and use
-both the deflection and twist budgets fully (the datum design sits at *both* limits;
-the per-tri-local one left deflection slack at 66/100 mm). Physically sensible: the
-longitudinal beams carry spanwise bending, so the skin's most efficient role is
-**chordwise (hoop) fibres** for section-shape/shear, not spanwise. CAVEAT: this 19.0 kg
-is WITHOUT buckling (apples-to-apples vs E.4); the true final design is datum + the
-closed-form buckling constraints (a quick combined run) — expect it modestly heavier.
-
-**Deferred to later E increments:** per-spanwise-band skin thickness; MILP discrete
-stock catalog (E.3); per-ply Tsai-Wu skin failure.
-
-**Buckling check done (2026-06-06).** Closed-form constraints added (optional, gated
-by `buckling_safety_factor`): beam Euler (`Pcr=π²EI/(KL)²`, element-length buckling
-since the skin restrains nodes) + skin panel plate-buckling (triangle-as-plate,
-`b=√area`, `kc=4`), in both sizers. Helpers in `structural.buckling`;
-`examples/27_buckling.py` re-sizes the CLT design with vs without (SF=1.5).
-
-**Validity finding — buckling binds, but the mass is robust (+2%).** Without buckling
-the E.4 design is 25.6 kg, twist-governed, beam-heavy (beams 14.7 / skin 10.8 @
-0.79 mm) — and is in fact **buckling-infeasible**. With buckling (SF 1.5) the optimum
-is **26.1 kg (+2%)**, now **buckling-governed** (beam & panel utilization both = 1.0,
-twist slack at 2.8°): the optimizer rebalances material **from beams into a thicker
-skin** (beams 9.7 / skin 16.4 @ 1.20 mm, layup shifts slightly toward ±45) — the
-thicker skin both resists panel buckling and laterally stabilizes the beams. So the
-~26 kg headline holds; the prior 25.6 kg was mildly optimistic. Approximations
-(triangle-as-plate panel, element-length Euler, no eigenvalue/global modes) are
-conservative-ish; eigenvalue/global buckling is the refinement if needed.
-
-**E.3 done (2026-06-07) — MILP stock catalog (CP-SAT).** `beams.select_stock_sizes`
-discretizes the continuous beam radii to a stock catalog via a CP-SAT min-mass
-assignment with a cap of K distinct sizes (the co-linear-grouping / part-count knob);
-`examples/29_stock_catalog.py` demonstrates + FEA-verifies. Stock catalog 4–20 mm
-(2 mm steps); continuous beam mass 8.65 kg. Mass-vs-part-count Pareto (all feasible):
-K=4 → **4 sizes, 9.5 kg (+10%)**; K=2 → 2 sizes, 17.4 kg (+101%); K=8 → 4 sizes (no
-gain over K=4). **Finding — round-up alone is NOT buckling-safe:** the monotonic
-"each beam ≥ its continuous radius stays feasible" argument holds for stress,
-deflection and twist but FAILS for beam buckling — non-uniform stiffening
-redistributes compression onto the pinned r_min (4 mm) beams, pushing their Euler
-utilization to ~1.3. A greedy **bump-and-reverify repair** (raise over-utilized
-beams to the next catalog size, re-select, re-solve — 1 iteration here) restores
-feasibility. The FEA verify step is therefore essential, not optional. Full
-SLP+FEA-sensitivity MILP remains deferred.
-
-**Combined final design done (2026-06-07) — span-datum CLT skin + buckling together.**
-Earlier increments measured the two refinements separately (E.4b: 19.0 kg with a
-coherent span-datum layup but WITHOUT buckling; the buckling study: ~26.1 kg on the
-*isotropic* skin). `examples/32_final_design.py` co-sizes BOTH at once — a
-manufacturable span-datum CLT layup under beam-stress, skin-stress, tip-deflection,
-tip-twist AND closed-form buckling (Euler + panel, SF 1.5). Result: **30.15 kg**
-(beams 9.38 / skin 20.77 @ **1.52 mm**), **buckling-governed** (beam & panel
-utilization both = 1.0), twist slack (1.30°/5°), deflection slack (28.8/100 mm),
-layup 31% spanwise / 15% ±45 / 54% chordwise. This is *heavier* than either partial
-number because the two constraints compound: buckling forces a thick skin (skin = 2/3
-of mass) and a single coherent global datum layup is less free than per-triangle-local
-angles — manufacturability and buckling each cost real mass. **This 30.15 kg is the
-defensible, fully-constrained, manufacturable headline for the shell-beam wingsail.**
-Caveat: SLSQP is a local optimum (per-tri-local + buckling reached 26.06 kg), so a
-better basin may exist; a global/multi-start pass is the refinement if mass is
-critical.
-
-**Per-band skin thickness done (2026-06-08) — clear win.** The CLT sizer's single
-uniform skin thickness is now an opt-in set of B contiguous spanwise thickness bands
-(`LaminateSizingConfig.n_skin_bands`, default 1 = unchanged; `beams.skin_band_map` maps
-each triangle to a band, per-triangle thickness drives CLT stiffness, panel buckling,
-and mass). Since the skin is ~2/3 of mass and uniform thickness is set by the worst
-(root) panel, the lightly-loaded tip carries excess material. `examples/33_banded_skin.py`
-compares uniform vs. 4 bands at equal constraints (span datum + buckling SF 1.5,
-n_beams=16, n_levels=8): **uniform 30.11 kg → banded 27.67 kg (−8.1%, −2.44 kg, all in
-the skin: 20.46→18.02)**, both converged & feasible (beam/panel buckling util = 1.0).
-The taper thins the tip and keeps the keel thick — band thicknesses (tip→keel)
-**0.96 / 1.29 / 1.57 / 1.55 mm** (mean 1.32). The **governing constraint flips from
-buckling (uniform) to twist (banded, tip twist pinned at 5.0°)**: banding lets the
-optimizer thin the tip skin until twist — not panel buckling — becomes binding.
-Banding needs more SLSQP iterations (4× the thickness DVs + tighter active set; ~354 vs
-70). Highest-leverage lever realized; per-ply Tsai-Wu and per-band *layup* remain
-deferred follow-ups. NB this −8.1% is on top of the 30.15 kg headline, i.e. a banded
-final design lands ~27.7 kg.
-
-**Per-ply Tsai-Wu skin failure done (2026-06-08) — confirms strength is not the binding
-skin mode.** Opt-in `skin_failure="tsai_wu"` (default `"von_mises"`; `materials.failure`)
-replaces the laminate-average von-Mises proxy with a per-ply Tsai-Wu strength-ratio check
-(R ≥ SF, F12 = -0.5·√(F11·F22), material SF 2.0) over the present ply orientations, using
-`recover_membrane_strain`. `examples/34_tsai_wu_skin.py` compares the two criteria at
-equal constraints (span datum + buckling SF 1.5, uniform skin): **von-Mises 30.11 kg vs
-Tsai-Wu 30.07 kg (−0.1%)**, layup essentially unchanged (34/13/52 → 35/13/52), and the
-governing **Tsai-Wu min strength ratio is R = 7.01 — far above the required SF of 2.0**.
-**Finding:** the skin is **buckling/stiffness-governed, not strength-governed** (both
-designs sit at beam & panel buckling util = 1.0 with vM skin stress ~22 MPa ≪ 1100 MPa
-allowable and ~3.5× margin even on the proper Tsai-Wu criterion), so the cruder
-von-Mises proxy was already adequate here — the accurate criterion confirms it rather
-than changing the design. Tsai-Wu remains the right check to keep available for
-load/geometry regimes where the skin *is* strength-critical. **Cost caveat (measured):**
-the Tsai-Wu run took **~2 h 11 m** wall-clock (per-triangle Python loop inside every
-SLSQP `evaluate` × the FD-Jacobian's ~115 evaluates/iter); vectorize the inner loop
-before using it in any larger sweep. First-ply only; smeared laminate (no
-stacking/delamination).
-
-**Tsai-Wu vectorized (2026-06-08).** The per-triangle Python loop in the Tsai-Wu check
-was replaced by a vectorized `laminate_min_strength_ratio_batch` (identical results;
-scalar delegates to it). **Lesson (corrected):** this gave only a *modest* speedup — a
-post-vectorization run of `examples/34` was still >1 h 18 m before being killed — because
-the dominant cost is the **FEA solve per `evaluate`** (`solve_beam_shell_laminate` called
-~(n_design_vars+1)× per SLSQP iteration by the finite-difference Jacobian × maxiter ×
-n_load_cases), NOT the per-ply inner loop. Sizing-run cost is gated by mesh size, maxiter,
-and DV count; an analytic/!FD Jacobian or fewer DVs would be the real lever.
-
-**Per-band skin layup done (2026-06-08) — built & tested; mass win unquantified.**
-Opt-in `LaminateSizingConfig.per_band_layup` gives each `n_skin_bands` spanwise band its
-own `(f0,f45,f90)` (default off = global layup; the Tsai-Wu batch was generalized to
-per-triangle fractions so it composes). Backward-compatible (full suite green, 120
-tests). Since skin mass is fraction-independent, any win is **indirect** (a band's fibre
-mix can meet the constraints at a thinner thickness). **Measurement inconclusive:** a
-coarse comparison (medium wingsail, n_beams=12/n_levels=6, 4 bands, datum+buckling,
-maxiter 120 global / 200 per-band) took **1 h 04 m** and *neither* run converged
-(both hit maxiter); the per-band run ended **beam-buckling-infeasible (util 1.70)**, so
-its −6.6% lower mass is not a valid feasible win. The per-band run did produce a sensible
-fibre **taper** (root band ≈48/23/29 spanwise-heavy, mid bands more ±45/chord), so the
-mechanism works, but a trustworthy headline needs a converged feasible run (more
-iterations / better conditioning) — deferred given cost. Consistent with the
-buckling/stiffness-governed picture (Tsai-Wu showed huge strength margin), per-band layup
-is expected to be a small, hard-to-realize lever. Independent layup-band-count and a
-global/multi-start pass remain deferred.
-
-**Multi-start sizing done (2026-06-08) — machinery only (not run at scale).** A serial,
-parallel-ready `beams.size_beam_shell_laminate_multistart` runs the sizer from N initial
-guesses and returns the best **feasible** result (`laminate_result_is_feasible`): start 0
-is the default guess (so it never regresses), starts 1.. are seeded uniform-random within
-`laminate_design_bounds` (simplex-projected). The sizer gained an opt-in `x0` param
-(default None = unchanged). Per the cost realities (one sizing is hours; multi-start is
-N×), **no full multi-start was executed** — the orchestration (start-0-default,
-best-feasible selection, determinism, never-worse) is verified with a *stubbed* sizer,
-and `examples/36_multistart.py` is a minutes-scale validation harness left for on-demand
-use. The levers for a real headline are parallel execution (structured for it, not
-implemented) and/or an analytic constraint Jacobian to make each sizing cheaper. This
-closes the deferred-followup queue (vectorize Tsai-Wu / per-band layup / multi-start);
-next is Phase G/H.
-
-**Beam symmetry + monotonic taper done (2026-06-08) — now the sizer default.**
-`size_beam_shell_laminate` enforces, by default: mirror-symmetric beam radii (mirror-
-paired beams share one radius DV via `beams.beam_radius_groups`, which auto-detects
-symmetric placement and falls back to independent radii if asymmetric) and monotonic
-non-increasing radius from keel-step to tip (cheap algebraic constraints). This ~halves
-the radius DVs (16 beams → 9 unique groups) — fewer FD-Jacobian columns — for a faster,
-more physical solve. `result.radii` is still the full per-element length `n` (expanded),
-so geometry/stock-catalog consumers are unaffected. **This changes the sizer default**;
-earlier headlines assumed independent per-element radii and are historical. **Full
-medium-wingsail run** (`examples/37_sized_export.py`; symmetric+monotonic, span datum,
-4 thickness bands, buckling SF 1.5, von-Mises skin): **converged feasible at 2316.6 kg**
-(beams 585 + skin 1731; twist pinned 5.0°, beam & panel buckling util = 1.0) in 187
-iters, **wall-clock 1 h 22 m** — a converged, feasible headline where the prior
-unconstrained per-band coarse run could not converge. The sized beams taper monotonically
-**35.7 mm (keel) → 4.0 mm (tip)**, mirror-symmetric. The resulting structure was lofted
-(lens-section beams + OML skin) and **exported as STL meshes**
-(`exports/wingsail_sized_{skin,beams,assembly}.stl`). NB the 2316 kg is the **medium
-(22 m)** wingsail — a ~2-tonne structure by surface area — not comparable to the small
-(5 m) ~30 kg headlines.
-
-**Analytic (adjoint) constraint Jacobian done (2026-06-09) — correct, modest speedup.**
-Opt-in `LaminateSizingConfig.use_analytic_jacobian` (default False; FD path byte-identical)
-supplies SLSQP analytic gradients for the objective + all six FEA constraints via the
-**adjoint** method, reusing one `splu(K_ff)` factorization (`structural.beam_shell.
-solve_beam_shell_laminate_factored` + `beams.sensitivity`). Every gradient is
-**FD-validated** (element ∂K/∂x primitives, adjoint engine, and each constraint to
-rel-err ≤ ~1e-4; 27 sensitivity/failure tests). TDD caught two real derivation gaps: the
-recovered internal force `floc=klocal(r)·T·u` adds a `∂klocal/∂r` term (radius gradient
-was 13× off without it), and `beam_con` is **vector-valued** (one row per beam element) so
-its Jacobian is the full `(n,nx)` matrix. `examples/38_analytic_speedup.py` (small problem,
-n_beams=12/n_levels=6, datum+buckling+4 bands): analytic and FD reach the **same feasible
-optimum** (31.15 vs 31.13 kg, buckling 1.0) with analytic **1.58× faster (489 s → 309 s)**.
-**The 1.58× is far below the ~n_DV× ceiling**, throttled by (a) the vector `beam_con` needing
-~n adjoint solves per gradient and (b) `∂K/∂x` re-assembled in pure-Python loops each adjoint
-(the design-dependent per-element derivative matrices aren't cached). The method is sound;
-the realized gain is implementation-bound. **Path to the big win (follow-up):** cache the
-per-element/per-triangle ∂K matrices once per design point (reused across `beam_con`'s n
-rows) and/or aggregate the beam-stress constraint (KS/max → 1 adjoint), and vectorize the
-assembly. Default stays FD until that lands.
-
-**Analytic-Jacobian caching done (2026-06-09) — exact, 1.58×→1.98×.** Implemented the
-first follow-up above: `beams.sensitivity.prepare_sensitivity(ds, factored) -> SensCache`
-precomputes every beam element's `∂kg/∂r` and every triangle's `∂ke/∂t`,`∂ke/∂f0`,`∂ke/∂f45`
-(the trig/Q-transform builds) **once per design point**; `lambdaT_dK_x_cached` reuses them as
-cheap `λ[dofs]·(∂k·u[dofs])` dots. Each `grad_*` takes an optional `cache=` (lazy-builds if
-None, so the FD-validation tests are unchanged), and `evaluate_jac` builds one cache per
-design point and threads it through all constraints (reused across `beam_con`'s n rows and
-all load cases — the cache is design-only). **Exact:** gradients are bit-for-bit identical
-(same math, not recomputed) — cached==uncached to ≤1e-12, and every existing FD-grad test
-passes unchanged. Re-measured `examples/38` (same small problem): FD 546.4 s → analytic
-**276.2 s = 1.98× faster** (up from 1.58×), same feasible optimum (31.13 vs 31.15 kg,
-buckling 1.0). The remaining gap to the ~n_DV× ceiling is now the n adjoint *back-substitutions*
-for the vector `beam_con` (KS/max aggregation → 1 adjoint is the deferred next lever; one
-non-cached path, `_beam_vm_grad_one`, still calls `lambdaT_dK_x` directly — a candidate
-follow-up). Default stays FD.
-
-**Tip gusset in the sizer done (2026-06-09) — NEGATIVE result (heavier).** A rigid,
-massless tip-gusset (stiff connector-beam clique among the tip-ring nodes) is now opt-in
-in the laminate sizer (`build_beam_shell_model(tip_gusset_radius=...)` /
-`model_with_tip_gusset`; assembled into K but excluded from beam-force recovery, so it
-composes with the analytic Jacobian for free — the gusset is constant stiffness). At a
-fixed design it cuts tip twist ~23× (and the investigation showed ~50×). But sizing the
-medium wingsail **with** the gusset, warm-started from the free-tip optimum and run with
-the analytic Jacobian (both converged feasible, buckling 1.0): free-tip **2264.6 kg →
-gusset 2453.1 kg (+8.3%)**, even though it eliminates tip twist (5.0°→0.03°) and stiffens
-the tip (defl 156→71 mm). **Why heavier:** the design is buckling-governed; the rigid tip
-coupling **redistributes load** so the free-tip optimum becomes infeasible with the gusset
-(members overloaded) and the optimizer must add material. Twist, though pinned at the
-limit, was not the mass driver — killing it frees nothing while the coupling costs
-material. Confirms the original tip-coupling investigation (a twist/stiffness lever, not a
-mass lever). **Recommendation:** don't use the tip gusset for mass; keep it opt-in for
-twist/aeroelastic-stiffness purposes. (Aside: the analytic free-tip run found 2264.6 vs
-the FD 2316.6 kg — exact gradients reached a ~2% better basin.)
-
-**Mirror-symmetric non-uniform spacing done (2026-06-09) — NEGATIVE result (heavier).**
-`beams.chord_symmetrize_weights` (max-of-mirror) makes the per-segment skin-stress weights
-chord-symmetric so stress-weighted placement (`stress_weighted_targets` via the existing
-`arc_fractions` path) yields a mirror-symmetric layout that **keeps `beam_radius_groups`
-grouping** (verified: symmetric-spaced n_groups = even n_groups = 63 — the radii stay
-mirror-paired). `examples/40_symmetric_spacing.py` (medium, span datum + buckling + 4
-bands, analytic Jacobian, both converged feasible): even **2264.6 kg → symmetric-weighted
-2325.2 kg (+2.7%)**, despite a real stress concentration (max/mean segment = 2.45).
-**Why heavier:** clustering beams toward the high-stress mirror regions leaves *larger
-panels* in the gaps, and the design is **panel-buckling-governed** — bigger panels force
-more material (beam mass 557→626 kg; skin ~flat). Even spacing minimizes the largest
-panel, which is what a buckling-governed skin wants. So even spacing is near-optimal here
-and stress-weighted re-spacing is counterproductive — consistent with F.1's low leverage,
-now clearly *negative* under the current symmetry+taper+banded+buckling model. (F.1's
-earlier ~1%-lighter was asymmetric and predated this stack.) Even spacing stays the
-default; the helper is kept (built+tested) for completeness. **Takeaway across F.1 / F.2
-diagonals / tip gusset / this:** the design is robustly skin/panel-buckling-dominated, so
-beam-layout levers don't reduce mass — only direct skin tailoring (per-band thickness,
-−8.1%) does.
-
-**Re-spacing under a *binding* deflection budget (2026-06-09) — small positive (−0.6%).**
-Re-ran even-vs-symmetric-weighted on the medium wingsail with the tip-deflection budget
-*tightened to bind* (0.5% span = 110 mm; the default 2% is slack, deflects ~156 mm only at
-the unconstrained optimum). Both converged feasible at **defl 110/110 mm and buckling
-1.00/1.00** (deflection and panel-buckling *co-bind*): even **2362.1 kg → symmetric-weighted
-2347.9 kg = −14.3 kg (−0.6%)** (beams 479→501, skin 1883→1847). So once *stiffness* governs
-rather than buckling alone, clustering beams toward the high-stress regions flips re-spacing
-from negative (+2.7% at the slack budget) to a small positive — but buckling still co-binds,
-so the skin keeps doing most of the work and the win stays marginal. Reinforces the
-cross-cutting lesson: layout levers move the needle only at the margin; skin tailoring is
-the real lever. (1 h 41 m, analytic Jacobian.)
-
-### Phase F — Frame-field-driven layout
-
-The retained Arora frame field finally drives geometry.
-
-- Non-uniform beam spacing by **cumulative principal-stress** around each
-  cross-section (replaces even arc-length spacing).
-- Optional **second helical/diagonal beam family** whose winding angle follows
-  the in-plane principal-stress direction.
-
-**Deliverable: a beam layout demonstrably lighter/stiffer than even spacing for
-the same load cases.**
-
-**F.1 done (2026-06-07) — non-uniform (stress-weighted) spacing; marginal benefit,
-clear lesson.** Beams re-placed at equal-cumulative-skin-stress arc positions
-(`stress_weighted_targets` from a baseline `cross_section_stress_weights`;
-`arc_fractions` threaded through cross_section/splines/shell_model, default even =
-backward-compatible). `examples/30_nonuniform_spacing.py` (n_levels=8, with buckling):
-the per-segment skin stress is only **mildly concentrated (max/mean ≈ 1.8×)**;
-stress-weighted spacing comes out **~1% lighter (29.7 → 29.3 kg)** and reaches feasible
-beam buckling (util 1.00) where the even-spacing sizing stalled at 1.30 within maxiter.
-**Finding:** longitudinal beam re-spacing has **low leverage** on total mass for this
-design because it is **skin/buckling-dominated** (beams ~8.7 kg of ~30 kg; the skin
-ballooned to ~21 kg under the buckling constraint). The real layout levers are the
-**second diagonal beam family (F.2)** and skin tailoring, not longitudinal re-spacing.
-One-shot (not iterated); per-z-uniform arc_fractions.
-
-**F.2 investigated (2026-06-07) — diagonal/helix beam family; strong NEGATIVE result,
-clear lesson. Implementation was a throwaway measurement spike and was NOT merged —
-only this finding is kept.** A balanced both-hand grid-helix lattice (diagonals as
-chains on the existing structured node grid — no remesh) was tied into the combined
-beam-shell solver and co-sized with ONE shared diagonal-radius DV; the grid pitch was
-chosen to best track the baseline principal-stress field. A baseline-vs-diagonal
-comparison was run at equal constraints (span datum + buckling, SF 1.5, n_beams=16,
-n_levels=6): recommended **pitch 2** (mean principal alignment only **0.68**, 160
-diagonal elements). Result: **baseline 33.1 kg → diagonal 60.6 kg (+83%)**; the 160
-diagonals alone add **20.8 kg** at a buckling-forced **4.7 mm** radius, and tip twist
-went *up* slightly (1.25°→1.58°). **Finding:** the diagonal lattice is strongly
-mass-**counterproductive** here, for a physical reason consistent with F.1 and the
-buckling study — the design is **buckling-governed with large twist slack** (both
-designs sit at twist ≈1.3–1.6° vs. the 5° limit, beam & panel buckling util = 1.00).
-Diagonals are long compression-loaded members whose own Euler buckling forces a fat
-radius, so they bloat mass *without relieving a binding constraint* — there is no twist
-budget to recover. Diagonals would only pay off if twist were binding and the lattice
-carried tension. **Implication:** abandon (or radically thin/sparsify) the distributed
-diagonal lattice for this load/constraint regime; twist, when it matters, is far more
-cheaply killed at the tip (see the gusset investigation). Streamline-following diagonals
-(F.3) are unlikely to change the verdict while buckling dominates, so F.3 is **not**
-recommended unless a twist-governed variant emerges. The spike (helix topology,
-principal-stress alignment / pitch recommendation, the shared-`r_diag` sizing path, and
-a comparison example) was discarded after measuring; it can be reconstructed from this
-note and the approach above if a twist-governed case ever justifies it.
-
-### Investigations
-
-**Hard tip coupling / gusset (2026-06-07).** Modeled a rigid tip joint (a clamp all
-beams seat into) as a clique of stiff connector beams tying the tip nodes
-(`beams.solve_beam_shell_tip_coupled`, reuses `solve_beam_shell`; tunable
-`gusset_radius`), to measure beam-to-beam stress transfer at the tip.
-`examples/31_tip_coupling.py` (uniform r=20 mm design, sweep gusset stiffness):
-skin-only → near-rigid gusset gives **peak beam σ −1%, σ-spread 3.75→3.38, tip
-deflection −14%, tip twist 0.197°→0.004° (~47× lower)**, saturating at a small gusset
-(20 mm ≈ rigid). **Finding:** a hard tip joint barely redistributes *beam* stress —
-the load-bearing skin already shares spanwise load between beams — but it is a powerful
-**torsional** restraint, near-eliminating tip section rotation. Since the sized design
-is twist-governed, a tip gusset is a candidate to relax that binding constraint and
-lighten the design (re-size-with-gusset is the natural follow-up). (Earlier attempt
-used ad-hoc Z penalty springs to pass a tip-Z-spread test; a probe showed the skin
-already makes tip-Z-spread ~0, so that test was meaningless — replaced with the clean
-model + this honest measurement.)
+- **P.1 Hollow members.** New member type: the straight filament-wound **core tube**
+  (permanent structural mandrel) with `r(z)`, `t_wall(z)` DVs + wall-buckling/crimping
+  check. If the tube alone doesn't capture the win, add straight in-wing wound beam
+  segments spliced to RTM'd solid curved transition segments. Likely the biggest
+  single lever (beams are solid rods today). (P#1)
+- **P.2 Skin prestress + compression cross-members.** Winding pretension as a
+  self-equilibrated load case (the build already commits to the tensioned hoop wrap);
+  spreader struts / shear webs concentrate the equilibrating compression into short,
+  buckling-cheap members. New DVs: strut radii + pretension magnitude(s); guard with a
+  prestress-retention knockdown and strut-foot peel checks. (P#2, P#3)
+- **P.3 Sandwich (cored) skin.** Core multiplies panel D at ~5% of the monolithic mass
+  cost; needs wrinkling/shear-crimping checks. Partially redundant with P.2 — measure
+  which wins. (P#5)
+- **P.4 n_beams sweep + light rings as panel-breakers.** Panel size is the proven
+  currency; beam count has never been varied. (P#4)
+- **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
+  and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
 
 ### Phase G — Filament-winding path planner
 
 - `wing_design.manufacturing.winding` — continuous winding passes forming the
   airfoil + reinforcing joints/buckling-prone members; output robot/G-code paths
-  + per-pass fiber-orientation map feeding the CLT of Phase E.
+  + per-pass fiber-orientation map feeding the CLT skin model (closes M.3).
 
 **Deliverable: animated winding sequence + CLT-homogenized skin stiffness map.**
 
@@ -598,9 +176,10 @@ model + this honest measurement.)
 
 - Re-mesh the **as-designed** assembly; re-solve every load case; check stress,
   deflection, buckling, fatigue.
-- Feed σ(x) back into Phase F; iterate to convergence.
+- Aeroelastic closure: loads recomputed on the deformed/twisted shape, iterate to a
+  fixed point; **divergence/flutter check for the free-rotating wing** (V#6).
 - Parametrize span/chord/taper for FPV-drone-wing / turbine-blade retargeting;
-  add dynamic (flutter, vortex shedding) and impact cases.
+  add dynamic (vortex shedding) and impact cases.
 
 **Deliverable: certified-on-paper wingsail with documented load envelope and
 safety margins.**
@@ -629,53 +208,18 @@ interior-truss comparison baseline).
 src/wing_design/
   __init__.py
   scenario.py    # DesignParameters dataclass + default_scenario()   [done]
-  geometry/      # build123d wing OML + spar                         [Phase 1 ✅]
-  aero/          # AeroSandbox loads                                 [Phase 2 ✅]
-  materials/     # UD ply + CLT                                      [Phase 3 ✅]
-  structural/    # tube-spar baseline (P3), mesh+FEA (P4), shell     [✅]
-  truss/         # frame field, parametrization, streamlines         [Phase 5 ✅]
-                 #   (retained as diagnostic + Phase F layout driver)
-  beams/         # form-beam splines, build, wrap, assembly,         [Phases A–F]
-                 #   fea_model, sizing
+  geometry/      # build123d wing OML + spar                         [done]
+  aero/          # AeroSandbox loads                                 [done; V.4/V.5 extend]
+  materials/     # UD ply + CLT + failure                            [done]
+  structural/    # frame, shell, beam_shell, buckling                [done; V.3 extends]
+  truss/         # frame field, parametrization, streamlines         [diagnostic]
+  beams/         # splines, build, wrap, fea_model, sizing,          [done; M/P extend]
+                 #   laminate_sizing, sensitivity
   manufacturing/ # winding path planner, BOM                         [Phase G]
   viz/           # PyVista / ocp_vscode helpers
 ```
 
 ## Decisions log
 
-| Decision | Choice |
-| --- | --- |
-| Structural concept | **Shell-following form beams**, not interior volumetric truss (2026-06-04). |
-| Frame field | Kept; diagnostic now, layout driver in Phase F. |
-| Cross-section sizing | FEA-in-the-loop (fully-stressed first, MILP catalog in Phase E). |
-| Skin role | Load-bearing structural shell (supersedes fairing-only). |
-| Beam layout (early) | Even arc-length spacing; frame-field-driven in Phase F. |
-| Build-out strategy | Thin end-to-end spike (Phases A–C), then deepen (D+). |
-| Phase-4 FEA backend | Roll-our-own linear-tet solver in numpy/scipy; promote to sfepy/FEniCSx when anisotropic homogenization matters. |
-| Spline fitting | Dense on-surface sampling + cubic B-spline interpolation (no NURBS weight optimization). |
-| Spar radius | Derived (max inscribed circle at pivot, floored to cm), not stored. |
-| Phase-B FEA element | Fresh 3D Euler–Bernoulli frame (`structural.frame`); ring connectors stand in for skin shear transfer in the spike (coupled shell = later deepen). |
-| Example outputs | All examples write generated artifacts to the repo-root `exports/` (gitignored); no outputs tracked in git. |
-| Phase-C sizing | Continuous SLSQP NLP over per-element longitudinal radii; stress + tip-deflection + tip-twist constraints; analytic mass gradient, FD constraint Jacobian over FEA re-solves; rings fixed (stress reported). MILP stock catalog deferred to Phase E. |
-| Phase-D geometry | Inward-arc **lens** beam sections sized to Phase-C radii (lens lofts cleanly, circular fallback unused); fillets best-effort and currently **no-op** (0/2 — OCC rejects the 30/50 mm transition radii, skipped not fatal); spline fidelity coarse (~286 mm full / ~282 mm aero at 8 levels) — fidelity tuning + valid fillet radii are open Phase-D items (2026-06-05). |
-| Phase-E.1 skin coupling | Load-bearing skin assembled as DKT+CST shell panels between beam nodes into the combined `structural.solve_beam_shell`; skin replaces ring connectors. Isotropic-equivalent skin; re-sizing/MILP/buckling/CLT deferred to later E increments. |
-| Phase-E.2 co-sizing | SLSQP co-sizes per-element beam radii + a uniform skin thickness minimizing total beam+skin mass under beam-vm, skin-vm, tip-deflection and tip-twist constraints (skin membrane stress recovered each solve). 43.5→27.5 kg (37% lighter); structure becomes twist-governed. Per-band skin / MILP / buckling / CLT deferred. |
-| Phase-E.4 CLT skin | Anisotropic skin via CLT (symmetric-balanced laminate, smeared D); laminate (A,D) feed `tri_element_stiffness_laminate` / `solve_beam_shell_laminate`; co-sizes beam radii + skin thickness + layup fractions (f0,f45,f90) under beam-vm, skin-vm, deflection, twist. 27.5→25.6 kg (7% lighter, valid optimum). LIMITATION: ply angles are per-triangle-local (frames ~50/50 spanwise/chordwise), so the optimal layup is not a manufacturable fibre prescription — needs a consistent ply-angle datum (E.4b). Per-ply Tsai-Wu / per-band layup / MILP / buckling deferred. |
-| Buckling check | Closed-form beam Euler (element-length) + skin panel plate-buckling (triangle-as-plate, b=√area, fixed kc) added as optional sizing constraints in both sizers (gated by `buckling_safety_factor`). Buckling binds but mass robust: 25.6→26.1 kg (+2%), governing constraint flips twist→buckling, optimizer shifts mass from beams into thicker skin. Eigenvalue/global buckling + refined panel geometry deferred. |
-| Phase-E.4b ply datum | Ply angles measured against the span axis (per-triangle offset via `skin_datum_angles` + `laminate_stiffness_offset`; solver/recovery generalized to per-triangle stiffness). Opt-in via `LaminateSizingConfig.ply_angle_datum`. Coherent layup AND 26% lighter: 25.6→19.0 kg, optimum is 100% chordwise (90°) skin; design now uses both deflection + twist budgets. (19.0 kg is without buckling — datum+buckling is the real final combo.) |
-| Phase-E.3 stock catalog | Beam radii discretized to a stock catalog via CP-SAT (`beams.select_stock_sizes`): min-mass assignment with a ≤K-distinct-sizes cap (co-linear grouping). Round-up is feasible for stress/defl/twist but NOT buckling (non-uniform stiffening redistributes load onto pinned r_min beams) → greedy bump-and-reverify repair restores feasibility; FEA verify is essential. K=4 → 4 sizes at +10% mass. Full SLP+sensitivity MILP deferred. |
-| Phase-F.1 non-uniform spacing | Beams placed at equal-cumulative-skin-stress arc positions (`stress_weighted_targets` from `cross_section_stress_weights`); `arc_fractions` threaded through cross_section/splines/shell_model (default even, backward-compatible). One-shot; 2nd diagonal family deferred (F.2). Result: only ~1% lighter (skin stress mildly concentrated 1.8×, design is skin/buckling-dominated so beam re-spacing has low leverage) — the layout lever is F.2 / skin tailoring, not re-spacing. |
-| Combined final design | Span-datum CLT layup co-sized WITH buckling (`examples/32_final_design.py`) — both refinements together, not separately. 30.15 kg (beams 9.38 / skin 20.77 @ 1.52 mm), buckling-governed (beam & panel util = 1.0), twist/defl slack, layup 31/15/54% span/±45/chord. Heavier than the partial numbers (E.4b 19.0 no-buckling; isotropic+buckling 26.1) because manufacturable-datum + buckling compound. **This is the defensible fully-constrained headline.** SLSQP local optimum (per-tri-local+buckling hit 26.06) → multi-start is the refinement if mass-critical. |
-| Per-band skin thickness | Skin thickness split into B contiguous spanwise bands (opt-in `n_skin_bands`, default 1 = uniform/unchanged; `beams.skin_band_map`), each a thickness DV in the SLSQP laminate loop; per-triangle thickness drives CLT stiffness, panel buckling, and mass; `t_skin` retained as the area-weighted mean. Uniform 30.11 kg → 4-band **27.67 kg (−8.1%)**, all saved in the skin; taper 0.96/1.29/1.57/1.55 mm tip→keel; governing constraint flips buckling→twist. Needs more SLSQP iters (~354 vs 70). Highest-leverage skin lever. Per-ply Tsai-Wu + per-band layup deferred. |
-| Per-ply Tsai-Wu skin failure | Opt-in `skin_failure="tsai_wu"` (default von-Mises unchanged; `materials.failure`) — per-ply Tsai-Wu strength ratio R≥SF (F12=-0.5√(F11 F22), material SF 2.0) over present orientations, from per-triangle membrane strain (`recover_membrane_strain`). vs von-Mises proxy at equal constraints: 30.11→30.07 kg (−0.1%), layup ~unchanged, **min R = 7.01 ≫ SF 2.0** → skin is buckling/stiffness-governed, not strength-governed; the proxy was already adequate. Kept for strength-critical regimes. Measured cost ~2h11m (per-triangle loop × SLSQP FD-Jacobian — vectorize before large sweeps). First-ply only; smeared laminate. |
-| Tsai-Wu vectorized | Per-triangle Python loop replaced by vectorized `laminate_min_strength_ratio_batch` (identical results; scalar delegates). Modest speedup only — the dominant sizing cost is the FEA solve per `evaluate` × FD-Jacobian width × maxiter, not the inner loop. Real lever would be an analytic Jacobian or fewer DVs. |
-| Per-band skin layup | Opt-in `per_band_layup` — each n_skin_bands band gets its own (f0,f45,f90) DVs (L-group design vector, L fraction constraints; Tsai-Wu batch generalized to per-triangle fractions). Built + tested (120 tests, backward-compatible). Mass is fraction-independent → win is indirect (per-band mix → thinner bands). Headline UNQUANTIFIED: coarse comparison (1h04m) didn't converge and ended beam-buckling-infeasible; sensible fibre taper emerged. Expected small lever (buckling/stiffness-governed). Converged headline + independent layup-band-count deferred. |
-| Multi-start sizing | Serial parallel-ready `size_beam_shell_laminate_multistart`: N seeded starts (start 0 = default → never worse), best-feasible-by-mass selection (`laminate_result_is_feasible`); sizer gained an `x0` param + `laminate_design_bounds` helper. Machinery built + unit-tested via a stubbed sizer; NOT run at scale (cost). Parallel exec + full converged headline deferred. |
-| Beam symmetry + monotonic taper | Sizer DEFAULT: mirror-paired beams share one radius DV (`beam_radius_groups`, auto-detect symmetric placement + fallback), radius monotonic non-increasing keel→tip (algebraic constraints). ~Halves radius DVs → faster FD-Jacobian. Changes the default (prior headlines historical); `result.radii` still full length n. Full medium run converged feasible: 2316.6 kg (beams 585 / skin 1731), twist 5.0° / buck 1.0, 187 iters, 1 h 22 m; beams taper 35.7→4.0 mm symmetric. Sized geometry exported as STL (`exports/wingsail_sized_*.stl`). |
-| Analytic (adjoint) Jacobian | Opt-in `use_analytic_jacobian` (default off; FD byte-identical): adjoint analytic gradients for objective + all 6 FEA constraints, one reused `splu` factorization (`beams.sensitivity`, `solve_beam_shell_laminate_factored`). Every gradient FD-validated (≤~1e-4); TDD caught the ∂klocal/∂r internal-force term + the vector-valued beam_con. Same feasible optimum as FD; measured **1.58× faster** (489→309 s, small problem). Speedup implementation-bound (vector beam_con = n adjoint solves; uncached Python ∂K assembly) — follow-up: cache per-element ∂K + aggregate beam constraint for the big win. |
-| Analytic-Jacobian caching | First follow-up to the above, **exact** (no formulation change): `prepare_sensitivity → SensCache` precomputes every element/triangle ∂K (the trig/Q-transform builds) once per design point; `lambdaT_dK_x_cached` reuses them as cheap dots; `grad_*` take an optional `cache=` (lazy if None → FD tests unchanged); `evaluate_jac` builds one cache per design point, threaded through all constraints + load cases. Cached==uncached ≤1e-12; all FD-grad tests pass unchanged. `examples/38` re-measured: FD 546→analytic **276 s = 1.98×** (was 1.58×), same optimum. Remaining gap = n adjoint back-subs for vector beam_con (KS aggregation = deferred next lever; `_beam_vm_grad_one` still uncached). Default stays FD. |
-| Re-spacing under binding deflection | Re-ran even-vs-symmetric-weighted spacing (medium) with the tip-deflection budget tightened to **bind** (0.5% span = 110 mm; default 2% is slack). Both feasible, defl & panel-buckling **co-bind** (110/110 mm, 1.00/1.00): even 2362.1 → symmetric-weighted 2347.9 kg = **−14.3 kg (−0.6%)**. So once stiffness governs (not buckling alone), re-spacing flips from +2.7% (slack) to a small positive — but buckling co-binds so the win stays marginal. Confirms layout levers help only at the margin; skin tailoring is the real lever. (1 h 41 m, analytic Jac.) |
-| Tip gusset in the sizer | Opt-in rigid massless tip-node clique (`build_beam_shell_model(tip_gusset_radius=...)`/`model_with_tip_gusset`), assembled into K but excluded from force recovery → composes with the analytic Jacobian (constant stiffness). **Negative for mass:** medium free-tip 2264.6 → gusset 2453.1 kg (+8.3%), both feasible/converged, despite twist 5.0°→0.03° and tip defl 156→71 mm. Buckling-governed design + rigid coupling redistributes load → must add material. Twist not the mass driver. Keep opt-in for twist/stiffness, not mass. |
-| Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
-| Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
-| Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+Archived (Phases 1–F) and ongoing: see [`findings.md` → Decisions log](./findings.md#decisions-log).
+New decisions are appended there.
