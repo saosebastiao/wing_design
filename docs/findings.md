@@ -642,6 +642,32 @@ basin-local and config-dependent (1-band vs 4-band flip the binding set). Wall-c
 measured post-cache-fix; 42's two runs shared the machine with the V.2 sweep
 (contention ≤ minor). (383 s + 452 s, analytic Jacobian.)
 
+**V.2 mesh-convergence study done (2026-06-10) — headline masses are NOT
+mesh-converged; refinement removes ~9–11% per step with no plateau, in the
+unconservative direction predicted by V#3/V#9.** `examples/43_mesh_convergence.py`:
+medium config (16 beams, span-datum + buckling, analytic Jacobian), n_levels swept
+6→12 warm-started coarse→fine (`resample_segment_radii`), n_beams=20 spot at 8
+levels. Converged AND feasible points: **16×6 2807.1 kg (144 s) → 16×8 2486.5 kg
+(235 s) → 16×10 2271.0 kg (390 s)** — every point buckling-governed (beam & panel
+util = 1.00), twist/defl slack; mass falls −11.4% then −8.7% per refinement with no
+flattening. **16×12 FAILED (diagnostic, not a result):** SLSQP quit at 83 iters
+unconverged + infeasible (beam-buck util 19.4 — the optimizer had stripped beams to
+156 kg before the early exit). **n_beams spot:** 20×8 = 2485.6 kg ≈ 16×8 (+0.0%
+total) but with beams +31% / skin −10% — more beams *should* win big physically
+(panel width: σcr ∝ n²) yet the implemented `b = √area` check credits only ∝ n
+(backlog V#1), consistent with the mass-neutral outcome; do not run the P.4 sweep
+before fixing the panel model. **Why:** the beam Euler check uses element length as
+buckling length (refinement shortens L → raises Pcr) and the panel check uses
+b = √(triangle area) (refinement shrinks b → raises σcr); both let the optimizer
+legally remove real mass as the mesh refines. **Implication:** mesh-converged
+headlines do not exist under the current closed-form checks — the honest fix is a
+physical buckling length / V.3's eigenvalue solve, not a finer mesh; the 16×8
+headline numbers stay comparable to each other but their absolute level carries an
+unquantified mesh bias (bracketed +13%/−9% by the neighboring meshes). 16×8
+warm-started here reached 2486.5 vs 2471.7 cold in ex-42 (+0.6%, inside the 2–3%
+noise floor). (Sweep total ≈ 24 min measured, shared the machine with ex-42's runs
+for its first ~14 min.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -680,6 +706,7 @@ measured post-cache-fix; 42's two runs shared the machine with the V.2 sweep
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.2 mesh convergence (2026-06-10) | n_levels 6→10 (feasible points): 2807→2486→2271 kg, −9–11% per refinement, no plateau — headlines NOT mesh-converged; bias is unconservative (element-length Euler + b=√area both gain capacity from refinement). 16×12 diverged (diagnostic). n_beams 20×8 ≈ 16×8 total mass, consistent with the V#1 ∝n mis-scaling muting the physical ∝n² panel win — P.4 sweep stays gated on the panel-model fix. Headline comparisons remain valid at fixed 16×8; absolute level carries mesh bias. V.3 (eigenvalue/physical buckling length) is the fix, not finer meshes. |
 | V.1 shadow prices (2026-06-10) | KKT multipliers captured + converted to kg-per-unit (`shadow_prices` on the result; FD-validated 0.02–0.5%). Medium headline (4-band, 2264.6 kg reproduced exactly): twist −41.35 kg/deg (binding, cheapest requirement), beam-buck SF +266.5 / panel-buck SF +151.7 kg/SF-unit, deflection + σ_allow free. 1-band: buckling-only (panel +352.2). Renegotiation order: twist limit first, then buckling SF — which V.3 prices in model-fidelity terms. |
 | V.0.1 profile → cache fix (2026-06-10) | cProfile of 10 medium SLSQP iters (examples/41): 93% of wall = uncached `_beam_vm_grad_one` rebuilding triangle ∂K per beam-vM row. Fixed by threading the existing `SensCache` through `beam_con_jac` (exact; 21 equivalence/FD tests unchanged). 1.13 s/iter raw vs ~26 s/iter recorded → ~23×; medium sizing now ~minutes. V.0.2 vectorization + V.0.3 KS deprioritized — no dominant wall remains; re-profile before investing further. |
 | Python 3.13 migration (2026-06-09) | `requires-python >=3.13,<3.14` (was `<3.13`), `.python-version` 3.13, lock regenerated; **full suite green 160/160 in 19 m 30 s** (measured — suite is NOT fast; CI needs a fast/slow marker split). 3.14 blocked solely by build123d 0.10.0 (`<3.14` + OCP `<7.9`; cp314 OCP wheels exist, build123d dev branch already supports `<3.15`+7.9) — bump when its next release ships. |

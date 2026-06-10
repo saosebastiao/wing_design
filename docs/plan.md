@@ -147,9 +147,12 @@ trustworthy baseline, not the current one.
   (cheapest requirement), beam/panel buckling SF +266/+152 kg/SF-unit, deflection +
   σ_allow free. Renegotiate twist first; V.3 prices the buckling SFs in fidelity terms.
   See findings.md. (P#8)
-- **V.2 Mesh-convergence study of the optimized design.** Sweep n_levels (and spot-check
-  n_beams) at fixed constraints; quantifies the element-length-Euler mesh dependence,
-  which currently rewards refinement unconservatively. (V#9, V#3)
+- **V.2 Mesh-convergence study of the optimized design. — DONE (2026-06-10).**
+  `examples/43_mesh_convergence.py`: n_levels 6→10 gives 2807→2486→2271 kg (−9–11%
+  per step, no plateau, all feasible/buckling-governed) — headlines NOT mesh-converged,
+  bias unconservative as predicted; 16×12 diverged (diagnostic). 20-beam spot ≈ equal
+  total mass, consistent with the V#1 ∝n mis-scaling — P.4 stays gated. Conclusion
+  feeds V.3: fix the physics, not the mesh. See findings.md. (V#9, V#3)
 - **V.3 Eigenvalue buckling check (K + Kσ).** Linear buckling solve of the current
   optimum: curvature credit, stiffness-direction match, combined loading, global
   ovalization modes — validates or relaxes *both* binding closed-form checks. Includes
