@@ -164,7 +164,8 @@ def run_scenario(name, P):
 
 def main() -> None:
     out = Path("exports"); out.mkdir(exist_ok=True)
-    print("=== V.6 re-baseline (strip + gravity/heel/slam + pressure bending) ===")
+    print("=== V.6 re-baseline (strip + upright/heel gravity + pressure bending; "
+          "slam deferred per 2026-06-10 decision) ===")
     _small_model, _small = run_scenario("small", small_scenario())
 
     model, med = run_scenario("medium", medium_scenario())
