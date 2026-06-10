@@ -34,9 +34,13 @@ from ..structural.frame import FrameResult, _element_rotation
 from .sensitivity import (
     DesignSens, grad_beam_buckling, grad_skin_vm,
     grad_panel_buckling, grad_skin_tsai_wu, grad_tip_defl, grad_tip_twist,
-    _active_beam_force, adjoint_lambda, lambdaT_dK_x_cached, dkloc_dr,
+    grad_tube_wall_one, _active_beam_force, _annulus_props, _beam_vm_explicit_tube,
+    adjoint_lambda, lambdaT_dK_x_cached, dkloc_annular, dkloc_dr,
 )
-from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
+from ..structural.buckling import (
+    TUBE_WALL_KNOCKDOWN, beam_euler_utilization, beam_euler_utilization_I,
+    panel_buckling_utilization, tube_wall_utilization,
+)
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
 from .body_loads import body_load_jacobian, body_load_vector
@@ -73,6 +77,9 @@ class LaminateSizingConfig:
     # combo); the design's own mass is lumped to nodes each evaluate and the
     # analytic adjoint carries the lam^T dF/dx term (loads depend on the design).
     accel_vectors: tuple[tuple[float, float, float], ...] = ()
+    # P.1 core tube DV bounds (used when the model carries tube_elements).
+    tube_r_min: float = 0.02
+    tube_t_min: float = 0.001
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -111,15 +118,25 @@ class LaminateSizingResult:
     # "tsai_wu_safety_factor") are >= 0 (raising SF costs kg). None when the
     # multiplier layout can't be attributed. Only meaningful at a converged optimum.
     shadow_prices: dict[str, float] | None = None
+    # P.1 core tube (None when the model has no tube)
+    r_tube: np.ndarray | None = None
+    t_wall: np.ndarray | None = None
+    tube_mass_kg: float = 0.0
+    max_tube_wall_util: float = 0.0
 
 
 def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
-    """(lo, hi) bounds for [r_group(G), t_band(B), f0_grp(L), f45_grp(L)]."""
+    """(lo, hi) bounds for [r_group(G), t_band(B), f0(L), f45(L) | r_tube(S), t_wall(S)]."""
     _, G = beam_radius_groups(model)
     B = config.n_skin_bands
     L = B if config.per_band_layup else 1
     lo = np.concatenate([np.full(G, config.r_min), np.full(B, config.t_min), np.zeros(2 * L)])
     hi = np.concatenate([np.full(G, config.r_max), np.full(B, config.t_max), np.ones(2 * L)])
+    if getattr(model, "tube_elements", None) is not None:
+        S = len(model.tube_elements)
+        rb = np.asarray(model.tube_r_bounds, dtype=float)
+        lo = np.concatenate([lo, np.full(S, config.tube_r_min), np.full(S, config.tube_t_min)])
+        hi = np.concatenate([hi, rb, rb])
     return lo, hi
 
 
@@ -144,6 +161,8 @@ def laminate_result_is_feasible(
         if result.max_beam_buckling_util > 1.0 + tol:
             return False
         if result.max_panel_buckling_util > 1.0 + tol:
+            return False
+        if result.max_tube_wall_util > 1.0 + tol:
             return False
     return True
 
@@ -202,15 +221,38 @@ def size_beam_shell_laminate(
     A_skin_area = float(Atri.sum())
     band_of_tri = skin_band_map(model, B)
     band_area = skin_band_areas(model, band_of_tri, B)
-    dv = DesignVector(("r_group", G), ("t_band", B), ("f0", L), ("f45", L))
+    tube = getattr(model, "tube_elements", None) is not None
+    S = len(model.tube_elements) if tube else 0
+    tube_el = model.tube_elements if tube else None
+    blocks = [("r_group", G), ("t_band", B), ("f0", L), ("f45", L)]
+    if tube:
+        blocks += [("r_tube", S), ("t_wall", S)]
+    dv = DesignVector(*blocks)
     nx = dv.nx
     f0_lo = dv.slice("f0").start
     f45_lo = dv.slice("f45").start
+
+    def decode_tube(x):
+        """(r_t, t_eff) tube DVs; t clamped to r so infeasible SLSQP trial points
+        still evaluate (the r - t >= 0 constraint drives feasibility)."""
+        r_t = np.asarray(x[dv.slice("r_tube")], dtype=float)
+        t_w = np.asarray(x[dv.slice("t_wall")], dtype=float)
+        return r_t, np.minimum(t_w, r_t)
+
+    def build_sections(x, radii_form):
+        if not tube:
+            return [BeamSection.circular(float(r)) for r in radii_form]
+        r_t, t_eff = decode_tube(x)
+        return ([BeamSection.circular(float(r)) for r in radii_form]
+                + [BeamSection.annular(float(r_t[s]), float(t_eff[s])) for s in range(S)])
     if x0 is None:
         x0 = np.concatenate([
             np.full(G, config.r_max), np.full(B, config.t_max),
             np.full(L, 1.0 / 3.0), np.full(L, 1.0 / 3.0),
         ])
+        if tube:
+            x0 = np.concatenate([x0, 0.8 * np.asarray(model.tube_r_bounds, dtype=float),
+                                 np.full(S, 0.003)])
     else:
         x0 = np.asarray(x0, dtype=float)
         if x0.shape != (nx,):
@@ -264,14 +306,17 @@ def size_beam_shell_laminate(
 
     accels = [np.asarray(a, dtype=float) for a in config.accel_vectors]
 
-    def effective_loads(radii, t_tri):
+    def effective_loads(x, radii, t_tri):
         """Aero × accel combos; aero-only when no accelerations configured."""
         if not accels:
             return load_arrays
+        sections = build_sections(x, radii)
+        areas_e = np.array([sec.A for sec in sections])
         out = []
         for lc in load_arrays:
             for acc in accels:
-                out.append(lc + body_load_vector(model, radii, t_tri, rho=rho, accel=acc))
+                out.append(lc + body_load_vector(model, radii, t_tri, rho=rho,
+                                                 accel=acc, areas=areas_e))
         return out
 
     def evaluate(x):
@@ -279,7 +324,7 @@ def size_beam_shell_laminate(
         hit = cache.get(key)
         if hit is not None:
             return hit
-        radii = x[:G][group_of_element]
+        radii = x[:G][group_of_element]          # form-beam radii per form element
         t_band_vec = x[G:G + B]
         t_tri = t_band_vec[band_of_tri]
         f0b, f45b, f90b = band_fracs(x)
@@ -305,7 +350,12 @@ def size_beam_shell_laminate(
             D_arg = np.stack([m[1] for m in mats])
             C_arg = np.stack([m[2] for m in mats])
         D11 = D_arg[:, 0, 0]
-        sections = [BeamSection.circular(float(r)) for r in radii]
+        sections = build_sections(x, radii)
+        areas_e = np.array([sec.A for sec in sections])
+        I_e = np.array([sec.Iy for sec in sections])
+        if tube:
+            r_t, t_eff = decode_tube(x)
+            tube_util = np.zeros(S)
         wb = np.zeros(n)
         ws = 0.0
         md = 0.0
@@ -314,7 +364,7 @@ def size_beam_shell_laminate(
         worst_panel_buck = 0.0
         worst_R = np.inf
         n_acc = max(len(accels), 1)
-        for ci, loads in enumerate(effective_loads(radii, t_tri)):
+        for ci, loads in enumerate(effective_loads(x, radii, t_tri)):
             qw2 = qw2_cases[ci // n_acc] if qw2_cases is not None else None
             res = solve_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
@@ -338,29 +388,53 @@ def size_beam_shell_laminate(
             md = max(md, float(np.linalg.norm(res.displacements[tip, :3], axis=1).max()))
             mt = max(mt, float(np.degrees(np.abs(res.displacements[tip, 5]).max())))
             if config.buckling_safety_factor is not None:
-                bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
-                                            K=config.euler_K, safety_factor=config.buckling_safety_factor)
+                # I-based Euler when a tube is present (annular sections); the
+                # radii-based form is kept for the no-tube path bit-compatibly.
+                if tube:
+                    bu = beam_euler_utilization_I(res.axial_force, I_e, Lb, E=model.E_beam,
+                                                  K=config.euler_K,
+                                                  safety_factor=config.buckling_safety_factor)
+                    tu = tube_wall_utilization(res.axial_force[tube_el], r_t, t_eff,
+                                               areas_e[tube_el], E=model.E_beam,
+                                               safety_factor=config.buckling_safety_factor)
+                    tube_util = np.maximum(tube_util, tu)
+                else:
+                    bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
+                                                K=config.euler_K, safety_factor=config.buckling_safety_factor)
                 pu = panel_buckling_utilization(skin_s, b2_panel, D11=D11, t=t_tri,
                                                 kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
-        out = (wb, ws, md, mt, worst_beam_buck, worst_panel_buck, worst_R)
+        out = (wb, ws, md, mt, worst_beam_buck, worst_panel_buck, worst_R,
+               tube_util if tube else None)
         cache[key] = out
         return out
 
     m_ref = beam_mass(model, np.full(n, config.r_max), rho=rho) + skin_mass(model, config.t_max, rho=rho)
 
+    Lb_form = Lb[:model.n_form_elements] if tube else Lb
+    Lb_tube = Lb[tube_el] if tube else None
+
     def mass(x):
         radii = x[:G][group_of_element]
-        m = rho * np.sum(np.pi * radii ** 2 * Lb) + rho * np.sum(x[G:G + B] * band_area)
+        m = rho * np.sum(np.pi * radii ** 2 * Lb_form) + rho * np.sum(x[G:G + B] * band_area)
+        if tube:
+            r_t, t_eff = decode_tube(x)
+            ri = r_t - t_eff
+            m += rho * np.sum(np.pi * (r_t**2 - ri**2) * Lb_tube)
         return m / m_ref
 
     def mass_grad(x):
         g = np.zeros(nx)
         radii = x[:G][group_of_element]
-        per_elem = rho * 2.0 * np.pi * radii * Lb / m_ref
+        per_elem = rho * 2.0 * np.pi * radii * Lb_form / m_ref
         np.add.at(g, group_of_element, per_elem)   # scatter element grads into the G groups
         g[G:G + B] = rho * band_area / m_ref
+        if tube:
+            r_t, t_eff = decode_tube(x)
+            ri = r_t - t_eff
+            g[dv.slice("r_tube")] = rho * 2.0 * np.pi * t_eff * Lb_tube / m_ref
+            g[dv.slice("t_wall")] = rho * 2.0 * np.pi * ri * Lb_tube / m_ref
         return g
 
     def beam_con(x):
@@ -440,14 +514,19 @@ def size_beam_shell_laminate(
                 Qeff_tri = np.stack([m[2] for m in mats])
                 offset_tri = np.asarray(datum_offsets_deg, dtype=float)
 
-            sections = [BeamSection.circular(float(r)) for r in radii]
-            loads_eff = effective_loads(radii, t_tri)
+            sections = build_sections(x, radii)
+            loads_eff = effective_loads(x, radii, t_tri)
+            tube_kw = {}
+            if tube:
+                r_t_j, t_eff_j = decode_tube(x)
+                tube_kw = dict(S=S, tube_elements=tube_el, tube_r=r_t_j, tube_t=t_eff_j)
             # V.4: one ∂f/∂x per accel vector (zero for pure aero); fac k pairs
             # with accel k % len(accels) by the effective_loads combo order.
             if accels:
                 dFs = [body_load_jacobian(
                            model, radii, group_of_element=group_of_element,
-                           band_of_tri=band_of_tri, rho=rho, accel=acc, G=G, B=B, L=L)
+                           band_of_tri=band_of_tri, rho=rho, accel=acc, G=G, B=B, L=L,
+                           **tube_kw)
                        for acc in accels]
                 dF_of_fac = [dFs[k % len(accels)] for k in range(len(loads_eff))]
             else:
@@ -489,6 +568,10 @@ def size_beam_shell_laminate(
                 f0_tri=(f0_tri if config.skin_failure == "tsai_wu" else None),
                 f45_tri=(f45_tri if config.skin_failure == "tsai_wu" else None),
                 f90_tri=(f90_tri if config.skin_failure == "tsai_wu" else None),
+                S=S,
+                tube_elements=(tube_el if tube else None),
+                tube_r=(r_t_j if tube else None),
+                tube_t=(t_eff_j if tube else None),
             )
             # Design-only ∂K/∂x assembly, built ONCE per design point and reused
             # across every load case and every constraint-gradient call below.
@@ -520,10 +603,15 @@ def size_beam_shell_laminate(
             """∂(1 − vM_{e_star}/σ)/∂x as an (nx,) row, for a chosen beam element."""
             sa = config.sigma_allow_Pa
             floc, Mmat, dofs = _active_beam_force(fac, e_star)
-            r = float(ds.radii_full[e_star])
-            A = np.pi * r**2
-            Iz = np.pi * r**4 / 4.0
-            J = np.pi * r**4 / 2.0
+            s_tube = ds.tube_seg_of_element(e_star)
+            if s_tube >= 0:
+                r = float(ds.tube_r[s_tube])
+                A, Iz, J, _dA, _dI, _dJ = _annulus_props(r, float(ds.tube_t[s_tube]))
+            else:
+                r = float(ds.radii_full[e_star])
+                A = np.pi * r**2
+                Iz = np.pi * r**4 / 4.0
+                J = np.pi * r**4 / 2.0
             axial = floc[6]
             torsion = floc[9]
             b0 = np.hypot(floc[4], floc[5])
@@ -556,14 +644,20 @@ def size_beam_shell_laminate(
             if dF is not None:   # design-dependent loads (V.4)
                 du_part += lam @ dF
 
-            dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
-            dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
-            dvm_dr = (sigma_n * dsigma_n_dr + 3.0 * tau * dtau_dr) / vm
-            dk_dr = dkloc_dr(ds.model.E_beam, ds.model.G_beam, r,
-                             float(ds.beam_lengths[e_star]))
-            dfloc_dr = dk_dr @ fac.transforms[e_star] @ fac.u[dofs]
-            dvm_dr += dvm_dfloc @ dfloc_dr
-            du_part[int(ds.group_of_element[e_star])] += dvm_dr
+            if s_tube >= 0:
+                dvm_dr_t, dvm_dt_t = _beam_vm_explicit_tube(
+                    floc, dvm_dfloc, fac, ds, e_star, s_tube, sigma_n, tau, vm)
+                du_part[ds.tube_dv_r(s_tube)] += dvm_dr_t
+                du_part[ds.tube_dv_t(s_tube)] += dvm_dt_t
+            else:
+                dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
+                dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
+                dvm_dr = (sigma_n * dsigma_n_dr + 3.0 * tau * dtau_dr) / vm
+                dk_dr = dkloc_dr(ds.model.E_beam, ds.model.G_beam, r,
+                                 float(ds.beam_lengths[e_star]))
+                dfloc_dr = dk_dr @ fac.transforms[e_star] @ fac.u[dofs]
+                dvm_dr += dvm_dfloc @ dfloc_dr
+                du_part[int(ds.group_of_element[e_star])] += dvm_dr
             return -du_part / sa
 
         def beam_con_jac(x):
@@ -623,6 +717,29 @@ def size_beam_shell_laminate(
             "beam_vm": beam_con_jac, "skin": skin_con_jac, "defl": defl_con_jac,
             "twist": twist_con_jac, "frac": frac_con_jac, "mono": monotonic_con_jac,
         }
+        if tube and config.buckling_safety_factor is not None:
+            def tube_wall_jac(x):
+                """(S, nx): row s at its binding load combo (max wall util)."""
+                facs, ds, _sections, sens_cache, dF_of_fac = _jac_lookup(x)
+                util = np.empty((len(facs), S))
+                c = TUBE_WALL_KNOCKDOWN * 0.605 * model.E_beam
+                for li, fac in enumerate(facs):
+                    ax = np.array([fac.result.axial_force[int(e)] for e in tube_el])
+                    A_t = np.pi * (ds.tube_r**2 - (ds.tube_r - ds.tube_t)**2)
+                    scr = c * ds.tube_t / ds.tube_r
+                    util[li] = (np.maximum(0.0, -ax) / A_t
+                                * config.buckling_safety_factor / scr)
+                binding = np.argmax(util, axis=0)
+                Jrows = np.empty((S, nx))
+                for s_i in range(S):
+                    bi = int(binding[s_i])
+                    _con, row = grad_tube_wall_one(
+                        facs[bi], ds, s_i, safety_factor=config.buckling_safety_factor,
+                        E=model.E_beam, knockdown=TUBE_WALL_KNOCKDOWN,
+                        cache=sens_cache, dF=dF_of_fac[bi])
+                    Jrows[s_i] = row
+                return Jrows
+            jacs["tube_wall"] = tube_wall_jac
         if config.buckling_safety_factor is not None:
             def beam_buck_con_jac(x):
                 return _binding_grad(
@@ -638,6 +755,42 @@ def size_beam_shell_laminate(
 
             jacs["beam_buck"] = beam_buck_con_jac
             jacs["panel_buck"] = panel_buck_con_jac
+
+    if tube:
+        def tube_wall_con(x):
+            return 1.0 - evaluate(x)[7]
+
+        def tube_validity_con(x):
+            r_t = x[dv.slice("r_tube")]
+            t_w = x[dv.slice("t_wall")]
+            return r_t - t_w                       # >= 0: annulus validity
+
+        # monotonic non-increasing r_tube keel -> tip (same z ordering as beams)
+        tmono_lo, tmono_hi = [], []
+        for k in range(S - 1):
+            if seg_z[k] >= seg_z[k + 1]:           # segment k is tip-ward
+                tmono_lo.append(k + 1); tmono_hi.append(k)
+            else:
+                tmono_lo.append(k); tmono_hi.append(k + 1)
+        r_tube0 = dv.slice("r_tube").start
+
+        def tube_mono_con(x):
+            r_t = x[dv.slice("r_tube")]
+            return r_t[tmono_lo] - r_t[tmono_hi]
+
+        def tube_validity_jac(x):
+            Jm = np.zeros((S, nx))
+            for s_i in range(S):
+                Jm[s_i, r_tube0 + s_i] = 1.0
+                Jm[s_i, dv.slice("t_wall").start + s_i] = -1.0
+            return Jm
+
+        def tube_mono_jac(x):
+            Jm = np.zeros((S - 1, nx))
+            for k in range(S - 1):
+                Jm[k, r_tube0 + tmono_lo[k]] += 1.0
+                Jm[k, r_tube0 + tmono_hi[k]] += -1.0
+            return Jm
 
     # P.0: one named spec per constraint — append HERE to add a constraint; the
     # scipy dicts, Jacobian registration, and shadow-price attribution all follow.
@@ -665,6 +818,16 @@ def size_beam_shell_laminate(
             ConstraintSpec("panel_buck", panel_buck_con, 1, jacs.get("panel_buck"),
                            ("sf", "buckling_sf_panel", sf)),
         ]
+    if tube:
+        if config.buckling_safety_factor is not None:
+            specs.append(ConstraintSpec(
+                "tube_wall", tube_wall_con, S, jacs.get("tube_wall"),
+                ("sf", "buckling_sf_tube_wall", config.buckling_safety_factor)))
+        specs.append(ConstraintSpec("tube_validity", tube_validity_con, S,
+                                    tube_validity_jac if config.use_analytic_jacobian else None))
+        if S > 1:
+            specs.append(ConstraintSpec("tube_mono", tube_mono_con, S - 1,
+                                        tube_mono_jac if config.use_analytic_jacobian else None))
     constraints = [s.scipy_dict() for s in specs]
 
     res = minimize(
@@ -685,7 +848,7 @@ def size_beam_shell_laminate(
     scale = np.where(fg + hg > 1.0, fg + hg, 1.0)
     x[f0_lo:f0_lo + L] = fg / scale
     x[f45_lo:f45_lo + L] = hg / scale
-    wb, ws, d, t, bbu, pbu, worst_R = evaluate(x)
+    wb, ws, d, t, bbu, pbu, worst_R, tube_util_vec = evaluate(x)
     radii = x[:G][group_of_element]
     t_bands = x[G:G + B].copy()
     t_tri = t_bands[band_of_tri]
@@ -693,7 +856,11 @@ def size_beam_shell_laminate(
     f0_tri = f0b[band_of_tri]
     f45_tri = f45b[band_of_tri]
     f90_tri = f90b[band_of_tri]
-    bm = beam_mass(model, radii, rho=rho)
+    bm = float(rho * np.sum(np.pi * radii**2 * Lb_form))   # form beams only
+    tm = 0.0
+    if tube:
+        r_t_f, t_w_f = decode_tube(x)
+        tm = float(rho * np.sum(np.pi * (r_t_f**2 - (r_t_f - t_w_f)**2) * Lb_tube))
     sm = float(rho * np.sum(t_tri * Atri))
     t_skin_mean = float(np.sum(t_tri * Atri) / A_skin_area)
     f0_mean = float(np.sum(f0_tri * Atri) / A_skin_area)
@@ -703,7 +870,7 @@ def size_beam_shell_laminate(
         radii=radii, t_skin=t_skin_mean, t_bands=t_bands,
         f0=f0_mean, f45=f45_mean, f90=f90_mean,
         f0_bands=f0b, f45_bands=f45b, f90_bands=f90b,
-        mass_kg=bm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
+        mass_kg=bm + tm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
         converged=bool(res.success), n_iter=int(res.nit),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
         tip_defl_m=float(d), tip_twist_deg=float(t),
@@ -711,6 +878,10 @@ def size_beam_shell_laminate(
         max_panel_buckling_util=float(pbu),
         min_skin_strength_ratio=(float(worst_R) if config.skin_failure == "tsai_wu" else None),
         shadow_prices=shadow,
+        r_tube=(decode_tube(x)[0] if tube else None),
+        t_wall=(decode_tube(x)[1] if tube else None),
+        tube_mass_kg=tm,
+        max_tube_wall_util=(float(tube_util_vec.max()) if tube else 0.0),
     )
 
 

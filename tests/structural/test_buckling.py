@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from wing_design.structural.buckling import beam_euler_utilization, panel_buckling_utilization
 
@@ -24,3 +25,32 @@ def test_panel_utilization_against_closed_form():
     assert abs(u[0] - 1.0) < 1e-9
     ut = panel_buckling_utilization(np.array([[sigma_cr, 0.0, 0.0]]), np.array([area]), D11=D11, t=t, kc=kc)
     assert ut[0] == 0.0   # tension → no buckling
+
+
+def test_euler_I_matches_solid_rod_form():
+    import numpy as np
+    from wing_design.structural.buckling import beam_euler_utilization, beam_euler_utilization_I
+    r = np.array([0.01, 0.02]); L = np.array([1.0, 1.5]); N = np.array([-500.0, -2000.0])
+    I = np.pi * r**4 / 4.0
+    a = beam_euler_utilization(N, r, L, E=70e9, K=1.0, safety_factor=1.5)
+    b = beam_euler_utilization_I(N, I, L, E=70e9, K=1.0, safety_factor=1.5)
+    assert np.allclose(a, b)
+
+
+def test_tube_wall_utilization_scales():
+    import numpy as np
+    from wing_design.structural.frame import BeamSection
+    from wing_design.structural.buckling import tube_wall_utilization
+    sec = BeamSection.annular(0.05, 0.002)
+    u = tube_wall_utilization(np.array([-1.0e4]), np.array([0.05]), np.array([0.002]),
+                              np.array([sec.A]), E=70e9, safety_factor=1.5)
+    # doubling the wall halves stress AND doubles sigma_cr -> ~4x lower util
+    sec2 = BeamSection.annular(0.05, 0.004)
+    u2 = tube_wall_utilization(np.array([-1.0e4]), np.array([0.05]), np.array([0.004]),
+                               np.array([sec2.A]), E=70e9, safety_factor=1.5)
+    assert u[0] > 0
+    assert u[0] / u2[0] == pytest.approx(4.0, rel=0.05)
+    # tension never crimps
+    ut = tube_wall_utilization(np.array([+1.0e4]), np.array([0.05]), np.array([0.002]),
+                               np.array([sec.A]), E=70e9)
+    assert ut[0] == 0.0

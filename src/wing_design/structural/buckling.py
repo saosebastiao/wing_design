@@ -34,6 +34,49 @@ def beam_euler_utilization(
     return comp * safety_factor / np.maximum(pcr, 1e-30)
 
 
+def beam_euler_utilization_I(
+    axial_force: np.ndarray,
+    I: np.ndarray,
+    lengths: np.ndarray,
+    *,
+    E: float,
+    K: float = 1.0,
+    safety_factor: float = 1.0,
+) -> np.ndarray:
+    """Per-element Euler utilization from explicit second moments (P.1).
+
+    Generalizes `beam_euler_utilization` to arbitrary sections (annular tube
+    segments): Pcr = π²·E·I/(K·L)². Tension members return 0.
+    """
+    comp = np.maximum(0.0, -np.asarray(axial_force, dtype=float))
+    pcr = np.pi**2 * E * np.asarray(I, dtype=float) / (K * np.asarray(lengths, dtype=float)) ** 2
+    return comp * safety_factor / np.maximum(pcr, 1e-30)
+
+
+TUBE_WALL_KNOCKDOWN = 0.65   # NASA SP-8007-class imperfection knockdown (recorded)
+
+
+def tube_wall_utilization(
+    axial_force: np.ndarray,
+    r_outer: np.ndarray,
+    t_wall: np.ndarray,
+    A: np.ndarray,
+    *,
+    E: float,
+    safety_factor: float = 1.0,
+    knockdown: float = TUBE_WALL_KNOCKDOWN,
+) -> np.ndarray:
+    """Per-tube-segment wall crimping (axial-compression cylinder buckling, P.1).
+
+    σ_cr = knockdown · 0.605 · E · t / r (classical cylinder bifurcation with an
+    imperfection knockdown); utilization = SF · max(0, −N)/A / σ_cr. Shear/torsion
+    buckling and bending-gradient relief are deferred (recorded caveats).
+    """
+    comp_stress = np.maximum(0.0, -np.asarray(axial_force, dtype=float)) / np.asarray(A, dtype=float)
+    sigma_cr = knockdown * 0.605 * E * np.asarray(t_wall, dtype=float) / np.asarray(r_outer, dtype=float)
+    return comp_stress * safety_factor / np.maximum(sigma_cr, 1e-30)
+
+
 def panel_buckling_utilization(
     membrane_stress: np.ndarray,
     areas: np.ndarray,

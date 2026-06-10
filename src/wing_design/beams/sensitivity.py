@@ -56,6 +56,26 @@ def dkloc_dr(E_beam, G_beam, r, L):
     return local_beam_stiffness(E_beam, G_beam, dsec, L)
 
 
+def dkloc_annular(E_beam, G_beam, r, t, L, *, wrt):
+    """∂(local beam stiffness)/∂r_outer or ∂t_wall for an annular section (12x12).
+
+    Annulus: A = π(r²−(r−t)²), I = π/4(r⁴−(r−t)⁴), J = 2I (P.1 core tube).
+    wrt="r": dA = 2πt, dI = π(r³−(r−t)³);  wrt="t": dA = 2π(r−t), dI = π(r−t)³.
+    `local_beam_stiffness` is linear in (A, Iy, Iz, J).
+    """
+    ri = r - t
+    if wrt == "r":
+        dA = 2.0 * np.pi * t
+        dI = np.pi * (r**3 - ri**3)
+    elif wrt == "t":
+        dA = 2.0 * np.pi * ri
+        dI = np.pi * ri**3
+    else:
+        raise ValueError(wrt)
+    dsec = BeamSection(A=dA, Iy=dI, Iz=dI, J=2.0 * dI, r=r)
+    return local_beam_stiffness(E_beam, G_beam, dsec, L)
+
+
 def dke_dAD(p1, p2, p3, dA, dD, drilling_factor=1.0e-4):
     """Element shell stiffness directional derivative given dA, dD (18x18).
 
@@ -122,6 +142,29 @@ class DesignSens:
     f0_tri: np.ndarray = None         # (M,)
     f45_tri: np.ndarray = None        # (M,)
     f90_tri: np.ndarray = None        # (M,)
+    # P.1 core tube (optional): tube rows of beam_elements carry annular sections
+    # sized by the r_tube/t_wall DV blocks appended after f45. S = 0 = no tube.
+    S: int = 0
+    tube_elements: np.ndarray = None  # (S,) element indices (into beam_elements)
+    tube_r: np.ndarray = None         # (S,) outer radii (segment order)
+    tube_t: np.ndarray = None         # (S,) wall thicknesses
+
+    @property
+    def nx(self) -> int:
+        return self.G + self.B + 2 * self.L + 2 * self.S
+
+    def tube_dv_r(self, s: int) -> int:
+        return self.G + self.B + 2 * self.L + s
+
+    def tube_dv_t(self, s: int) -> int:
+        return self.G + self.B + 2 * self.L + self.S + s
+
+    def tube_seg_of_element(self, e: int) -> int:
+        """Segment index of tube element e, or -1 if e is a form beam."""
+        if self.tube_elements is None:
+            return -1
+        hit = np.nonzero(self.tube_elements == e)[0]
+        return int(hit[0]) if hit.size else -1
 
 
 def adjoint_lambda(factored, dg_du):
@@ -133,23 +176,31 @@ def adjoint_lambda(factored, dg_du):
 
 def lambdaT_dK_x(factored, ds, lam):
     """Vector (nx,) of λᵀ (∂K/∂x_i) u for every design variable i."""
-    nx = ds.G + ds.B + 2 * ds.L
+    nx = ds.nx
     out = np.zeros(nx)
     u = factored.u
     nodes = ds.model.nodes
     be = factored.beam_elements
 
-    # radius groups
+    # radius groups (form beams) + tube segments (annular, two DVs each)
     for e in range(be.shape[0]):
-        g = int(ds.group_of_element[e])
         i, j = int(be[e, 0]), int(be[e, 1])
+        dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
+        T = factored.transforms[e]
+        s = ds.tube_seg_of_element(e)
+        if s >= 0:
+            for wrt, col in (("r", ds.tube_dv_r(s)), ("t", ds.tube_dv_t(s))):
+                dk = dkloc_annular(ds.model.E_beam, ds.model.G_beam,
+                                   float(ds.tube_r[s]), float(ds.tube_t[s]),
+                                   float(ds.beam_lengths[e]), wrt=wrt)
+                out[col] += lam[dofs] @ (T.T @ dk @ T) @ u[dofs]
+            continue
+        g = int(ds.group_of_element[e])
         dk = dkloc_dr(
             ds.model.E_beam, ds.model.G_beam,
             float(ds.radii_full[e]), float(ds.beam_lengths[e]),
         )
-        T = factored.transforms[e]
         dkg = T.T @ dk @ T
-        dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
         out[g] += lam[dofs] @ dkg @ u[dofs]
 
     # thickness bands + layup groups
@@ -200,24 +251,47 @@ class SensCache:
     tri_dv_t: np.ndarray     # (n_tri,) thickness DV index = G + band
     tri_dv_f0: np.ndarray    # (n_tri,) f0 DV index = G+B + layup_group
     tri_dv_f45: np.ndarray   # (n_tri,) f45 DV index = G+B+L + layup_group
+    # P.1 tube entries (empty lists when no tube)
+    tube_dofs: list = None
+    tube_dkg_r: list = None
+    tube_dkg_t: list = None
+    tube_dv_r: np.ndarray = None
+    tube_dv_t: np.ndarray = None
 
 
 def prepare_sensitivity(ds, factored) -> "SensCache":
     """Precompute design-dependent ∂K element matrices once (reused across all adjoints/LCs)."""
     G, B, L = ds.G, ds.B, ds.L
-    nx = G + B + 2 * L
+    nx = ds.nx
     be = factored.beam_elements
-    beam_dofs, beam_dkg = [], []
+    beam_dofs, beam_dkg, beam_dv_list = [], [], []
+    tube_dofs, tube_dkg_r, tube_dkg_t, tube_dv_r, tube_dv_t = [], [], [], [], []
     for e in range(be.shape[0]):
         i, j = int(be[e, 0]), int(be[e, 1])
+        dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
+        T = factored.transforms[e]
+        s = ds.tube_seg_of_element(e)
+        if s >= 0:
+            dk_r = dkloc_annular(ds.model.E_beam, ds.model.G_beam,
+                                 float(ds.tube_r[s]), float(ds.tube_t[s]),
+                                 float(ds.beam_lengths[e]), wrt="r")
+            dk_t = dkloc_annular(ds.model.E_beam, ds.model.G_beam,
+                                 float(ds.tube_r[s]), float(ds.tube_t[s]),
+                                 float(ds.beam_lengths[e]), wrt="t")
+            tube_dofs.append(dofs)
+            tube_dkg_r.append(T.T @ dk_r @ T)
+            tube_dkg_t.append(T.T @ dk_t @ T)
+            tube_dv_r.append(ds.tube_dv_r(s))
+            tube_dv_t.append(ds.tube_dv_t(s))
+            continue
         dk = dkloc_dr(
             ds.model.E_beam, ds.model.G_beam,
             float(ds.radii_full[e]), float(ds.beam_lengths[e]),
         )
-        T = factored.transforms[e]
         beam_dkg.append(T.T @ dk @ T)
-        beam_dofs.append(np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6])
-    beam_dv = np.asarray(ds.group_of_element, dtype=int)
+        beam_dofs.append(dofs)
+        beam_dv_list.append(int(ds.group_of_element[e]))
+    beam_dv = np.asarray(beam_dv_list, dtype=int)
 
     tris = ds.model.shell_tris
     tri_dofs, tri_dke_t, tri_dke_f0, tri_dke_f45 = [], [], [], []
@@ -238,7 +312,10 @@ def prepare_sensitivity(ds, factored) -> "SensCache":
         b = int(ds.band_of_tri[t]); lg = int(ds.layup_group_of_band[b])
         tri_dv_t[t] = G + b; tri_dv_f0[t] = G + B + lg; tri_dv_f45[t] = G + B + L + lg
     return SensCache(nx, beam_dofs, beam_dkg, beam_dv, tri_dofs, tri_dke_t,
-                     tri_dke_f0, tri_dke_f45, tri_dv_t, tri_dv_f0, tri_dv_f45)
+                     tri_dke_f0, tri_dke_f45, tri_dv_t, tri_dv_f0, tri_dv_f45,
+                     tube_dofs=tube_dofs, tube_dkg_r=tube_dkg_r, tube_dkg_t=tube_dkg_t,
+                     tube_dv_r=np.asarray(tube_dv_r, dtype=int),
+                     tube_dv_t=np.asarray(tube_dv_t, dtype=int))
 
 
 def lambdaT_dK_x_cached(cache: "SensCache", lam, u) -> np.ndarray:
@@ -247,12 +324,55 @@ def lambdaT_dK_x_cached(cache: "SensCache", lam, u) -> np.ndarray:
     for e in range(len(cache.beam_dofs)):
         d = cache.beam_dofs[e]
         out[cache.beam_dv[e]] += lam[d] @ cache.beam_dkg[e] @ u[d]
+    if cache.tube_dofs:
+        for s in range(len(cache.tube_dofs)):
+            d = cache.tube_dofs[s]
+            le, ue = lam[d], u[d]
+            out[cache.tube_dv_r[s]] += le @ cache.tube_dkg_r[s] @ ue
+            out[cache.tube_dv_t[s]] += le @ cache.tube_dkg_t[s] @ ue
     for t in range(len(cache.tri_dofs)):
         d = cache.tri_dofs[t]; le = lam[d]; ue = u[d]
         out[cache.tri_dv_t[t]] += le @ cache.tri_dke_t[t] @ ue
         out[cache.tri_dv_f0[t]] += le @ cache.tri_dke_f0[t] @ ue
         out[cache.tri_dv_f45[t]] += le @ cache.tri_dke_f45[t] @ ue
     return out
+
+
+def _annulus_props(r, t):
+    """(A, I, J) and their (d/dr, d/dt) for an annular section."""
+    ri = r - t
+    A = np.pi * (r**2 - ri**2)
+    I = 0.25 * np.pi * (r**4 - ri**4)
+    J = 2.0 * I
+    dA = (2.0 * np.pi * t, 2.0 * np.pi * ri)            # (d/dr, d/dt)
+    dI = (np.pi * (r**3 - ri**3), np.pi * ri**3)
+    dJ = (2.0 * dI[0], 2.0 * dI[1])
+    return A, I, J, dA, dI, dJ
+
+
+def _beam_vm_explicit_tube(floc, dvm_dfloc, fac, ds, e_star, s, sigma_n, tau, vm):
+    """Explicit (∂vM/∂r_tube, ∂vM/∂t_wall) for an annular active element:
+    section-property chains + the recovered-force dependence via ∂klocal."""
+    r = float(ds.tube_r[s]); t = float(ds.tube_t[s])
+    A, I, J, dA, dI, dJ = _annulus_props(r, t)
+    axial = floc[6]; torsion = floc[9]
+    b0 = np.hypot(floc[4], floc[5]); b1 = np.hypot(floc[10], floc[11])
+    Mres = max(b0, b1)
+    i, j = int(fac.beam_elements[e_star, 0]), int(fac.beam_elements[e_star, 1])
+    dofs = np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6]
+    out = []
+    for k, wrt in enumerate(("r", "t")):
+        dr_outer = 1.0 if wrt == "r" else 0.0   # fiber distance = r_outer
+        dsig = (-abs(axial) * dA[k] / A**2
+                + Mres * (dr_outer * I - r * dI[k]) / I**2)
+        dtau = abs(torsion) * (dr_outer * J - r * dJ[k]) / J**2
+        dvm = (sigma_n * dsig + 3.0 * tau * dtau) / vm
+        dk = dkloc_annular(ds.model.E_beam, ds.model.G_beam, r, t,
+                           float(ds.beam_lengths[e_star]), wrt=wrt)
+        dfloc = dk @ fac.transforms[e_star] @ fac.u[dofs]
+        dvm += dvm_dfloc @ dfloc
+        out.append(dvm)
+    return out[0], out[1]
 
 
 def _active_beam_force(factored, e):
@@ -279,10 +399,15 @@ def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
     rows = []
     for e in range(n):
         floc, M, dofs = _active_beam_force(factored, e)
-        r = float(ds.radii_full[e])
-        A = np.pi * r**2
-        Iz = np.pi * r**4 / 4.0
-        J = np.pi * r**4 / 2.0
+        s_e = ds.tube_seg_of_element(e)
+        if s_e >= 0:
+            r = float(ds.tube_r[s_e])
+            A, Iz, J, _dA, _dI, _dJ = _annulus_props(r, float(ds.tube_t[s_e]))
+        else:
+            r = float(ds.radii_full[e])
+            A = np.pi * r**2
+            Iz = np.pi * r**4 / 4.0
+            J = np.pi * r**4 / 2.0
         axial = floc[6]
         torsion = floc[9]
         b0 = np.hypot(floc[4], floc[5])
@@ -332,19 +457,24 @@ def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
     if dF is not None:
         du_part += lam @ dF
 
-    # explicit ∂vM/∂r for the group of e*. Two pieces:
-    #  (1) section A,Iz,J depend on r (the stress formula);
-    #  (2) the recovered internal force floc = klocals(r)·T·u_e also depends on r,
-    #      because klocals scales with the section. Both feed vM at fixed u.
-    dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
-    dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
-    dvm_dr = (sigma_n * dsigma_n_dr + 3.0 * tau * dtau_dr) / vm
-    # piece (2): dfloc/dr = (∂klocals/∂r)·T·u_e ; chain through ∂vM/∂floc
-    dk_dr = dkloc_dr(ds.model.E_beam, ds.model.G_beam, r,
-                     float(ds.beam_lengths[e_star]))
-    dfloc_dr = dk_dr @ factored.transforms[e_star] @ factored.u[dofs]
-    dvm_dr += dvm_dfloc @ dfloc_dr
-    du_part[int(ds.group_of_element[e_star])] += dvm_dr
+    # explicit section terms for e*: solid rod (radius-group DV) or annular tube
+    # (two tube DVs). Two pieces each: (1) section props in the stress formula;
+    # (2) the recovered force floc = klocal(x)·T·u_e depends on the section.
+    s_tube = ds.tube_seg_of_element(e_star)
+    if s_tube >= 0:
+        dvm_dr_t, dvm_dt_t = _beam_vm_explicit_tube(
+            floc, dvm_dfloc, factored, ds, e_star, s_tube, sigma_n, tau, vm)
+        du_part[ds.tube_dv_r(s_tube)] += dvm_dr_t
+        du_part[ds.tube_dv_t(s_tube)] += dvm_dt_t
+    else:
+        dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
+        dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
+        dvm_dr = (sigma_n * dsigma_n_dr + 3.0 * tau * dtau_dr) / vm
+        dk_dr = dkloc_dr(ds.model.E_beam, ds.model.G_beam, r,
+                         float(ds.beam_lengths[e_star]))
+        dfloc_dr = dk_dr @ factored.transforms[e_star] @ factored.u[dofs]
+        dvm_dr += dvm_dfloc @ dfloc_dr
+        du_part[int(ds.group_of_element[e_star])] += dvm_dr
 
     grad = -du_part / sigma_allow
     return con_value, grad
@@ -364,11 +494,16 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor,
     rows = []
     for e in range(n):
         floc, M, dofs = _active_beam_force(factored, e)
-        r = float(ds.radii_full[e])
+        s_e = ds.tube_seg_of_element(e)
+        if s_e >= 0:
+            r = float(ds.tube_r[s_e])
+            _A, Iy, _J, _dA, _dI, _dJ = _annulus_props(r, float(ds.tube_t[s_e]))
+        else:
+            r = float(ds.radii_full[e])
+            Iy = np.pi * r**4 / 4.0
         L = float(ds.beam_lengths[e])
         axial = floc[6]
         comp = max(0.0, -axial)
-        Iy = np.pi * r**4 / 4.0
         Pcr = np.pi**2 * E * Iy / (euler_K * L) ** 2
         util = comp * safety_factor / max(Pcr, 1e-30)
         utils[e] = util
@@ -380,7 +515,7 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor,
     con_value = 1.0 - util
 
     if comp == 0.0:
-        return con_value, np.zeros(ds.G + ds.B + 2 * ds.L)
+        return con_value, np.zeros(ds.nx)
 
     # ∂util/∂axial = SF/Pcr · ∂comp/∂axial = SF/Pcr · (−1)  (axial<0 here)
     dutil_daxial = -safety_factor / Pcr
@@ -395,18 +530,73 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor,
     if dF is not None:
         du_part += lam @ dF
 
-    # explicit ∂util/∂r for the group of e*. Two pieces:
-    #  (1) Pcr ∝ r⁴ ⇒ util ∝ r^−4 ⇒ ∂util/∂r = −4·util/r;
-    #  (2) the recovered axial = floc[6] = (klocals(r)·T·u_e)[6] also depends on r.
+    # explicit section terms for e*: util ∝ 1/I plus the recovered-axial
+    # dependence via ∂klocal. Solid rod: one radius-group DV; tube: two DVs.
     L = float(ds.beam_lengths[e_star])
-    dutil_dr = -4.0 * util / r
-    dk_dr = dkloc_dr(E, ds.model.G_beam, r, L)
-    daxial_dr = (dk_dr @ factored.transforms[e_star] @ factored.u[dofs])[6]
-    dutil_dr += dutil_daxial * daxial_dr
-    du_part[int(ds.group_of_element[e_star])] += dutil_dr
+    s_tube = ds.tube_seg_of_element(e_star)
+    if s_tube >= 0:
+        rt = float(ds.tube_r[s_tube]); tt = float(ds.tube_t[s_tube])
+        _A, Iy, _J, _dA, dI, _dJ = _annulus_props(rt, tt)
+        for k, wrt in enumerate(("r", "t")):
+            dutil = -util * dI[k] / Iy
+            dk = dkloc_annular(E, ds.model.G_beam, rt, tt, L, wrt=wrt)
+            dutil += dutil_daxial * (dk @ factored.transforms[e_star] @ factored.u[dofs])[6]
+            col = ds.tube_dv_r(s_tube) if wrt == "r" else ds.tube_dv_t(s_tube)
+            du_part[col] += dutil
+    else:
+        dutil_dr = -4.0 * util / r
+        dk_dr = dkloc_dr(E, ds.model.G_beam, r, L)
+        daxial_dr = (dk_dr @ factored.transforms[e_star] @ factored.u[dofs])[6]
+        dutil_dr += dutil_daxial * daxial_dr
+        du_part[int(ds.group_of_element[e_star])] += dutil_dr
 
     grad = -du_part
     return con_value, grad
+
+
+def grad_tube_wall_one(factored, ds, s, *, safety_factor, E,
+                       knockdown=0.65, cache: "SensCache | None" = None,
+                       dF: np.ndarray | None = None):
+    """Row s of the tube wall-crimping constraint gradient (P.1).
+
+    con_s = 1 − util_s, util = SF·max(0,−N)/A / σ_cr, σ_cr = γ·0.605·E·t/r
+    ⇒ util = SF·(−N)·r / (A·γ·0.605·E·t) for N < 0. Returns (con_s, grad (nx,)).
+    """
+    e = int(ds.tube_elements[s])
+    floc, M, dofs = _active_beam_force(factored, e)
+    axial = floc[6]
+    r = float(ds.tube_r[s]); t = float(ds.tube_t[s])
+    A, _I, _J, dA, _dI, _dJ = _annulus_props(r, t)
+    c = knockdown * 0.605 * E
+    sigma_cr = c * t / r
+    comp = max(0.0, -axial)
+    util = (comp / A) * safety_factor / sigma_cr
+    con_value = 1.0 - util
+    if comp == 0.0:
+        return con_value, np.zeros(ds.nx)
+
+    # implicit: ∂util/∂N = −SF/(A·σcr) for N<0; scatter through M row 6 + adjoint
+    dutil_daxial = -safety_factor / (A * sigma_cr)
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dutil_daxial * M[6, :]
+    lam = adjoint_lambda(factored, dg_du)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    du_part = -lambdaT_dK_x_cached(_cache, lam, factored.u)
+    if dF is not None:
+        du_part += lam @ dF
+
+    # explicit: util = K0·r/(A·t), K0 = SF·comp/c; plus N(klocal(r,t)) chains
+    K0 = safety_factor * comp / c
+    dutil_dr = K0 * (A * t - r * t * dA[0]) / (A * t) ** 2
+    dutil_dt = K0 * (-r) * (dA[1] * t + A) / (A * t) ** 2
+    for wrt, dutil in (("r", dutil_dr), ("t", dutil_dt)):
+        dk = dkloc_annular(ds.model.E_beam, ds.model.G_beam, r, t,
+                           float(ds.beam_lengths[e]), wrt=wrt)
+        dutil += dutil_daxial * (dk @ factored.transforms[e] @ factored.u[dofs])[6]
+        col = ds.tube_dv_r(s) if wrt == "r" else ds.tube_dv_t(s)
+        du_part[col] += dutil
+
+    return con_value, -du_part
 
 
 # --- Skin membrane stress sensitivities -----------------------------------
@@ -548,7 +738,7 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas,
     con_value = 1.0 - util
 
     if comp == 0.0:
-        return con_value, np.zeros(ds.G + ds.B + 2 * ds.L)
+        return con_value, np.zeros(ds.nx)
 
     # ∂comp/∂s with comp = R − mean (since s_min<0 here)
     # ∂R/∂sxx = (sxx−syy)/(4R), ∂R/∂syy = −(sxx−syy)/(4R), ∂R/∂sxy = sxy/R

@@ -11,23 +11,26 @@ from __future__ import annotations
 import numpy as np
 
 
-def body_load_vector(model, radii, t_tri, *, rho: float, accel) -> np.ndarray:
+def body_load_vector(model, radii, t_tri, *, rho: float, accel,
+                     areas: np.ndarray | None = None) -> np.ndarray:
     """(N, 6) lumped nodal forces from structural mass under ``accel`` (m/s²).
 
-    Beam element mass ρπr²L lumps half to each end node; triangle mass ρ·t·A a
-    third to each corner. Forces only (no moment lumping — consistent with the
-    aero projection). The tip gusset is massless by convention and contributes
-    nothing.
+    Beam element mass ρ·A·L lumps half to each end node (A = πr² from ``radii``,
+    or per-element ``areas`` when given — the P.1 tube path with annular
+    sections); triangle mass ρ·t·A a third to each corner. Forces only (no moment
+    lumping — consistent with the aero projection). The tip gusset and tube bonds
+    are massless by convention and contribute nothing.
     """
     a = np.asarray(accel, dtype=float)
     nodes = model.nodes
     out = np.zeros((nodes.shape[0], 6))
     be = model.beam_elements
-    r = np.asarray(radii, dtype=float)
+    if areas is None:
+        areas = np.pi * np.asarray(radii, dtype=float) ** 2
     for e in range(be.shape[0]):
         i, j = int(be[e, 0]), int(be[e, 1])
         L = float(np.linalg.norm(nodes[j] - nodes[i]))
-        m_half = 0.5 * rho * np.pi * r[e] ** 2 * L
+        m_half = 0.5 * rho * float(areas[e]) * L
         out[i, :3] += m_half * a
         out[j, :3] += m_half * a
     tris = model.shell_tris
@@ -54,23 +57,41 @@ def body_load_jacobian(
     G: int,
     B: int,
     L: int,
+    S: int = 0,
+    tube_elements: np.ndarray | None = None,
+    tube_r: np.ndarray | None = None,
+    tube_t: np.ndarray | None = None,
 ) -> np.ndarray:
-    """∂f/∂x as a dense (ndof, nx) matrix, x = [r_group(G), t_band(B), f0(L), f45(L)].
+    """∂f/∂x as a dense (ndof, nx) matrix,
+    x = [r_group(G), t_band(B), f0(L), f45(L) | r_tube(S), t_wall(S)].
 
-    Radius groups: ∂(ρπr²L)/∂r = 2ρπrL per element, half to each end node's
-    translational DOFs. Thickness bands: ∂(ρtA)/∂t = ρA per triangle, a third per
-    corner. Layup fractions: zero (mass is fraction-independent).
+    Radius groups: ∂(ρπr²L)/∂r = 2ρπrL per form element, half per end node.
+    Tube segments (P.1, annulus A = π(2rt − t²)): ∂A/∂r = 2πt, ∂A/∂t = 2π(r−t).
+    Thickness bands: ∂(ρtA)/∂t = ρA per triangle, a third per corner. Layup
+    fractions: zero (mass is fraction-independent).
     """
     a = np.asarray(accel, dtype=float)
     nodes = model.nodes
     ndof = 6 * nodes.shape[0]
-    nx = G + B + 2 * L
+    nx = G + B + 2 * L + 2 * S
     dF = np.zeros((ndof, nx))
     be = model.beam_elements
     r = np.asarray(radii, dtype=float)
+    tube_seg = {int(e): s for s, e in enumerate(tube_elements)} if tube_elements is not None else {}
     for e in range(be.shape[0]):
         i, j = int(be[e, 0]), int(be[e, 1])
         Le = float(np.linalg.norm(nodes[j] - nodes[i]))
+        if e in tube_seg:
+            s = tube_seg[e]
+            rt, tt = float(tube_r[s]), float(tube_t[s])
+            col_r = G + B + 2 * L + s
+            col_t = G + B + 2 * L + S + s
+            dm_r = 0.5 * rho * 2.0 * np.pi * tt * Le
+            dm_t = 0.5 * rho * 2.0 * np.pi * (rt - tt) * Le
+            for n in (i, j):
+                dF[6 * n:6 * n + 3, col_r] += dm_r * a
+                dF[6 * n:6 * n + 3, col_t] += dm_t * a
+            continue
         dm_half = 0.5 * rho * 2.0 * np.pi * r[e] * Le
         g = int(group_of_element[e])
         for n in (i, j):
