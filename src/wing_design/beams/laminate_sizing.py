@@ -34,7 +34,7 @@ from ..structural.frame import FrameResult, _element_rotation
 from .sensitivity import (
     DesignSens, grad_beam_buckling, grad_skin_vm,
     grad_panel_buckling, grad_skin_tsai_wu, grad_tip_defl, grad_tip_twist,
-    _active_beam_force, adjoint_lambda, lambdaT_dK_x, dkloc_dr,
+    _active_beam_force, adjoint_lambda, lambdaT_dK_x_cached, dkloc_dr,
 )
 from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
@@ -503,7 +503,7 @@ def size_beam_shell_laminate(
                     best_grad = grad
             return best_grad
 
-        def _beam_vm_grad_one(fac, ds, e_star):
+        def _beam_vm_grad_one(fac, ds, e_star, sens_cache):
             """∂(1 − vM_{e_star}/σ)/∂x as an (nx,) row, for a chosen beam element."""
             sa = config.sigma_allow_Pa
             floc, Mmat, dofs = _active_beam_force(fac, e_star)
@@ -539,7 +539,7 @@ def size_beam_shell_laminate(
             dg_du = np.zeros(fac.ndof)
             dg_du[dofs] = dvm_dfloc @ Mmat
             lam = adjoint_lambda(fac, dg_du)
-            du_part = -lambdaT_dK_x(fac, ds, lam)
+            du_part = -lambdaT_dK_x_cached(sens_cache, lam, fac.u)
 
             dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
             dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
@@ -553,7 +553,7 @@ def size_beam_shell_laminate(
 
         def beam_con_jac(x):
             """Full (n, nx) Jacobian: row e is ∂(1 − vM_e/σ)/∂x at e's binding load case."""
-            facs, ds, sections, _sens_cache = _jac_lookup(x)
+            facs, ds, sections, sens_cache = _jac_lookup(x)
             # per-element binding lc = the lc achieving max vM_e (matches evaluate's max).
             vm_lc = np.empty((len(facs), n))
             for li, fac in enumerate(facs):
@@ -561,7 +561,7 @@ def size_beam_shell_laminate(
             binding = np.argmax(vm_lc, axis=0)
             Jrows = np.empty((n, nx))
             for e in range(n):
-                Jrows[e] = _beam_vm_grad_one(facs[int(binding[e])], ds, e)
+                Jrows[e] = _beam_vm_grad_one(facs[int(binding[e])], ds, e, sens_cache)
             return Jrows
 
         def skin_con_jac(x):
