@@ -181,6 +181,80 @@ def lambdaT_dK_x(factored, ds, lam):
     return out
 
 
+@dataclass(frozen=True)
+class SensCache:
+    """Precomputed design-dependent ∂K/∂x element matrices (reused across all
+    adjoints / load cases). Independent of `lam` and `u`.
+    """
+
+    nx: int
+    # beam (radius) contributions
+    beam_dofs: list          # list of (12,) int dof-index arrays
+    beam_dkg: list           # list of (12,12) global ∂kg/∂r
+    beam_dv: np.ndarray      # (n_beam,) radius-group DV index per element
+    # triangle contributions
+    tri_dofs: list           # list of (18,) int dof-index arrays
+    tri_dke_t: list          # (18,18) ∂ke/∂t
+    tri_dke_f0: list         # (18,18) ∂ke/∂f0
+    tri_dke_f45: list        # (18,18) ∂ke/∂f45
+    tri_dv_t: np.ndarray     # (n_tri,) thickness DV index = G + band
+    tri_dv_f0: np.ndarray    # (n_tri,) f0 DV index = G+B + layup_group
+    tri_dv_f45: np.ndarray   # (n_tri,) f45 DV index = G+B+L + layup_group
+
+
+def prepare_sensitivity(ds, factored) -> "SensCache":
+    """Precompute design-dependent ∂K element matrices once (reused across all adjoints/LCs)."""
+    G, B, L = ds.G, ds.B, ds.L
+    nx = G + B + 2 * L
+    be = factored.beam_elements
+    beam_dofs, beam_dkg = [], []
+    for e in range(be.shape[0]):
+        i, j = int(be[e, 0]), int(be[e, 1])
+        dk = dkloc_dr(
+            ds.model.E_beam, ds.model.G_beam,
+            float(ds.radii_full[e]), float(ds.beam_lengths[e]),
+        )
+        T = factored.transforms[e]
+        beam_dkg.append(T.T @ dk @ T)
+        beam_dofs.append(np.r_[6 * i:6 * i + 6, 6 * j:6 * j + 6])
+    beam_dv = np.asarray(ds.group_of_element, dtype=int)
+
+    tris = ds.model.shell_tris
+    tri_dofs, tri_dke_t, tri_dke_f0, tri_dke_f45 = [], [], [], []
+    tri_dv_t = np.empty(tris.shape[0], dtype=int)
+    tri_dv_f0 = np.empty(tris.shape[0], dtype=int)
+    tri_dv_f45 = np.empty(tris.shape[0], dtype=int)
+    for t in range(tris.shape[0]):
+        n0, n1, n2 = int(tris[t, 0]), int(tris[t, 1]), int(tris[t, 2])
+        p1, p2, p3 = ds.model.nodes[n0], ds.model.nodes[n1], ds.model.nodes[n2]
+        tri_dofs.append(np.r_[6 * n0:6 * n0 + 6, 6 * n1:6 * n1 + 6, 6 * n2:6 * n2 + 6])
+        tt = float(ds.t_tri[t]); off = float(ds.offset_tri[t]); Qe = ds.Qeff_tri[t]
+        dA, dD = dAD_dt(Qe, tt)
+        tri_dke_t.append(dke_dAD(p1, p2, p3, dA, dD, ds.drilling_factor))
+        dA0, dD0 = dAD_df(dQeff_df(ds.ply, which="f0", offset_deg=off), tt)
+        tri_dke_f0.append(dke_dAD(p1, p2, p3, dA0, dD0, ds.drilling_factor))
+        dA4, dD4 = dAD_df(dQeff_df(ds.ply, which="f45", offset_deg=off), tt)
+        tri_dke_f45.append(dke_dAD(p1, p2, p3, dA4, dD4, ds.drilling_factor))
+        b = int(ds.band_of_tri[t]); lg = int(ds.layup_group_of_band[b])
+        tri_dv_t[t] = G + b; tri_dv_f0[t] = G + B + lg; tri_dv_f45[t] = G + B + L + lg
+    return SensCache(nx, beam_dofs, beam_dkg, beam_dv, tri_dofs, tri_dke_t,
+                     tri_dke_f0, tri_dke_f45, tri_dv_t, tri_dv_f0, tri_dv_f45)
+
+
+def lambdaT_dK_x_cached(cache: "SensCache", lam, u) -> np.ndarray:
+    """Cheap contraction λᵀ(∂K/∂x)u using cached ∂K matrices (identical to lambdaT_dK_x)."""
+    out = np.zeros(cache.nx)
+    for e in range(len(cache.beam_dofs)):
+        d = cache.beam_dofs[e]
+        out[cache.beam_dv[e]] += lam[d] @ cache.beam_dkg[e] @ u[d]
+    for t in range(len(cache.tri_dofs)):
+        d = cache.tri_dofs[t]; le = lam[d]; ue = u[d]
+        out[cache.tri_dv_t[t]] += le @ cache.tri_dke_t[t] @ ue
+        out[cache.tri_dv_f0[t]] += le @ cache.tri_dke_f0[t] @ ue
+        out[cache.tri_dv_f45[t]] += le @ cache.tri_dke_f45[t] @ ue
+    return out
+
+
 def _active_beam_force(factored, e):
     """Recover (floc 12-vector, M=klocals@T, dofs) for beam element e (match beam_shell.py)."""
     be = factored.beam_elements
@@ -192,7 +266,7 @@ def _active_beam_force(factored, e):
     return floc, M, dofs
 
 
-def grad_beam_vm(factored, ds, sigma_allow):
+def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
     """beam von-Mises feasibility constraint gradient.
 
     con = 1 − max_e(vM_e)/σ_allow. Returns (con_value, grad (nx,)).
@@ -201,7 +275,7 @@ def grad_beam_vm(factored, ds, sigma_allow):
     n = be.shape[0]
     # find active element (max vM) using the documented force recovery
     vms = np.empty(n)
-    cache = []
+    rows = []
     for e in range(n):
         floc, M, dofs = _active_beam_force(factored, e)
         r = float(ds.radii_full[e])
@@ -217,12 +291,12 @@ def grad_beam_vm(factored, ds, sigma_allow):
         tau = abs(torsion) * r / J
         vm = np.sqrt(sigma_n**2 + 3.0 * tau**2)
         vms[e] = vm
-        cache.append((floc, M, dofs, r, A, Iz, J, axial, torsion, b0, b1, Mres,
-                      sigma_n, tau, vm))
+        rows.append((floc, M, dofs, r, A, Iz, J, axial, torsion, b0, b1, Mres,
+                     sigma_n, tau, vm))
 
     e_star = int(np.argmax(vms))
     (floc, M, dofs, r, A, Iz, J, axial, torsion, b0, b1, Mres,
-     sigma_n, tau, vm) = cache[e_star]
+     sigma_n, tau, vm) = rows[e_star]
 
     con_value = 1.0 - vm / sigma_allow
 
@@ -250,7 +324,9 @@ def grad_beam_vm(factored, ds, sigma_allow):
     dg_du = np.zeros(factored.ndof)
     dg_du[dofs] = dvm_dfloc @ M
     lam = adjoint_lambda(factored, dg_du)
-    du_part = -lambdaT_dK_x(factored, ds, lam)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    du_part = -dkx
 
     # explicit ∂vM/∂r for the group of e*. Two pieces:
     #  (1) section A,Iz,J depend on r (the stress formula);
@@ -270,7 +346,7 @@ def grad_beam_vm(factored, ds, sigma_allow):
     return con_value, grad
 
 
-def grad_beam_buckling(factored, ds, *, euler_K, safety_factor):
+def grad_beam_buckling(factored, ds, *, euler_K, safety_factor, cache: "SensCache | None" = None):
     """beam Euler-buckling feasibility constraint gradient.
 
     con = 1 − max_e(util_e), util = comp·SF/Pcr, comp=max(0,−axial),
@@ -280,7 +356,7 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor):
     n = be.shape[0]
     E = ds.model.E_beam
     utils = np.empty(n)
-    cache = []
+    rows = []
     for e in range(n):
         floc, M, dofs = _active_beam_force(factored, e)
         r = float(ds.radii_full[e])
@@ -291,10 +367,10 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor):
         Pcr = np.pi**2 * E * Iy / (euler_K * L) ** 2
         util = comp * safety_factor / max(Pcr, 1e-30)
         utils[e] = util
-        cache.append((floc, M, dofs, r, axial, comp, Pcr, util))
+        rows.append((floc, M, dofs, r, axial, comp, Pcr, util))
 
     e_star = int(np.argmax(utils))
-    floc, M, dofs, r, axial, comp, Pcr, util = cache[e_star]
+    floc, M, dofs, r, axial, comp, Pcr, util = rows[e_star]
 
     con_value = 1.0 - util
 
@@ -307,7 +383,9 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor):
     dg_du = np.zeros(factored.ndof)
     dg_du[dofs] = dutil_daxial * M[6, :]
     lam = adjoint_lambda(factored, dg_du)
-    du_part = -lambdaT_dK_x(factored, ds, lam)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    du_part = -dkx
 
     # explicit ∂util/∂r for the group of e*. Two pieces:
     #  (1) Pcr ∝ r⁴ ⇒ util ∝ r^−4 ⇒ ∂util/∂r = −4·util/r;
@@ -368,7 +446,7 @@ def _active_tri_stress(factored, ds, t):
     return s, eps, Gt, area, dofs, C_t
 
 
-def grad_skin_vm(factored, ds, sigma_allow):
+def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
     """skin von-Mises feasibility constraint gradient.
 
     con = 1 − max_t(vM_t)/σ_allow, membrane stress is thickness-independent.
@@ -377,16 +455,16 @@ def grad_skin_vm(factored, ds, sigma_allow):
     tris = ds.model.shell_tris
     M = tris.shape[0]
     vms = np.empty(M)
-    cache = []
+    rows = []
     for t in range(M):
         s, eps, Gt, area, dofs, C_t = _active_tri_stress(factored, ds, t)
         sxx, syy, sxy = s
         vm = np.sqrt(sxx**2 - sxx * syy + syy**2 + 3.0 * sxy**2)
         vms[t] = vm
-        cache.append((s, eps, Gt, area, dofs, C_t, vm))
+        rows.append((s, eps, Gt, area, dofs, C_t, vm))
 
     t_star = int(np.argmax(vms))
-    s, eps, Gt, area, dofs, C_t, vm = cache[t_star]
+    s, eps, Gt, area, dofs, C_t, vm = rows[t_star]
     sxx, syy, sxy = s
     con_value = 1.0 - vm / sigma_allow
 
@@ -401,7 +479,9 @@ def grad_skin_vm(factored, ds, sigma_allow):
     dg_du = np.zeros(factored.ndof)
     dg_du[dofs] = dg_ds @ (C_t @ Gt)
     lam = adjoint_lambda(factored, dg_du)
-    du_part = -lambdaT_dK_x(factored, ds, lam)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    du_part = -dkx
 
     # explicit f terms (no t term: membrane stress is thickness-independent)
     b = int(ds.band_of_tri[t_star])
@@ -417,7 +497,7 @@ def grad_skin_vm(factored, ds, sigma_allow):
     return con_value, grad
 
 
-def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas):
+def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas, cache: "SensCache | None" = None):
     """skin (panel) buckling feasibility constraint gradient.
 
     con = 1 − max_t(util_t), util = comp·SF/σcr, comp=max(0,−s_min),
@@ -427,7 +507,7 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas):
     M = tris.shape[0]
     SF = safety_factor
     utils = np.empty(M)
-    cache = []
+    rows = []
     for t in range(M):
         s, eps, Gt, area, dofs, C_t = _active_tri_stress(factored, ds, t)
         sxx, syy, sxy = s
@@ -441,11 +521,11 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas):
         sigma_cr = panel_kc * np.pi**2 * Qeff00 * tt**2 / (12.0 * b2)
         util = comp * SF / max(sigma_cr, 1e-30)
         utils[t] = util
-        cache.append((s, eps, Gt, area, dofs, C_t, comp, R, sigma_cr, util, tt, Qeff00))
+        rows.append((s, eps, Gt, area, dofs, C_t, comp, R, sigma_cr, util, tt, Qeff00))
 
     t_star = int(np.argmax(utils))
     (s, eps, Gt, area, dofs, C_t, comp, R, sigma_cr, util, tt,
-     Qeff00) = cache[t_star]
+     Qeff00) = rows[t_star]
     sxx, syy, sxy = s
     con_value = 1.0 - util
 
@@ -467,7 +547,9 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas):
     dg_du = np.zeros(factored.ndof)
     dg_du[dofs] = dutil_ds @ (C_t @ Gt)
     lam = adjoint_lambda(factored, dg_du)
-    du_part = -lambdaT_dK_x(factored, ds, lam)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    du_part = -dkx
 
     # explicit t: util ∝ 1/σcr ∝ 1/t² ⇒ ∂util/∂t = −2·util/t
     b = int(ds.band_of_tri[t_star])
@@ -499,7 +581,7 @@ def _Teps(theta_deg):
     ])
 
 
-def grad_skin_tsai_wu(factored, ds, *, safety_factor):
+def grad_skin_tsai_wu(factored, ds, *, safety_factor, cache: "SensCache | None" = None):
     """Per-ply Tsai-Wu skin feasibility constraint gradient.
 
     con = min_R/SF − 1, where min_R is the minimum Tsai-Wu strength ratio over all
@@ -559,13 +641,15 @@ def grad_skin_tsai_wu(factored, ds, *, safety_factor):
     dg_du = np.zeros(factored.ndof)
     dg_du[dofs] = dR_du
     lam = adjoint_lambda(factored, dg_du)
-    dR_dx = -lambdaT_dK_x(factored, ds, lam)  # explicit term is zero
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    dR_dx = -dkx  # explicit term is zero
 
     grad = dR_dx / SF
     return con_value, grad
 
 
-def grad_tip_defl(factored, ds):
+def grad_tip_defl(factored, ds, cache: "SensCache | None" = None):
     """g = max tip ||u_trans||; returns (g, grad (nx,)). Explicit term is 0."""
     u = factored.u.reshape(-1, 6)
     tip = ds.model.tip_nodes
@@ -577,11 +661,13 @@ def grad_tip_defl(factored, ds):
     dg_du = np.zeros(factored.ndof)
     dg_du[6 * node:6 * node + 3] = uhat
     lam = adjoint_lambda(factored, dg_du)
-    grad = -lambdaT_dK_x(factored, ds, lam)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    grad = -dkx
     return g, grad
 
 
-def grad_tip_twist(factored, ds):
+def grad_tip_twist(factored, ds, cache: "SensCache | None" = None):
     """g = max tip |u_twist (dof 5)|; returns (g, grad (nx,)). Explicit term is 0."""
     u = factored.u.reshape(-1, 6)
     tip = ds.model.tip_nodes
@@ -593,5 +679,7 @@ def grad_tip_twist(factored, ds):
     dg_du = np.zeros(factored.ndof)
     dg_du[6 * node + 5] = s
     lam = adjoint_lambda(factored, dg_du)
-    grad = -lambdaT_dK_x(factored, ds, lam)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
+    grad = -dkx
     return g, grad

@@ -312,6 +312,69 @@ def test_grad_beam_buckling_matches_fd():
     assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
 
 
+# --- Task 1 (caching): SensCache equivalence ---
+
+
+def _adjoint_small_case():
+    """Build a small (factored, ds) pair exercising radius, thickness AND layup DVs.
+
+    Uses a datum offset and >=2 thickness bands (with >=2 layup groups) so the
+    band/layup-group dv-index plumbing in the cache is genuinely exercised, not
+    just the all-zeros degenerate case.
+    """
+    from wing_design.materials.unidir import laminate_stiffness_offset
+
+    m, group_of_element, G, n, M, beam_lengths, loads = _adjoint_case()
+    x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
+    offset_deg = 20.0
+
+    t = float(x0[G]); f0 = float(x0[G + 1]); f45 = float(x0[G + 2])
+    f90 = 1.0 - f0 - f45
+    radii_full = x0[:G][group_of_element]
+    secs = [BeamSection.circular(float(r)) for r in radii_full]
+    _A, _D, Qeff = laminate_stiffness_offset(
+        T700_EPOXY, f0=f0, f45=f45, f90=f90, thickness=t, offset_deg=offset_deg
+    )
+    A = t * Qeff; D = (t**3 / 12.0) * Qeff
+    fac = solve_beam_shell_laminate_factored(
+        m.nodes, m.beam_elements, secs, m.shell_tris,
+        E_beam=m.E_beam, G_beam=m.G_beam, A_skin=A, D_skin=D,
+        fixed_nodes=m.fixed_nodes, loads=loads,
+    )
+
+    # 2 thickness bands, 2 layup groups (alternate triangles) so band/layup
+    # dv-indexing is exercised. All bands share the same physical t/Qeff here
+    # (single solve), but the dv-index bookkeeping differs per band/group.
+    band_of_tri = (np.arange(M) % 2).astype(int)
+    layup_group_of_band = np.array([0, 1], dtype=int)
+    ds = DesignSens(
+        model=m, G=G, B=2, L=2,
+        group_of_element=group_of_element,
+        band_of_tri=band_of_tri,
+        layup_group_of_band=layup_group_of_band,
+        radii_full=radii_full,
+        beam_lengths=beam_lengths,
+        t_tri=np.full(M, t),
+        Qeff_tri=np.broadcast_to(Qeff, (M, 3, 3)).copy(),
+        offset_tri=np.full(M, offset_deg),
+        ply=T700_EPOXY,
+    )
+    return fac, ds
+
+
+def test_cached_lambdaT_dK_x_matches_uncached():
+    from wing_design.beams.sensitivity import (
+        prepare_sensitivity, lambdaT_dK_x, lambdaT_dK_x_cached,
+    )
+    factored, ds = _adjoint_small_case()
+    rng = np.random.default_rng(0)
+    lam = rng.normal(size=factored.ndof)
+    cache = prepare_sensitivity(ds, factored)
+    a = lambdaT_dK_x(factored, ds, lam)
+    b = lambdaT_dK_x_cached(cache, lam, factored.u)
+    assert np.allclose(a, b, atol=1e-12, rtol=0.0)
+
+
 # --- Task 5: skin von-Mises + panel buckling gradients (FD-validated) ---
 from wing_design.beams.sensitivity import grad_skin_vm, grad_panel_buckling
 from wing_design.structural.shell import (
