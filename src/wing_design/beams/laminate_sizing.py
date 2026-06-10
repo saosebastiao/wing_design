@@ -755,6 +755,14 @@ class MultiStartResult:
     start_feasible: tuple[bool, ...]
 
 
+def _multistart_worker(args):
+    """Top-level worker (picklable) for the process-parallel start map (V.0.4)."""
+    model, load_arrays, config, ply, rho, maxiter, ftol, x0, panel_pressures = args
+    return size_beam_shell_laminate(model, load_arrays, config, ply=ply, rho=rho,
+                                    maxiter=maxiter, ftol=ftol, x0=x0,
+                                    panel_pressures=panel_pressures)
+
+
 def size_beam_shell_laminate_multistart(
     model: BeamShellModel,
     load_arrays,
@@ -766,14 +774,18 @@ def size_beam_shell_laminate_multistart(
     seed: int = 0,
     maxiter: int = 80,
     ftol: float = 1.0e-4,
+    n_workers: int | None = None,
+    panel_pressures: list[np.ndarray] | None = None,
 ) -> MultiStartResult:
     """Run the sizer from ``n_starts`` initial guesses; return the best feasible result.
 
     Start 0 is the sizer's default guess (so the result is never worse than a single
     start); starts 1.. are uniform-random within the design bounds (per-group
     simplex-projected), from a seeded RNG (deterministic for a given ``seed``). The
-    start loop is a serial map (swappable for multiprocessing). Selection: min-mass among
-    feasible results (``laminate_result_is_feasible``); if none feasible, min-mass overall
+    start map is serial by default; ``n_workers > 1`` (V.0.4) fans the starts over a
+    process pool — identical results to serial (starts are independent and the start
+    list is generated up front from the seed). Selection: min-mass among feasible
+    results (``laminate_result_is_feasible``); if none feasible, min-mass overall
     with ``n_feasible == 0``.
     """
     if n_starts < 1:
@@ -802,12 +814,19 @@ def size_beam_shell_laminate_multistart(
         return x
 
     starts = [make_start(k) for k in range(n_starts)]
-    # Serial map (swap for multiprocessing.Pool.map later without interface change).
-    results = [
-        size_beam_shell_laminate(model, load_arrays, config, ply=ply, rho=rho,
-                                 maxiter=maxiter, ftol=ftol, x0=s)
-        for s in starts
-    ]
+    if n_workers is not None and n_workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        jobs = [(model, load_arrays, config, ply, rho, maxiter, ftol, s, panel_pressures)
+                for s in starts]
+        with ProcessPoolExecutor(max_workers=min(n_workers, n_starts)) as pool:
+            results = list(pool.map(_multistart_worker, jobs))
+    else:
+        results = [
+            size_beam_shell_laminate(model, load_arrays, config, ply=ply, rho=rho,
+                                     maxiter=maxiter, ftol=ftol, x0=s,
+                                     panel_pressures=panel_pressures)
+            for s in starts
+        ]
     feasible = [laminate_result_is_feasible(r, config) for r in results]
     masses = [float(r.mass_kg) for r in results]
 

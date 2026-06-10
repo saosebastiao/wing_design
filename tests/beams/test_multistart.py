@@ -92,7 +92,7 @@ def test_multistart_selects_best_feasible(monkeypatch):
     feas =   [True, True, False, True]
     calls = {"i": 0}
 
-    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None, panel_pressures=None):
         i = calls["i"]; calls["i"] += 1
         buck = 1.7 if not feas[i] else 0.9
         return _result(mass_kg=masses[i], max_beam_buckling_util=buck)
@@ -111,7 +111,7 @@ def test_multistart_selects_best_feasible(monkeypatch):
 def test_multistart_deterministic(monkeypatch):
     seen = []
 
-    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None, panel_pressures=None):
         # mass depends on x0 so different starts differ; record x0 to check determinism
         seen.append(None if x0 is None else float(np.sum(x0)))
         m = 10.0 if x0 is None else float(5.0 + np.sum(x0))
@@ -131,7 +131,7 @@ def test_multistart_deterministic(monkeypatch):
 def test_multistart_start0_is_default(monkeypatch):
     x0s = []
 
-    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None, panel_pressures=None):
         x0s.append(x0)
         return _result(mass_kg=10.0)
 
@@ -153,7 +153,7 @@ def test_multistart_random_starts_on_simplex(monkeypatch):
     from wing_design.beams.shell_sizing import beam_radius_groups
     captured = []
 
-    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None):
+    def fake(model, loads, config, *, ply, rho, maxiter, ftol, x0=None, panel_pressures=None):
         captured.append(x0)
         return _result(mass_kg=10.0)
 
@@ -169,3 +169,29 @@ def test_multistart_random_starts_on_simplex(monkeypatch):
     for x in captured[1:]:  # start 0 is None (default)
         assert x is not None and x.shape[0] == G + B + 2 * L
         assert np.all(x[f0_lo:f0_lo + L] + x[f45_lo:f45_lo + L] <= 1.0 + 1e-9)
+
+
+@pytest.mark.sizing  # real (tiny) SLSQP runs in subprocesses
+def test_parallel_multistart_matches_serial():
+    # V.0.4: the process-pool map must reproduce the serial map exactly — starts
+    # are generated up front from the seed and are independent.
+    import numpy as np
+    from wing_design.geometry import small_wingsail
+    from wing_design.materials.unidir import T700_EPOXY
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.laminate_sizing import (
+        LaminateSizingConfig, size_beam_shell_laminate_multistart)
+
+    model = build_beam_shell_model(small_wingsail, n_beams=4, n_levels=3)
+    loads = np.zeros((model.nodes.shape[0], 6))
+    loads[model.tip_nodes, 2] = 400.0
+    loads[model.tip_nodes, 0] = 200.0
+    cfg = LaminateSizingConfig(
+        sigma_allow_Pa=1.0e9, tip_defl_max_m=1.0, tip_twist_max_deg=90.0,
+        buckling_safety_factor=1.5, use_analytic_jacobian=True)
+    kw = dict(ply=T700_EPOXY, rho=1550.0, n_starts=3, seed=7, maxiter=40)
+    ser = size_beam_shell_laminate_multistart(model, [loads], cfg, **kw)
+    par = size_beam_shell_laminate_multistart(model, [loads], cfg, n_workers=3, **kw)
+    assert par.start_masses == ser.start_masses
+    assert par.best_start_index == ser.best_start_index
+    assert par.best.mass_kg == ser.best.mass_kg
