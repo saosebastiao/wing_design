@@ -784,9 +784,11 @@ def size_beam_shell_laminate_multistart(
     simplex-projected), from a seeded RNG (deterministic for a given ``seed``). The
     start map is serial by default; ``n_workers > 1`` (V.0.4) fans the starts over a
     process pool — identical results to serial (starts are independent and the start
-    list is generated up front from the seed). Selection: min-mass among feasible
-    results (``laminate_result_is_feasible``); if none feasible, min-mass overall
-    with ``n_feasible == 0``.
+    list is generated up front from the seed). NOTE: with ``n_workers > 1`` the
+    calling script MUST guard its entry point with ``if __name__ == "__main__":``
+    (macOS uses spawn, which re-imports the main module in every worker). Selection:
+    min-mass among feasible results (``laminate_result_is_feasible``); if none
+    feasible, min-mass overall with ``n_feasible == 0``.
     """
     if n_starts < 1:
         raise ValueError(f"n_starts must be >= 1, got {n_starts}")

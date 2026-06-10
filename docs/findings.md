@@ -18,13 +18,18 @@ Small wingsail (5 m span, NACA 0018, n_beams=16, n_levels=8) progression:
 | + span ply datum, no buckling (E.4b) | 19.0 kg | deflection + twist | `28_ply_datum.py` |
 | **Fully constrained:** datum + buckling SF 1.5 | **30.15 kg** | beam + panel buckling | `32_final_design.py` |
 | + 4 spanwise thickness bands | **27.67 kg** (−8.1% vs its 30.11 kg uniform re-run) | tip twist | `33_banded_skin.py` |
+| **V.6 re-baseline (2026-06-10):** strip-width buckling + gravity/heel + distributed pressure, eigen-verified | **25.13 kg** (4-band, λ_cr 2.00) | twist + beam + panel buckling | `49_rebaseline.py` |
 
-Medium wingsail (22 m span; symmetric+monotonic radii, span datum, 4 bands, buckling SF 1.5):
+Medium wingsail (22 m span; symmetric+monotonic radii, span datum, buckling SF 1.5):
 
 | Run | Mass | Notes | Example |
 | --- | --- | --- | --- |
-| FD Jacobian | 2316.6 kg | converged feasible, 1 h 22 m | `37_sized_export.py` |
-| Analytic Jacobian (free tip, even spacing) | **2264.6 kg** | ~2% better basin than FD | `39_tip_gusset.py` |
+| FD Jacobian (4-band) | 2316.6 kg | converged feasible, 1 h 22 m | `37_sized_export.py` |
+| Analytic Jacobian (free tip, 4-band) | 2264.6 kg | ~2% better basin than FD; legacy `b=√area` checks | `39_tip_gusset.py` |
+| **V.6 re-baseline (2026-06-10):** strip + gravity/heel + pressure, eigen-verified | **2248.0 kg** (1-band, λ_cr 2.26) | twist + beam + panel buckling | `49_rebaseline.py` |
+
+The V.6 numbers are the **current headlines** (all Phase-P levers measure against
+them); pre-V.6 numbers are historical (legacy `b=√area` buckling, aero-only loads).
 
 ## The governing-physics picture (cross-cutting findings)
 
@@ -804,6 +809,33 @@ Pressure–compression buckling interaction and Tsai-Wu bending remain recorded
 caveats (spec 2026-06-10-panel-pressure-design.md). (198 s + 232 s + 232 s
 measured, analytic Jacobian.)
 
+**V.6 re-baseline done (2026-06-10) — new headlines: small 25.13 kg / medium
+2248.0 kg, all eigen-verified; the honest model is now LIGHTER than the old one
+(strip-width fix outweighs the gravity penalty).** `examples/49_rebaseline.py`,
+the post-sprint standard configuration: strip-width panel buckling (V.3b) +
+upright/30°-heel gravity with the λᵀ·∂f/∂x term (V.4; slam deferred by user
+decision) + skin-distributed projection + strip-bending guard (V.5) + span-datum
+CLT + beam Euler SF 1.5, analytic Jacobian, 16×8. All four runs converged AND
+feasible, each eigen-verified over every load combo: **small 1-band 25.65 kg
+(λ_cr 2.14, 165 s) / small 4-band 25.13 kg (λ_cr 2.00, 239 s)** — vs the old
+27.67 kg banded headline, **−9.2% net of gravity**; **medium 1-band 2248.0 kg
+(λ_cr 2.26, 784 s) / medium 4-band 2345.9 kg (λ_cr 2.44, 466 s)**. **4-band
+anomaly (recorded honestly):** warm-started from the 1-band optimum, the 4-band
+run converged +4.4% heavier in a different basin (beam-buckling-dominated, skin
+thickened to 4.6–6.2 mm, panel constraint slack, beam-buck SF shadow price
++1201 kg/SF) — since the 1-band design is admissible in the 4-band space, the
+**defensible medium headline is 2248.0 kg (1-band)**; the P#9 12-start parallel
+multi-start on the 4-band config is running to settle whether banding still pays
+under the new constraint set (banding's −8.1% was measured under `b=√area`
+panel buckling, which strip mode just removed — the lever may genuinely be gone).
+Shadow prices on the new medium baseline: twist −50.7 kg/deg (binding, still the
+cheapest requirement), beam-buck SF +531 kg/SF (now the dominant SF — the strip
+fix moved the price from panels to beams), panel-buck SF +68 kg/SF, deflection
+free. **Artifacts (milestone):** `exports/rebaseline_medium_beams.stl` (lens
+beams, radii densified 8→40 levels) + `exports/rebaseline_medium_worst_mode.vtu`;
+regenerate via `just example 49_rebaseline`. All Phase-P levers measure against
+these numbers. (165+239+784+466 s sizing + eigen seconds, measured.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -842,6 +874,7 @@ measured, analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.6 re-baseline (2026-06-10) | New eigen-verified headlines under the honest model (strip widths + upright/heel gravity + distributed pressure): **small 25.13 kg** (4-band, λ 2.00; −9.2% vs old 27.67) / **medium 2248.0 kg** (1-band, λ 2.26; old 4-band 2264.6 not comparable — legacy checks, aero-only). Medium 4-band landed +4.4% heavier in a beam-buck-dominated basin (warm start included) → banding's value under strip-mode buckling unresolved, P#9 multistart running. Beam-buck SF is now the dominant price (+531 kg/SF) — beams are the next physics to attack (P.1 hollow members). STL + worst-mode VTU exported (`just example 49_rebaseline`). |
 | Slam envelope deferred (2026-06-10) | DECISION (user): the 1 g lateral slam case (V#12; ex-47 diagnostic: → +110%, infeasible at maxiter 400) is re-introduced only AFTER the Phase-P performance harvest (hollow members, etc.) lightens/strengthens the structure. V.6 standard load set stays aero × {upright, 30° heel} gravity. When re-introduced: warm-start from the gravity optimum; IPOPT if SLSQP stalls. |
 | V.5 panel pressure + bending (2026-06-10) | Skin-distributed projection (force-conserving CST lumping) −1.6% vs node-lumped = neutral (noise floor) but adopted as V.6 standard. Strip-bending failure term σ_b = 0.75qw²/t²: zero effect at medium scale (skin vM 34 vs 1100 MPa — strength margin ~30×); kept as guard for thin-skin/high-pressure/large-scale regimes. Buckling-pressure interaction + Tsai-Wu bending deferred (caveats recorded). |
 | V.4 self-weight/inertial (2026-06-10) | `accel_vectors` body loads (mass lumped per evaluate) + the λᵀ·∂f/∂x adjoint term (FD-validated ≤2e-4; also the P.2 prerequisite). Medium strip baseline 2006.3 → **2316.9 kg (+15.5%)** with upright + 30° heel gravity (converged/feasible). 1 g lateral slam: diagnostic — unconverged/infeasible at maxiter 400, mass heading +110% → slam envelope deferred to the V#12 requirements decision; V.6 default = upright + heel only. |

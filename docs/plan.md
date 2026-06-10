@@ -188,8 +188,13 @@ trustworthy baseline, not the current one.
   effect at medium scale (skin strength margin ~30×) — kept as the guard for
   thin-skin / high-pressure / large-scale regimes. Buckling–pressure interaction +
   Tsai-Wu bending deferred (recorded). `examples/48_panel_pressure.py`. (V#4)
-- **V.6 Re-baseline.** Re-run the small and medium headlines with V.4/V.5 active; all
-  Phase-P levers are measured against these numbers.
+- **V.6 Re-baseline. — DONE (2026-06-10).** New eigen-verified headlines (strip +
+  upright/heel gravity + distributed pressure; slam deferred): **small 25.13 kg
+  (4-band, λ_cr 2.00) / medium 2248.0 kg (1-band, λ_cr 2.26)**. Medium 4-band found
+  only a worse basin (+4.4%) — banding under strip-mode buckling is being settled by
+  the P#9 parallel multistart. Beam-buckling SF now carries the dominant shadow
+  price (+531 kg/SF) → P.1 hollow members is the right next lever. Artifacts
+  exported (`examples/49_rebaseline.py`). All P-levers measure against these.
 
 Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
 Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built
