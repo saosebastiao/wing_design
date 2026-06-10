@@ -25,12 +25,16 @@ def body_load_vector(model, radii, t_tri, *, rho: float, accel,
     nodes = model.nodes
     out = np.zeros((nodes.shape[0], 6))
     be = model.beam_elements
-    if areas is None:
-        areas = np.pi * np.asarray(radii, dtype=float) ** 2
+    r = np.asarray(radii, dtype=float)
     for e in range(be.shape[0]):
         i, j = int(be[e, 0]), int(be[e, 1])
         L = float(np.linalg.norm(nodes[j] - nodes[i]))
-        m_half = 0.5 * rho * float(areas[e]) * L
+        if areas is None:
+            # exact original product association — regrouping via an areas array
+            # is a 1-ulp change that shifts cold-start basins (P.0 ulp lesson)
+            m_half = 0.5 * rho * np.pi * r[e] ** 2 * L
+        else:
+            m_half = 0.5 * rho * float(areas[e]) * L
         out[i, :3] += m_half * a
         out[j, :3] += m_half * a
     tris = model.shell_tris

@@ -186,9 +186,17 @@ def size_beam_shell_laminate(
     (Tsai-Wu mode keeps membrane-only — recorded caveat). None = unchanged."""
     if not load_arrays:
         raise ValueError("load_arrays is empty")
-    gusset_elements = model.tip_gusset_elements
-    gusset_section = (BeamSection.circular(model.tip_gusset_radius)
-                     if gusset_elements is not None else None)
+    # Extra stiff massless elements assembled into K but excluded from force
+    # recovery and mass: the opt-in tip gusset and (P.1) the tube->beam bonds.
+    # One shared section: the solver takes a single gusset array, so compose.
+    _extra = [e for e in (model.tip_gusset_elements,
+                          getattr(model, "tube_bond_elements", None)) if e is not None]
+    gusset_elements = np.vstack(_extra) if _extra else None
+    if gusset_elements is not None:
+        _r_bond = max(filter(None, (model.tip_gusset_radius, 0.05)))
+        gusset_section = BeamSection.circular(_r_bond)
+    else:
+        gusset_section = None
     n = model.beam_elements.shape[0]
     B = config.n_skin_bands
     L = B if config.per_band_layup else 1
