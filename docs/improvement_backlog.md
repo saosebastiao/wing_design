@@ -304,6 +304,56 @@ Ranked by expected leverage.*
 
 ---
 
+## 4. Toolbox & architecture improvements
+
+*Goal: the codebase and toolchain stay sound as Phases V/M/P repeatedly extend the
+sizing core. From the toolbox audit (2026-06-09). The library choices themselves were
+audited and confirmed: roll-your-own FEA is right at this scale and with custom
+adjoints; AeroSandbox, build123d, CP-SAT, and scipy.sparse all fit their roles.*
+
+1. **Constraint + design-vector extensibility refactor (do between Phase V and Phase
+   P).** `size_beam_shell_laminate` is a 482-line function (`laminate_sizing.py:129–610`)
+   bundling DV layout, constraint assembly, analytic-Jacobian wiring, optimizer call,
+   and post-solve; **adding one constraint touches ~6 places** (evaluate loop,
+   constraint closure, scipy dict, sensitivity.py gradient, Jacobian registration with
+   manual idx bookkeeping, result dataclass), and the hand-indexed design vector
+   `x = [r_groups | t_bands | f0 | f45]` means every new DV block touches every unpack
+   site. Performance #1/#2 each add DV blocks *and* constraints. Refactor scope: a
+   named-block `DesignVector` (pack/unpack once) + a small `Constraint` object (value,
+   optional analytic gradient, feasibility entry) consumed by one driver loop. Schedule
+   after V.3 (its new constraint shape informs the design), before P.1.
+2. **CI + example smoke layer.** No `.github/` exists; the unit suite (fast — long runs
+   live in examples/) never runs automatically, and the numbered examples — the
+   project's measurement record — have no guard against API drift. Add a GitHub Actions
+   workflow (uv + pytest) and a smoke suite running 2–3 representative examples at
+   maxiter≈10 / tiny mesh.
+3. **Feature-flag interaction coverage.** `LaminateSizingConfig` has 6 opt-in flags;
+   combinations like `per_band_layup × tsai_wu` and `per_band_layup × ply_angle_datum`
+   are never exercised. Add a pairwise smoke matrix (tiny mesh, maxiter≈5, assert
+   runs + sane shapes).
+4. **Optimizer headroom: planned IPOPT fallback, not an emergency.** SLSQP (dense
+   active-set) already needed O(1) normalization and has stalled on recorded runs; its
+   cost grows with DV count. Notable: **casadi 3.7.2 ships in the venv via AeroSandbox
+   and bundles IPOPT** — an interior-point, sparse-friendly, multiplier-native NLP
+   solver one import away (or via cyipopt). Trigger to switch: convergence trouble
+   returns or DVs grow past ~150 (Performance #1/#2 territory). Until then, SLSQP +
+   the V.0 speed work is the plan.
+5. **Dependency & tooling hygiene.** `gmsh` is imported (`structural/mesh.py:97`) but
+   undeclared in pyproject (works by venv accident) — declare it. Add ruff (and the
+   basedpyright config the docs already assume) to the dev group.
+6. **Freeze the legacy sizers.** `sizing.py` and `shell_sizing.py` share ~20–40%
+   structural duplication with the laminate path; they are live (phase examples/tests)
+   but should be explicitly frozen as historical baselines — new features go to the
+   laminate path only (already the de-facto policy; make it stated).
+7. **Autodiff (JAX/casadi): no, with a trigger.** The hand adjoint is FD-validated and
+   cached; a rewrite re-litigates 27 sensitivity tests for speculative benefit.
+   Reconsider element-kernel-level autodiff only if the sensitivity surface keeps
+   growing (e.g. `∂f_pre/∂x` prestress terms plus eigenvalue derivatives plus core/wall
+   buckling gradients all landing). Eigenvalue-buckling gradients alone don't force it
+   (clean hand formula: `φᵀ(∂K/∂x + λ ∂Kσ/∂x)φ`).
+
+---
+
 ## Suggested sequence
 
 Validity first — three of the fixes (panel pressure, self-weight, D11 direction) could
@@ -318,7 +368,10 @@ baseline:
    alongside.
 3. Add self-weight + panel pressure; re-baseline the small and medium headlines
    (Validity #4, #5).
-4. Harvest in leverage order against the re-baselined numbers: hollow members (core
+4. Do the constraint/design-vector refactor (Toolbox #1) — after V.3's constraint
+   shape is known, before any harvest lever adds DV blocks. CI + smoke layers
+   (Toolbox #2/#3) can land any time alongside.
+5. Harvest in leverage order against the re-baselined numbers: hollow members (core
    tube first, then straight beam segments) → prestress + spreaders/webs → sandwich
    skin → n_beams sweep — one lever at a time, recording findings as before.
 

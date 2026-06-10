@@ -120,6 +120,11 @@ change) except KS, which is testable.
 - **V.0.6 Opportunistic cleanups.** The uncached `_beam_vm_grad_one` path; sparse
   Cholesky instead of `splu` only if the profile shows factorization mattering at
   finer meshes.
+- **V.0.7 Engineering guardrails.** GitHub Actions CI for the (fast) unit suite; an
+  example smoke layer (2–3 representative examples at maxiter≈10 / tiny mesh); a
+  pairwise config-flag smoke matrix (untested combos exist, e.g. `per_band_layup ×
+  tsai_wu`); declare `gmsh` in pyproject. Land any time — these guard the V/M/P code
+  churn. (Toolbox #2, #3, #5)
 
 V.0.1 runs now; the rest pull in as the profile directs. Don't block V.1 on this —
 shadow prices is a few independent lines.
@@ -182,6 +187,15 @@ any "as-built" headline claim; later items can interleave with Phase P.
 One lever at a time, each against the V.6 re-baselined numbers, finding recorded
 before the next lever starts.
 
+- **P.0 Sizer extensibility refactor (gate for P.1/P.2).** `size_beam_shell_laminate`
+  is a 482-line function where adding a constraint touches ~6 places and the design
+  vector is hand-indexed — the wrong shape for P.1/P.2, which each add DV blocks *and*
+  constraints. Introduce a named-block `DesignVector` (pack/unpack once) and a small
+  `Constraint` object (value, optional analytic gradient, feasibility entry) consumed
+  by one driver loop. Do after V.3 (its constraint shape informs the design); behavior-
+  preserving (existing tests + a headline re-run must reproduce). If SLSQP struggles as
+  DVs grow, the documented fallback is IPOPT (already on disk via casadi/AeroSandbox).
+  (Toolbox #1, #4)
 - **P.1 Hollow members.** New member type: the straight filament-wound **core tube**
   (permanent structural mandrel) with `r(z)`, `t_wall(z)` DVs + wall-buckling/crimping
   check. If the tube alone doesn't capture the win, add straight in-wing wound beam
