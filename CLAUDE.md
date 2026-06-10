@@ -47,6 +47,15 @@ load-bearing skin, sized FEA-in-the-loop. Scales 1 m drone wing → 100 m turbin
 - `justfile-tasks` — project task runner recipes and how to extend them.
 - `ortools-cp` — CP-SAT modeling (stock catalog / discrete selection).
 
+## Pending upgrade
+
+- **Python 3.14 when build123d > 0.10.0 releases.** We're on 3.13; 3.14 is blocked
+  solely by build123d 0.10.0 (`requires-python <3.14`, OCP pin `<7.9`). cp314 OCP
+  wheels already exist and build123d's dev branch already supports `<3.15` + OCP 7.9.
+  When a new build123d release appears: bump `requires-python` to `>=3.14,<3.15` and
+  `.python-version` to 3.14, `uv lock && uv sync`, run the full suite, commit. 3.14
+  carries the real interpreter gains (tail-call interpreter, incremental GC).
+
 ## Layout notes
 
 - `examples/` numbered scripts are the measurement record; not run in CI.

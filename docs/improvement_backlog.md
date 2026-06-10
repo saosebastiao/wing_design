@@ -342,7 +342,11 @@ adjoints; AeroSandbox, build123d, CP-SAT, and scipy.sparse all fit their roles.*
    the V.0 speed work is the plan.
 5. **Dependency & tooling hygiene.** `gmsh` is imported (`structural/mesh.py:97`) but
    undeclared in pyproject (works by venv accident) — declare it. Add ruff (and the
-   basedpyright config the docs already assume) to the dev group.
+   basedpyright config the docs already assume) to the dev group. **Python: on 3.13
+   (2026-06-09, suite green 160/160); upgrade to 3.14 when build123d > 0.10.0
+   releases** — it's the sole blocker (`<3.14` + OCP `<7.9`; cp314 OCP wheels exist,
+   build123d dev already supports `<3.15`). See CLAUDE.md "Pending upgrade" for the
+   bump recipe.
 6. **Freeze the legacy sizers.** `sizing.py` and `shell_sizing.py` share ~20–40%
    structural duplication with the laminate path; they are live (phase examples/tests)
    but should be explicitly frozen as historical baselines — new features go to the
