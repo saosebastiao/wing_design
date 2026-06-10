@@ -760,6 +760,31 @@ V.4/V.5 load additions come first (V.6 re-baseline). CAD of the strip optimum is
 exportable via the example-37 sized-export path with `panel_width_mode="strip"`.
 (321 s baseline + 193 s strip re-size + eigen seconds; analytic Jacobian.)
 
+**V.4 self-weight + inertial loads done (2026-06-10) — gravity costs +15.5% on the
+medium strip baseline; a 1 g lateral slam is envelope-dominating and goes to the
+V#12 requirements decision.** `beams/body_loads.py` lumps the design's own mass to
+nodes under arbitrary acceleration vectors (`LaminateSizingConfig.accel_vectors`,
+cross-product with the aero cases; loads rebuilt every evaluate since they depend
+on the design), and the analytic adjoint gains the **`λᵀ·∂f/∂x` design-dependent-
+load term** — every touched gradient FD-validated at rel-err ≤ 2e-4
+(`tests/beams/test_body_loads.py`; this term is also the prerequisite the P.2
+prestress machinery would have needed). `examples/47_self_weight.py`, medium 16×8
+strip-mode (V.3b config): **A aero-only 2006.3 kg** (reproduces the V.3b optimum
+exactly; 145 iters, 201 s) → **B + upright & 30°-heel gravity 2316.9 kg = +15.5%**
+(converged AND feasible, 260 iters, 720 s, twist + both bucklings binding) →
+**C + 1 g lateral slam: DIAGNOSTIC, not a result** — unconverged AND infeasible at
+maxiter 400 (4219.4 kg and still beam-buckling-violated, 2127 s): the
+static-equivalent slam roughly doubles structural demand. **Why:** the 2.3-tonne,
+22 m cantilever's own weight under heel is a first-order bending load exactly as
+backlog V#5 predicted ([↑]); a >1 g lateral acceleration doubles the lateral load
+envelope on a structure whose binding constraints were set by aero bending.
+**Decisions:** (1) upright + heel gravity join the standard load set (V.6
+re-baseline includes them); (2) the slam static-equivalent is a **requirements
+question (V#12)** — excluded from the V.6 default pending an envelope decision
+(options: justified lower factor, dynamic analysis, or accepting the ~2× mass);
+(3) warm-start C from B and/or IPOPT if the envelope keeps it. (201 s + 720 s +
+2127 s measured, analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -798,6 +823,7 @@ exportable via the example-37 sized-export path with `panel_width_mode="strip"`.
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.4 self-weight/inertial (2026-06-10) | `accel_vectors` body loads (mass lumped per evaluate) + the λᵀ·∂f/∂x adjoint term (FD-validated ≤2e-4; also the P.2 prerequisite). Medium strip baseline 2006.3 → **2316.9 kg (+15.5%)** with upright + 30° heel gravity (converged/feasible). 1 g lateral slam: diagnostic — unconverged/infeasible at maxiter 400, mass heading +110% → slam envelope deferred to the V#12 requirements decision; V.6 default = upright + heel only. |
 | V.3b width-based panels (2026-06-10) | Opt-in `panel_width_mode="strip"`: b = physical chordwise beam spacing (median 0.449 vs 0.897 m √area surrogate). Calibration: implied capacity 5.14× at the old optimum ≈ converged eigen 5.7 (conservative side). Harvest: medium 1-band **2471.4 → 2006.3 kg (−18.8%)**, converged+feasible; twist now co-binds. Eigen verify of new optimum: λ_cr 2.286 ≥ 1.5. Fixes V#1 level + ∝n scaling → P.4 unlocked. Default stays sqrt_area until V.6 re-baseline (after V.4/V.5). kc=4 edge + V#2 direction caveats open. |
 | V.0.7 CI split (2026-06-10) | `sizing` pytest marker assigned from measured durations (19 tests ≥5 s; top 192/166/99 s). Fast job: 149 tests / **12.2 s measured** on every push/PR; sizing job on main pushes + nightly (uv, locked sync). Full suite green 168/168 post-cache-fix. Example smoke layer + flag matrix still open; example 14 broken (meshio gone from venv) — smoke layer would have caught it. |
 | V.3 eigenvalue buckling (2026-06-10) | K+Kσ linear buckling built + reference-validated (columns ≤0.2%, plate kc=4 ≤5%). Medium optimum: worst λ_cr = 2.443 vs the closed-form's claimed 1.5 → ≥1.6× conservative; λ rises to 5.67 on finer meshes of the same design (stress-field redistribution + no nodes between beam lines) → 2.44 is a lower bound. Worst mode = distributed skin-normal waving. Pretension moves λ 2.443→2.445 (null at this optimum) → P.2 demoted. Even γ=0.65 knockdown × 2.443 = 1.59 ≥ 1.5 → design not deficient; conservatism is harvestable. Next: width-based panel check calibrated by eigen (fixes level + ∝n scaling), then P.4. |

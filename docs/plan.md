@@ -176,8 +176,12 @@ trustworthy baseline, not the current one.
   (V#2) deliberately left open; kc=4 SS-edge caveat documented. Default flips to
   "strip" at the V.6 re-baseline; P.4 unlocked. `examples/46_width_based_panels.py`.
   (V#1)
-- **V.4 Self-weight + inertial/heel load cases.** First-order for the 2.3-tonne medium
-  cantilever. (V#5)
+- **V.4 Self-weight + inertial/heel load cases. — DONE (2026-06-10).**
+  `accel_vectors` body loads + the λᵀ·∂f/∂x adjoint term (FD-validated).
+  Measured: +15.5% on the medium strip baseline with upright + 30° heel gravity
+  (2006.3 → 2316.9 kg). The 1 g lateral slam static-equivalent is envelope-dominating
+  (diagnostic: → +110%, unconverged) — **deferred to the V#12 load-envelope
+  decision**; V.6 standard set = upright + heel. `examples/47_self_weight.py`. (V#5)
 - **V.5 Distributed panel pressure + skin bending stress in the failure check.**
   Panels currently receive no pressure; DKT bending moments are recovered but unused.
   (V#4)
