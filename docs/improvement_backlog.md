@@ -43,6 +43,13 @@ discussion, 2026-06-09):
   layers at any orientation; targeted UD reinforcement plies applied last.
 - **Root/spar section** — weight non-critical (low and inboard); beams slot into a
   solid (e.g. forged-carbon) socket and bond.
+- **Shape constraints (added 2026-06-09):** hollow sections are only buildable on
+  **completely straight** members — e.g. the core tube can be wound to any radius that
+  fits inside the wing, with radius *and* wall thickness varying along the span, but it
+  cannot easily be curved. A wound member must be **convex about its winding axis**
+  along its whole path; non-convex beam paths (e.g. the LE/TE beams where they curve
+  out from the rotational spar through the transition) cannot be filament wound and
+  must be cast.
 - **Assembly sequence** — (1) make beams → (2) assemble truss in the winder →
   (3) place/bond/wrap webs and cross-members → (4) wind the skin (winding tension binds
   the beams) → (5) targeted reinforcement plies.
@@ -144,12 +151,14 @@ discussion, 2026-06-09):
    swing-radius access). Constrain layup fractions to windable angle sets per region;
    longer term, Phase G's planner should feed the *as-wound* per-region orientation map
    back into the CLT (already the Phase G intent).
-4. **Beam section moldability.** Sized beams must respect the casting concept: female
-   mold + CNC tow feed implies extractable (draft-positive, "flat"-constrained)
-   cross-sections. If hollow/tube beams are adopted (Performance #1), reconcile with
-   the build: wound-over-sacrificial-core channels naturally make hollow sections; cast
-   beams need a trapped or extractable core. Add section-shape constraints to the
-   geometry stage rather than discovering them at mold design.
+4. **Beam section + path manufacturability.** Sized beams must respect the build:
+   cast beams need extractable female molds (draft-positive, "flat"-constrained
+   cross-sections); wound beams must be **convex about the winding axis along their
+   whole path**, which rules out winding the LE/TE beams where they curve out from the
+   spar — those are cast. Hollow sections only on completely straight members (see
+   Performance #1 for the split). Add section-shape and path-convexity classification
+   to the geometry stage — each beam tagged cast-vs-wound, solid-vs-hollow — rather
+   than discovering the limits at mold design.
 5. **Wrap-joint model for member junctions.** Cross-members are attached by local
    filament wraps (wrap two beams together). Characterize the wrap joint's stiffness,
    strength, and **mass per joint**, and use it as the bond representation in Validity
@@ -180,13 +189,24 @@ discussion, 2026-06-09):
 *Goal: phenomenally lightweight, strong enough for the anticipated conditions.
 Ranked by expected leverage.*
 
-1. **Hollow (tube) beam sections. [↓, likely the biggest single lever]** Beams are
-   *solid* rods — A=πr², I=πr⁴/4 (`frame.py:36–40`), 585 kg of the medium design, with
-   Euler buckling binding. Buckling/stiffness-governed members are the textbook case
-   for tubes: at equal mass a tube with R/t≈10 has ~25–50× the I of a solid rod. Needs
-   a wall-buckling/crimping check and a second section DV (wall thickness or fixed
-   R/t). The wound-channel build (Manufacturing concept) naturally produces hollow
-   sections. Plausible −10–15% total mass on the medium design even after local checks.
+1. **Hollow sections where the build allows them. [↓, likely the biggest single
+   lever]** Beams are *solid* rods — A=πr², I=πr⁴/4 (`frame.py:36–40`), 585 kg of the
+   medium design, with Euler buckling binding. Buckling/stiffness-governed members are
+   the textbook case for tubes: at equal mass a tube with R/t≈10 has ~25–50× the I of a
+   solid rod. **The build constrains where hollow is possible** (Manufacturing concept
+   shape constraints): only completely straight members, and wound members must be
+   convex about the winding axis. So the lever splits into:
+   (a) **the straight wound core tube** — promoted from "optional" to the prime hollow
+   candidate: radius and wall thickness free to taper along the span, carrying spanwise
+   bending/torsion as a proper closed section. Model as a new member type bonded to
+   beams/webs (new DVs: r(z), t_wall(z)).
+   (b) **straight in-wing beam segments** wound hollow: on the linearly-tapered planform
+   the surface beam paths between root and tip are ruled (near-straight) lines — verify
+   against the actual splines — joined by wrap joints to
+   (c) **cast solid curved segments** through the spar transition, which stay solid.
+   Needs wall-buckling/crimping checks for any hollow member and joint checks at the
+   straight↔curved splices. Plausible −10–15% total mass on the medium design even
+   after local checks, with (a) likely the cleanest path.
 2. **Skin prestress via winding tension + compression cross-members (tensegrity
    section). [↓, potentially large]** The arbitrage: skin strength margin is ~7× while
    panel buckling binds, and tensile prestress raises effective panel buckling capacity
@@ -258,9 +278,9 @@ baseline:
    alongside.
 3. Add self-weight + panel pressure; re-baseline the small and medium headlines
    (Validity #4, #5).
-4. Harvest in leverage order against the re-baselined numbers: tube beams → prestress +
-   spreaders/webs → sandwich skin → n_beams sweep — one lever at a time, recording
-   findings as before.
+4. Harvest in leverage order against the re-baselined numbers: hollow members (core
+   tube first, then straight beam segments) → prestress + spreaders/webs → sandwich
+   skin → n_beams sweep — one lever at a time, recording findings as before.
 
 The meta-observation: layout levers are mined out because buckling governs. The
 remaining step-changes all attack *what kind of section resists buckling* — hollow
