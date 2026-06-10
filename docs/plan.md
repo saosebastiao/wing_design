@@ -227,15 +227,12 @@ any "as-built" headline claim; later items can interleave with Phase P.
 One lever at a time, each against the V.6 re-baselined numbers, finding recorded
 before the next lever starts.
 
-- **P.0 Sizer extensibility refactor (gate for P.1/P.2).** `size_beam_shell_laminate`
-  is a 482-line function where adding a constraint touches ~6 places and the design
-  vector is hand-indexed — the wrong shape for P.1/P.2, which each add DV blocks *and*
-  constraints. Introduce a named-block `DesignVector` (pack/unpack once) and a small
-  `Constraint` object (value, optional analytic gradient, feasibility entry) consumed
-  by one driver loop. Do after V.3 (its constraint shape informs the design); behavior-
-  preserving (existing tests + a headline re-run must reproduce). If SLSQP struggles as
-  DVs grow, the documented fallback is IPOPT (already on disk via casadi/AeroSandbox).
-  (Toolbox #1, #4)
+- **P.0 Sizer extensibility refactor. — DONE (2026-06-10).** `DesignVector`
+  (named-block x layout) + `ConstraintSpec` (one list entry per constraint; scipy
+  dicts, Jacobian registration, and shadow-price attribution derive from it).
+  Behavior-preserving verified: 189 tests green + the V.6 medium headline reproduced
+  bit-exactly. IPOPT fallback unchanged (trigger: SLSQP stalls or DVs > ~150 — watch
+  during P.1). (Toolbox #1, #4)
 - **P.1 Hollow members.** New member type: the straight filament-wound **core tube**
   (permanent structural mandrel) with `r(z)`, `t_wall(z)` DVs + wall-buckling/crimping
   check. If the tube alone doesn't capture the win, add straight in-wing wound beam
