@@ -25,31 +25,38 @@ order-of-magnitude guesses to be measured, not predictions.
 The manufacturability items assume this intended build process (recorded from design
 discussion, 2026-06-09):
 
-- **Outer form beams** — either **cast UD** (female mold, CNC-fed unidirectional tow,
-  closed mold, epoxy injection, cure — implies moldable/flat-extractable beam
-  cross-sections) or **filament wound** into sacrificial-core female mold channels on a
-  winder whose rotational axis spans the wing (chord must fit the swing radius).
-- **Cross-member beams** — either method; if wound, **access ordering** applies (inner
-  members must be placed before outer members). Joined to beams by **local filament
-  wraps** (wrap two members together at a junction), not only wet adhesive.
-- **Shear webs** — CNC-cut pre-manufactured CFRP panels (possibly sandwich-cored),
-  slotted into place and bonded to the beams.
-- **Optional tube core** — a large filament-wound hollow tube as a *non-sacrificial*
-  structural core; beams/webs bond to it, and sacrificial mold channels on it locate
-  wound beams.
-- **Skin** — filament wound. **The first layer wraps LE→TE→back around the section,
-  deliberately creating a compressive binding tension around the beams** (i.e. skin
-  prestress is an intended manufacturing feature, not a hypothetical). Subsequent
-  layers at any orientation; targeted UD reinforcement plies applied last.
+- **Outer form beams** — either **resin transfer molded (RTM)**: a dry
+  unidirectional-tow **preform** laid into a closed matched-die (female cavity) mold by
+  CNC tow placement, mold closed, resin injected, cured — implies extractable
+  (draft-positive) beam cross-sections; or **filament wound** over a **washout
+  (sacrificial) mandrel** carrying female mold channels, on a winder whose spindle axis
+  spans the wing (the chord must fit the swing envelope).
+- **Cross-member beams** — either process; if wound, **assembly-sequence access
+  ordering** applies (inner members must be placed before outer members). Joined to
+  beams by **wrapped joints** — local filament overwinds tying two members together at
+  a junction (**co-bonded** when wound wet over cured members), not only a wet adhesive
+  bond.
+- **Shear webs** — CNC-cut pre-cured CFRP panels (possibly sandwich-cored), slotted
+  into place and **secondary-bonded** to the beams.
+- **Optional tube core** — a large filament-wound tube left in as a **permanent
+  structural mandrel**; beams/webs bond to it, and sacrificial mold channels on it
+  locate wound beams.
+- **Skin** — a filament-wound overwrap. **The first layer is a hoop (circumferential)
+  wind — LE→TE→back around the section — deliberately retaining winding tension as a
+  compressive binding force around the beams** (i.e. skin prestress is an intended
+  manufacturing feature, not a hypothetical). Wound wet over the cured frame, so the
+  skin–beam joints are **co-bonded**. Subsequent layers at any windable orientation;
+  **local UD doubler plies** applied last for targeted reinforcement.
 - **Root/spar section** — weight non-critical (low and inboard); beams slot into a
-  solid (e.g. forged-carbon) socket and bond.
+  solid socket — e.g. **compression-molded chopped-fiber CFRP ("forged" carbon)** —
+  and are adhesively bonded.
 - **Shape constraints (added 2026-06-09):** hollow sections are only buildable on
   **completely straight** members — e.g. the core tube can be wound to any radius that
   fits inside the wing, with radius *and* wall thickness varying along the span, but it
   cannot easily be curved. A wound member must be **convex about its winding axis**
-  along its whole path; non-convex beam paths (e.g. the LE/TE beams where they curve
-  out from the rotational spar through the transition) cannot be filament wound and
-  must be cast.
+  along its whole path; on non-convex paths the tow **bridges** the concave regions
+  (fiber bridging), so such beams (e.g. the LE/TE beams where they curve out from the
+  rotational spar through the transition) cannot be filament wound and must be RTM'd.
 - **Assembly sequence** — (1) make beams → (2) assemble truss in the winder →
   (3) place/bond/wrap webs and cross-members → (4) wind the skin (winding tension binds
   the beams) → (5) targeted reinforcement plies.
@@ -141,8 +148,8 @@ discussion, 2026-06-09):
    ~3–4 wound plies (~0.25 mm/ply) and may not be realizable. Add a post-sizing
    **ply-rounding + FEA re-verify** pass (same spirit as the CP-SAT stock catalog +
    bump-and-reverify for beams, which already exists at `beams/select_stock_sizes`).
-2. **Mandatory first-layer hoop wrap.** The build *requires* layer 1 to wrap LE→TE→back
-   (the binding/prestress layer). Encode a minimum chordwise-ply thickness floor in the
+2. **Mandatory first-layer hoop wind.** The build *requires* layer 1 to be a hoop
+   (circumferential) wind LE→TE→back (the binding/prestress layer). Encode a minimum chordwise-ply thickness floor in the
    layup variables. Helpfully, the optimizer already favors chordwise fiber (E.4b found
    100% chordwise optimal), so this constraint should be nearly free — verify rather
    than assume.
@@ -152,17 +159,17 @@ discussion, 2026-06-09):
    longer term, Phase G's planner should feed the *as-wound* per-region orientation map
    back into the CLT (already the Phase G intent).
 4. **Beam section + path manufacturability.** Sized beams must respect the build:
-   cast beams need extractable female molds (draft-positive, "flat"-constrained
+   RTM'd beams need extractable matched-die molds (draft-positive, "flat"-constrained
    cross-sections); wound beams must be **convex about the winding axis along their
-   whole path**, which rules out winding the LE/TE beams where they curve out from the
-   spar — those are cast. Hollow sections only on completely straight members (see
-   Performance #1 for the split). Add section-shape and path-convexity classification
-   to the geometry stage — each beam tagged cast-vs-wound, solid-vs-hollow — rather
-   than discovering the limits at mold design.
-5. **Wrap-joint model for member junctions.** Cross-members are attached by local
-   filament wraps (wrap two beams together). Characterize the wrap joint's stiffness,
-   strength, and **mass per joint**, and use it as the bond representation in Validity
-   #8 — the model currently has no joint at all.
+   whole path** (fiber bridging otherwise), which rules out winding the LE/TE beams
+   where they curve out from the spar — those are RTM'd. Hollow sections only on
+   completely straight members (see Performance #1 for the split). Add section-shape
+   and path-convexity classification to the geometry stage — each beam tagged
+   RTM-vs-wound, solid-vs-hollow — rather than discovering the limits at mold design.
+5. **Wrapped-joint model for member junctions.** Cross-members are attached by
+   wrapped joints (local filament overwinds tying two members together). Characterize
+   the joint's stiffness, strength, and **mass per joint**, and use it as the bond
+   representation in Validity #8 — the model currently has no joint at all.
 6. **Assembly-order constraints on internal members.** Wound cross-members have
    inner-before-outer access ordering, and shear webs must be slottable with the truss
    already in the winder. Any optimizer that places internal members (Performance
@@ -202,8 +209,8 @@ Ranked by expected leverage.*
    beams/webs (new DVs: r(z), t_wall(z)).
    (b) **straight in-wing beam segments** wound hollow: on the linearly-tapered planform
    the surface beam paths between root and tip are ruled (near-straight) lines — verify
-   against the actual splines — joined by wrap joints to
-   (c) **cast solid curved segments** through the spar transition, which stay solid.
+   against the actual splines — joined by wrapped joints to
+   (c) **RTM'd solid curved segments** through the spar transition, which stay solid.
    Needs wall-buckling/crimping checks for any hollow member and joint checks at the
    straight↔curved splices. Plausible −10–15% total mass on the medium design even
    after local checks, with (a) likely the cleanest path.
