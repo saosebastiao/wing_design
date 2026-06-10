@@ -495,9 +495,14 @@ def test_grad_skin_vm_matches_fd_offset():
     assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
 
 
-def _run_panel_buckling(offset_deg):
+def _run_panel_buckling(offset_deg, use_strip_widths=False):
     m, group_of_element, G, n, M, beam_lengths, loads = _skin_case()
-    areas = _tri_areas(m)
+    if use_strip_widths:
+        # V.3b strip mode: b^2 = physical panel width^2 enters where area did.
+        from wing_design.beams.shell_model import skin_panel_widths
+        areas = skin_panel_widths(m) ** 2
+    else:
+        areas = _tri_areas(m)
     x0 = np.concatenate([np.linspace(0.011, 0.014, G), [0.0015, 1.0 / 3.0, 1.0 / 3.0]])
     nx = G + 1 + 2
 
@@ -537,6 +542,13 @@ def test_grad_panel_buckling_matches_fd():
 
 def test_grad_panel_buckling_matches_fd_offset():
     grad, fd = _run_panel_buckling(offset_deg=30.0)
+    assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
+
+
+def test_grad_panel_buckling_matches_fd_strip_widths():
+    # V.3b: the strip width is design-independent, so the analytic gradient must
+    # stay exact when widths^2 replaces triangle areas as b^2.
+    grad, fd = _run_panel_buckling(offset_deg=30.0, use_strip_widths=True)
     assert np.allclose(grad, fd, rtol=2e-4, atol=1e-4 * np.abs(fd).max())
 
 

@@ -118,6 +118,40 @@ def model_with_tip_gusset(model: BeamShellModel, radius: float) -> BeamShellMode
                                tip_gusset_elements=tip_clique_elements(model.tip_nodes))
 
 
+def skin_panel_widths(model: BeamShellModel) -> np.ndarray:
+    """(n_tris,) physical panel-strip width per skin triangle (V.3b, backlog V#1).
+
+    Each triangle lies in the quad strip between adjacent beams b and b+1 (the
+    `skin_triangles` tiling); the physical compression panel is the *long strip*
+    between those beam lines, whose plate-buckling stress is set by the strip
+    WIDTH — the chordwise distance between the two bounding beams at that station
+    (mean of the quad's two level widths) — not by `sqrt(triangle area)`, which
+    mis-scales with beam count (∝n vs ∝n² physically) and over-sizes b ~2× on the
+    medium mesh. Beam membership is recovered from the node ids (b*n_levels + k).
+    """
+    nl = model.n_levels
+    tris = model.shell_tris
+    out = np.empty(tris.shape[0])
+    for e in range(tris.shape[0]):
+        beams = tris[e] // nl
+        levels = tris[e] % nl
+        uniq = np.unique(beams)
+        if uniq.size != 2:   # degenerate (shouldn't happen on this tiling)
+            n0, n1, n2 = (int(v) for v in tris[e])
+            _R, _loc, area = _triangle_local_frame(model.nodes[n0], model.nodes[n1],
+                                                   model.nodes[n2])
+            out[e] = np.sqrt(area)
+            continue
+        b0, b1 = int(uniq[0]), int(uniq[1])
+        ks = np.unique(levels)
+        w = 0.0
+        for k in ks:
+            w += float(np.linalg.norm(model.nodes[b0 * nl + int(k)]
+                                      - model.nodes[b1 * nl + int(k)]))
+        out[e] = w / ks.size
+    return out
+
+
 def skin_datum_angles(model: BeamShellModel, datum_dir=(0.0, 0.0, 1.0)) -> np.ndarray:
     """(n_tris,) angle [rad] from each skin triangle's local x-axis to ``datum_dir``,
     measured in the triangle's plane.

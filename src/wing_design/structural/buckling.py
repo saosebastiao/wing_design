@@ -42,18 +42,27 @@ def panel_buckling_utilization(
     t: float,
     kc: float = 4.0,
     safety_factor: float = 1.0,
+    b_widths: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-panel plate-buckling utilization = (compressive principal stress·SF) / σcr.
 
-    σcr = kc·π²·D11 / (b²·t), b = sqrt(area). `membrane_stress` is (M,3) [σxx,σyy,σxy];
-    the most-compressive principal stress drives buckling. Tension panels return 0.
-    Approximate (triangle-as-plate, fixed kc) — see module docstring.
+    σcr = kc·π²·D11 / (b²·t). Default b = sqrt(area) (historical; mis-scales with
+    beam count and over-sizes b — backlog V#1). Pass ``b_widths`` (per-panel physical
+    strip widths, `beams.shell_model.skin_panel_widths`) for the V.3b width-based
+    check — the long-strip SS plate formula with the chordwise beam spacing as b,
+    eigen-calibrated 2026-06-10. `membrane_stress` is (M,3) [σxx,σyy,σxy]; the
+    most-compressive principal stress drives buckling. Tension panels return 0.
+    Caveats: fixed kc=4 assumes simply-supported edges (flexible beam edges may be
+    softer); D11 is the triangle-local-frame value (direction mismatch V#2 open).
     """
     s = np.asarray(membrane_stress, dtype=float)
     mean = 0.5 * (s[:, 0] + s[:, 1])
     radius = np.sqrt(0.25 * (s[:, 0] - s[:, 1]) ** 2 + s[:, 2] ** 2)
     s_min = mean - radius
     comp = np.maximum(0.0, -s_min)
-    b = np.sqrt(np.maximum(np.asarray(areas, dtype=float), 1e-30))
-    sigma_cr = kc * np.pi**2 * D11 / (b**2 * t)
+    if b_widths is not None:
+        b2 = np.maximum(np.asarray(b_widths, dtype=float), 1e-30) ** 2
+    else:
+        b2 = np.maximum(np.asarray(areas, dtype=float), 1e-30)
+    sigma_cr = kc * np.pi**2 * D11 / (b2 * t)
     return comp * safety_factor / np.maximum(sigma_cr, 1e-30)

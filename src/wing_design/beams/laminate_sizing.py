@@ -39,7 +39,7 @@ from .sensitivity import (
 from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
-from .shell_model import BeamShellModel, skin_datum_angles
+from .shell_model import BeamShellModel, skin_datum_angles, skin_panel_widths
 from .shell_sizing import (
     beam_lengths, beam_mass, beam_radius_groups, skin_areas, skin_band_areas,
     skin_band_map, skin_mass,
@@ -58,6 +58,12 @@ class LaminateSizingConfig:
     buckling_safety_factor: float | None = None  # if set, enforce beam Euler + panel buckling
     euler_K: float = 1.0
     panel_kc: float = 4.0
+    # Panel-buckling characteristic width b: "sqrt_area" (historical triangle-as-
+    # plate; mis-scales with beam count, ~2x oversized b — backlog V#1) or "strip"
+    # (V.3b: physical chordwise beam spacing via `skin_panel_widths`, the long-strip
+    # SS-plate model, eigen-calibrated 2026-06-10). Default unchanged for
+    # comparability with recorded headlines until the V.6 re-baseline.
+    panel_width_mode: str = "sqrt_area"
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -207,6 +213,15 @@ def size_beam_shell_laminate(
     group_of_element, G = beam_radius_groups(model)
     Lb = beam_lengths(model)
     Atri = skin_areas(model)
+    # Effective b^2 for the panel-buckling check (the only consumer of "areas"
+    # in both the evaluate path and grad_panel_buckling, so the analytic
+    # Jacobian stays exact in either mode).
+    if config.panel_width_mode == "strip":
+        b2_panel = skin_panel_widths(model) ** 2
+    elif config.panel_width_mode == "sqrt_area":
+        b2_panel = Atri
+    else:
+        raise ValueError(f"unknown panel_width_mode: {config.panel_width_mode!r}")
     A_skin_area = float(Atri.sum())
     band_of_tri = skin_band_map(model, B)
     band_area = skin_band_areas(model, band_of_tri, B)
@@ -330,7 +345,7 @@ def size_beam_shell_laminate(
             if config.buckling_safety_factor is not None:
                 bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
                                             K=config.euler_K, safety_factor=config.buckling_safety_factor)
-                pu = panel_buckling_utilization(skin_s, Atri, D11=D11, t=t_tri,
+                pu = panel_buckling_utilization(skin_s, b2_panel, D11=D11, t=t_tri,
                                                 kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
@@ -621,7 +636,7 @@ def size_beam_shell_laminate(
                 return _binding_grad(
                     x, lambda fac, ds, cache: grad_panel_buckling(
                         fac, ds, panel_kc=config.panel_kc,
-                        safety_factor=config.buckling_safety_factor, areas=Atri, cache=cache)).reshape(1, nx)
+                        safety_factor=config.buckling_safety_factor, areas=b2_panel, cache=cache)).reshape(1, nx)
 
             constraints[idx]["jac"] = beam_buck_con_jac
             constraints[idx + 1]["jac"] = panel_buck_con_jac
