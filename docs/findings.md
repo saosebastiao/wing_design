@@ -588,6 +588,32 @@ used ad-hoc Z penalty springs to pass a tip-Z-spread test; a probe showed the sk
 already makes tip-Z-spread ~0, so that test was meaningless — replaced with the clean
 model + this honest measurement.)
 
+### Phase V.0 — Iteration-speed enablers
+
+**V.0.1 profile + beam-Jacobian cache fix done (2026-06-10) — ~23× faster medium
+gradient path (exact, no formulation change).** `examples/41_profile_sizing.py`
+cProfiles 10 SLSQP iterations of the medium 16×8 analytic-Jacobian sizing (the
+example-32 config). Profile verdict: **93% of wall-clock was `beam_con_jac`** — each
+of the n=112 vector-vM rows called the *uncached* `lambdaT_dK_x`, rebuilding every
+triangle stiffness derivative per row (`tri_element_stiffness_laminate`: 856,576
+calls / 148 s cumulative in 10 iterations); assembly+solve was ~12 s and `splu`,
+SLSQP, and the closed-form buckling checks were ~0 — so the suspected per-element
+assembly loops were NOT the wall, the known-uncached `_beam_vm_grad_one` path was
+(plan V.0.6, flagged in the analytic-Jacobian-caching decision row). Fix: thread the
+per-design-point `SensCache` (already built in `_build_jac`, previously discarded by
+`beam_con_jac`) into `_beam_vm_grad_one` → `lambdaT_dK_x_cached`. Exact: all 21
+sensitivity-FD + analytic-vs-FD equivalence tests pass unchanged. **Measured:**
+profiled self-time 181.8 → 19.8 s for the same 10 iterations (9.2× like-for-like);
+raw uninflated wall **1.13 s/iter** vs ~26 s/iter on the recorded 1h22m/187-iter
+medium run (**~23×**). A full 300-iter medium sizing now projects to ~6 min.
+**Why:** the SensCache contraction replaces ~3×695 18×18 element-stiffness rebuilds
+per constraint row with cached dots; the rebuild cost was paid n_beam_elements times
+per gradient evaluation. Post-fix profile: K assembly 24%, shell recovery 17%,
+sensitivity 10% of a now-small total — no single dominator left, so **V.0.2
+(vectorize assembly) and V.0.3 (KS aggregation) are deprioritized** until a measured
+wall reappears (KS's n back-substitutions now cost ~1.7 s per 10 iterations).
+(Profile runs: 3 m 09 s before / 23 s after, measured 2026-06-10.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -626,4 +652,5 @@ model + this honest measurement.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.0.1 profile → cache fix (2026-06-10) | cProfile of 10 medium SLSQP iters (examples/41): 93% of wall = uncached `_beam_vm_grad_one` rebuilding triangle ∂K per beam-vM row. Fixed by threading the existing `SensCache` through `beam_con_jac` (exact; 21 equivalence/FD tests unchanged). 1.13 s/iter raw vs ~26 s/iter recorded → ~23×; medium sizing now ~minutes. V.0.2 vectorization + V.0.3 KS deprioritized — no dominant wall remains; re-profile before investing further. |
 | Python 3.13 migration (2026-06-09) | `requires-python >=3.13,<3.14` (was `<3.13`), `.python-version` 3.13, lock regenerated; **full suite green 160/160 in 19 m 30 s** (measured — suite is NOT fast; CI needs a fast/slow marker split). 3.14 blocked solely by build123d 0.10.0 (`<3.14` + OCP `<7.9`; cp314 OCP wheels exist, build123d dev branch already supports `<3.15`+7.9) — bump when its next release ships. |

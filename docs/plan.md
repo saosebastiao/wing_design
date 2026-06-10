@@ -97,19 +97,17 @@ loops run every evaluate** (K assembly, SensCache build, adjoint contraction, st
 recovery). Items V.0.2–V.0.5 compose multiplicatively and are exact (no formulation
 change) except KS, which is testable.
 
-- **V.0.1 Profile first (the gate).** py-spy/cProfile a few SLSQP iterations of the
-  medium problem; rank assembly vs cache build vs back-subs vs recovery. Runtime
-  estimates run ~10× off — the profile decides whether V.0.2 or V.0.3 leads.
-- **V.0.2 Vectorize the per-element Python work** — assembly, SensCache build, and the
-  adjoint contraction as batched numpy over all elements/triangles. Helps every
-  evaluate on both FD and analytic paths; payoff grows with mesh size (V.2 pushes
-  n_levels up). Plausibly order-of-magnitude if the profile confirms the loops
-  dominate.
-- **V.0.3 KS aggregation of the vector beam constraints.** Collapses n adjoint
-  back-substitutions to 1 (the known wall, backlog P#7) and shrinks the SLSQP QP from
-  ~n stress rows to 1. KS is a smooth conservative approximation — re-validate optima
-  against the hard-max formulation (same pattern as the analytic-vs-FD equivalence
-  tests).
+- **V.0.1 Profile first (the gate). — DONE (2026-06-10).** `examples/41_profile_sizing.py`.
+  Verdict: 93% of wall was the *uncached* `_beam_vm_grad_one` path (V.0.6), not general
+  assembly. Fixed (SensCache threaded through `beam_con_jac`, exact): **1.13 s/iter raw
+  vs ~26 s/iter recorded ≈ 23×**; medium sizing now ~6 min. See findings.md.
+- **V.0.2 Vectorize the per-element Python work** — DEPRIORITIZED after the V.0.1 fix:
+  post-fix profile shows no dominant wall (assembly 24%, shell recovery 17%, sensitivity
+  10% of a small total). Re-profile before investing here (payoff returns if V.2 pushes
+  n_levels up).
+- **V.0.3 KS aggregation of the vector beam constraints.** DEPRIORITIZED after the
+  V.0.1 fix: the n back-substitutions cost ~1.7 s per 10 medium iterations now.
+  Reconsider only if fine meshes (V.2) or DV growth (P.1/P.2) bring the wall back.
 - **V.0.4 Process-parallel multi-start and sweeps.** The multistart wrapper is
   "serial, parallel-ready"; V.2 and P.4 are embarrassingly parallel across points.
   A process pool gives near-linear core scaling with no numerical work.
@@ -117,9 +115,10 @@ change) except KS, which is testable.
   starts from its neighbor's optimum; fine meshes start from resampled coarse-mesh
   solutions (the `resample_segment_radii` pattern). Attacks iteration *count*, which
   V.0.2–V.0.4 don't touch (examples 39/40 already proved warm-starting converges).
-- **V.0.6 Opportunistic cleanups.** The uncached `_beam_vm_grad_one` path; sparse
-  Cholesky instead of `splu` only if the profile shows factorization mattering at
-  finer meshes.
+- **V.0.6 Opportunistic cleanups.** ~~The uncached `_beam_vm_grad_one` path~~ (DONE
+  2026-06-10 — this WAS the wall; see V.0.1); sparse Cholesky instead of `splu` only
+  if the profile shows factorization mattering at finer meshes (it doesn't today:
+  `splu` ≈ 0.3 s / 10 medium iterations).
 - **V.0.7 Engineering guardrails.** GitHub Actions CI — but with a fast/slow split:
   the full suite **measured 19 m 30 s** (160 tests, 2026-06-09, Python 3.13), so CI
   needs a pytest marker separating fast unit tests (every push) from the SLSQP sizing
