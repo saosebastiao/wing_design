@@ -87,6 +87,43 @@ Each phase ends in a runnable example under `examples/` and a passing smoke test
 wall-clock for every sizing run. Backlog references (V#/M#/P#) point into
 [`improvement_backlog.md`](./improvement_backlog.md).
 
+### Phase V.0 — Iteration-speed enablers
+
+Phase V multiplies the number of sizing runs (mesh sweeps, re-baselines) and Phase P
+adds parameter sweeps and multi-start; at ~1.5 h per medium sizing, compute speed is
+the rate limiter on the whole plan. The FEA system is tiny (768 DOF — `splu` is
+microseconds), so wall-clock is almost certainly dominated by **per-element Python
+loops run every evaluate** (K assembly, SensCache build, adjoint contraction, stress
+recovery). Items V.0.2–V.0.5 compose multiplicatively and are exact (no formulation
+change) except KS, which is testable.
+
+- **V.0.1 Profile first (the gate).** py-spy/cProfile a few SLSQP iterations of the
+  medium problem; rank assembly vs cache build vs back-subs vs recovery. Runtime
+  estimates run ~10× off — the profile decides whether V.0.2 or V.0.3 leads.
+- **V.0.2 Vectorize the per-element Python work** — assembly, SensCache build, and the
+  adjoint contraction as batched numpy over all elements/triangles. Helps every
+  evaluate on both FD and analytic paths; payoff grows with mesh size (V.2 pushes
+  n_levels up). Plausibly order-of-magnitude if the profile confirms the loops
+  dominate.
+- **V.0.3 KS aggregation of the vector beam constraints.** Collapses n adjoint
+  back-substitutions to 1 (the known wall, backlog P#7) and shrinks the SLSQP QP from
+  ~n stress rows to 1. KS is a smooth conservative approximation — re-validate optima
+  against the hard-max formulation (same pattern as the analytic-vs-FD equivalence
+  tests).
+- **V.0.4 Process-parallel multi-start and sweeps.** The multistart wrapper is
+  "serial, parallel-ready"; V.2 and P.4 are embarrassingly parallel across points.
+  A process pool gives near-linear core scaling with no numerical work.
+- **V.0.5 Warm-start continuation as standard sweep protocol.** Each sweep point
+  starts from its neighbor's optimum; fine meshes start from resampled coarse-mesh
+  solutions (the `resample_segment_radii` pattern). Attacks iteration *count*, which
+  V.0.2–V.0.4 don't touch (examples 39/40 already proved warm-starting converges).
+- **V.0.6 Opportunistic cleanups.** The uncached `_beam_vm_grad_one` path; sparse
+  Cholesky instead of `splu` only if the profile shows factorization mattering at
+  finer meshes.
+
+V.0.1 runs now; the rest pull in as the profile directs. Don't block V.1 on this —
+shadow prices is a few independent lines.
+
 ### Phase V — Validity hardening
 
 Make the model behave like the real structure before harvesting levers. Three of
@@ -111,9 +148,6 @@ trustworthy baseline, not the current one.
   (V#4)
 - **V.6 Re-baseline.** Re-run the small and medium headlines with V.4/V.5 active; all
   Phase-P levers are measured against these numbers.
-
-Enabler on call: **KS aggregation of the vector beam constraint** (collapses n adjoint
-back-substitutions to 1) — pull in whenever V/P runs feel slow. (P#7)
 
 Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
 Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built
