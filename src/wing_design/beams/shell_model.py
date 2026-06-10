@@ -55,6 +55,19 @@ class BeamShellModel:
     t_skin: float
     tip_gusset_elements: np.ndarray | None = None
     tip_gusset_radius: float | None = None
+    # P.1 core tube: rows of `beam_elements` that are tube segments (annular
+    # sections sized by the r_tube/t_wall DV blocks), the per-segment outer-radius
+    # fit bounds (inscribed-circle bound at the segment's wider end), and the
+    # stiff massless tube->beam bond pairs (assembled via the gusset path:
+    # excluded from force recovery and mass).
+    tube_elements: np.ndarray | None = None        # (S,) indices into beam_elements
+    tube_r_bounds: np.ndarray | None = None        # (S,)
+    tube_bond_elements: np.ndarray | None = None   # (M, 2) node pairs
+
+    @property
+    def n_form_elements(self) -> int:
+        """Count of form-beam elements (tube rows, if any, come after)."""
+        return self.n_beams * (self.n_levels - 1)
 
 
 def build_beam_shell_model(
@@ -69,8 +82,18 @@ def build_beam_shell_model(
     skin_thickness: float = 0.003,
     arc_fractions: np.ndarray | None = None,
     tip_gusset_radius: float | None = None,
+    core_tube: bool = False,
+    tube_bonds_per_level: int = 4,
 ) -> BeamShellModel:
-    """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing."""
+    """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing.
+
+    ``core_tube=True`` (P.1) appends one tube node per z-level on the pivot axis
+    (X=0, Y=0), tube beam elements between consecutive levels (straight by
+    construction — the windability requirement), stiff massless bond pairs to the
+    ``tube_bonds_per_level`` nearest form-beam nodes per level, and per-segment
+    outer-radius fit bounds (0.95 x the min node distance to the axis). The tube
+    keel node joins ``fixed_nodes`` (the root-socket bond).
+    """
     if n_levels < 2:
         raise ValueError(f"n_levels must be >= 2, got {n_levels}")
     z = default_z_levels(spec, n_levels)
@@ -92,6 +115,34 @@ def build_beam_shell_model(
     G = E / (2.0 * (1.0 + nu))
     from .tip_coupling import tip_clique_elements  # local import to avoid circular dependency
     tip_gusset_elements = tip_clique_elements(tip_nodes) if tip_gusset_radius is not None else None
+
+    tube_elements = tube_r_bounds = tube_bond_elements = None
+    if core_tube:
+        n_grid = nodes.shape[0]
+        # level order follows z index k (default_z_levels runs tip->keel)
+        tube_nodes = np.array([[0.0, 0.0, float(z[k])] for k in range(n_levels)])
+        nodes = np.vstack([nodes, tube_nodes])
+        tube_node = lambda k: n_grid + k
+        n_form = beam_elements.shape[0]
+        tube_rows = [(tube_node(k), tube_node(k + 1)) for k in range(n_levels - 1)]
+        beam_elements = np.vstack([beam_elements, np.asarray(tube_rows, dtype=int)])
+        tube_elements = np.arange(n_form, n_form + n_levels - 1, dtype=int)
+        # fit bound per segment: min over the segment's two levels of the
+        # inscribed-circle bound sampled from this level's form-beam nodes.
+        level_bound = np.empty(n_levels)
+        for k in range(n_levels):
+            ring = np.array([nodes[b * n_levels + k] for b in range(n_beams)])
+            level_bound[k] = 0.95 * float(np.linalg.norm(ring[:, :2], axis=1).min())
+        tube_r_bounds = np.minimum(level_bound[:-1], level_bound[1:])
+        bonds = []
+        for k in range(n_levels):
+            ring = np.array([nodes[b * n_levels + k] for b in range(n_beams)])
+            d = np.linalg.norm(ring[:, :2], axis=1)
+            for b in np.argsort(d)[:tube_bonds_per_level]:
+                bonds.append((tube_node(k), int(b) * n_levels + k))
+        tube_bond_elements = np.asarray(bonds, dtype=int)
+        fixed_nodes = np.append(fixed_nodes, tube_node(keel_k))
+
     return BeamShellModel(
         nodes=nodes,
         beam_elements=beam_elements,
@@ -108,6 +159,9 @@ def build_beam_shell_model(
         t_skin=skin_thickness,
         tip_gusset_elements=tip_gusset_elements,
         tip_gusset_radius=tip_gusset_radius,
+        tube_elements=tube_elements,
+        tube_r_bounds=tube_r_bounds,
+        tube_bond_elements=tube_bond_elements,
     )
 
 

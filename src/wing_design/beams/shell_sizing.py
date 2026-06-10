@@ -110,7 +110,9 @@ def beam_radius_groups(model: BeamShellModel) -> tuple[np.ndarray, int]:
     nb = model.n_beams
     nl = model.n_levels
     seg = nl - 1
-    n = model.beam_elements.shape[0]
+    # form-beam elements only: tube rows (P.1), if any, come after and carry
+    # their own DV blocks (the tube sits on the symmetry axis).
+    n = getattr(model, "n_form_elements", model.beam_elements.shape[0])
     nodes = model.nodes
     scale = float(np.abs(nodes).max()) if nodes.size else 1.0
     tol = 1.0e-6 * max(1.0, scale)

@@ -39,6 +39,17 @@ class BeamSection:
         polar = 0.5 * np.pi * radius**4
         return cls(A=area, Iy=second, Iz=second, J=polar, r=radius)
 
+    @classmethod
+    def annular(cls, r_outer: float, t_wall: float) -> "BeamSection":
+        """Hollow circular tube (P.1 core tube). Exact annulus; t = r → solid."""
+        if not (0.0 < t_wall <= r_outer):
+            raise ValueError(f"need 0 < t_wall <= r_outer, got t={t_wall}, r={r_outer}")
+        ri = r_outer - t_wall
+        area = np.pi * (r_outer**2 - ri**2)
+        second = 0.25 * np.pi * (r_outer**4 - ri**4)
+        polar = 2.0 * second
+        return cls(A=area, Iy=second, Iz=second, J=polar, r=r_outer)
+
 
 @dataclass(frozen=True)
 class FrameResult:
