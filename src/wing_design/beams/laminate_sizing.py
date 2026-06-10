@@ -89,6 +89,13 @@ class LaminateSizingResult:
     max_beam_buckling_util: float
     max_panel_buckling_util: float
     min_skin_strength_ratio: float | None
+    # V.1 shadow prices: physical dm*/dparam (kg per unit of each config limit),
+    # from the SLSQP KKT multipliers. Limit-type keys ("tip_twist_max_deg",
+    # "tip_defl_max_m", "sigma_allow_Pa") are <= 0 (relaxing the limit sheds kg);
+    # safety-factor keys ("buckling_sf_beam", "buckling_sf_panel",
+    # "tsai_wu_safety_factor") are >= 0 (raising SF costs kg). None when the
+    # multiplier layout can't be attributed. Only meaningful at a converged optimum.
+    shadow_prices: dict[str, float] | None = None
 
 
 def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
@@ -124,6 +131,58 @@ def laminate_result_is_feasible(
         if result.max_panel_buckling_util > 1.0 + tol:
             return False
     return True
+
+
+def _shadow_prices(
+    multipliers,
+    *,
+    n: int,
+    L: int,
+    n_mono: int,
+    config: LaminateSizingConfig,
+    m_ref: float,
+) -> dict[str, float] | None:
+    """Convert SLSQP KKT multipliers (normalized problem) to physical shadow prices.
+
+    scipy >= 1.15 returns ``res.multipliers`` = [eq | ineq] rows in constraint-list
+    order (bounds excluded). The sizer's problem is min m/m_ref s.t. g_i >= 0 with
+    g = 1 - v/limit (limits) or 1 - SF*demand/capacity (buckling) or R/SF - 1
+    (Tsai-Wu), so at a binding constraint dm*/dlimit = -m_ref*lam/limit and
+    dm*/dSF = +m_ref*lam/SF. The beam rows share sigma_allow, so their multipliers
+    sum (non-binding rows carry lam = 0). Returns None on layout mismatch rather
+    than mis-attributing rows.
+    """
+    if multipliers is None:
+        return None
+    lam = np.asarray(multipliers, dtype=float).ravel()
+    rows = [("beam", n), ("skin", 1), ("defl", 1), ("twist", 1), ("frac", L)]
+    if n_mono > 0:
+        rows.append(("mono", n_mono))
+    if config.buckling_safety_factor is not None:
+        rows += [("beam_buck", 1), ("panel_buck", 1)]
+    if lam.size != sum(sz for _, sz in rows):
+        return None
+    grp: dict[str, np.ndarray] = {}
+    pos = 0
+    for name, sz in rows:
+        grp[name] = lam[pos:pos + sz]
+        pos += sz
+
+    out: dict[str, float] = {}
+    sigma_lam = float(grp["beam"].sum())
+    if config.skin_failure == "tsai_wu":
+        out["tsai_wu_safety_factor"] = (
+            m_ref * float(grp["skin"][0]) / config.tsai_wu_safety_factor)
+    else:
+        sigma_lam += float(grp["skin"][0])
+    out["sigma_allow_Pa"] = -m_ref * sigma_lam / config.sigma_allow_Pa
+    out["tip_defl_max_m"] = -m_ref * float(grp["defl"][0]) / config.tip_defl_max_m
+    out["tip_twist_max_deg"] = -m_ref * float(grp["twist"][0]) / config.tip_twist_max_deg
+    if config.buckling_safety_factor is not None:
+        sf = config.buckling_safety_factor
+        out["buckling_sf_beam"] = m_ref * float(grp["beam_buck"][0]) / sf
+        out["buckling_sf_panel"] = m_ref * float(grp["panel_buck"][0]) / sf
+    return out
 
 
 def size_beam_shell_laminate(
@@ -573,6 +632,11 @@ def size_beam_shell_laminate(
         options={"maxiter": maxiter, "ftol": ftol},
     )
 
+    shadow = _shadow_prices(
+        getattr(res, "multipliers", None), n=n, L=L, n_mono=int(mono_lo.size),
+        config=config, m_ref=m_ref,
+    )
+
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
     x = np.clip(res.x, lo, hi)
@@ -607,6 +671,7 @@ def size_beam_shell_laminate(
         max_beam_buckling_util=float(bbu),
         max_panel_buckling_util=float(pbu),
         min_skin_strength_ratio=(float(worst_R) if config.skin_failure == "tsai_wu" else None),
+        shadow_prices=shadow,
     )
 
 
