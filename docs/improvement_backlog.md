@@ -240,11 +240,12 @@ Ranked by expected leverage.*
    a mass lever: flat-plate kc=4 leaves real curved-panel capacity on the table in the
    constraint that sizes most of the structure. Every recovered Pa of σcr converts
    directly to thinner skin.
-7. **Finish analytic-Jacobian caching, then KS aggregation. [enabler]** The current
-   branch's caching spec is the prerequisite for items 4, 9 (validity), and 8 below.
-   Keep KS/max aggregation of the vector beam constraint on the table despite the spec
-   deferring it: after caching, n back-substitutions per `beam_con` gradient is the
-   next wall at finer meshes.
+7. **KS aggregation of the vector beam constraint. [enabler]** The ∂K caching is
+   merged (1.58×→1.98× measured) — still far below the ~n_DV ceiling, which confirms
+   the next wall: the vector-valued `beam_con` needs ~n adjoint back-substitutions per
+   gradient. A KS/soft-max aggregate collapses that to 1 adjoint, making finer meshes,
+   sweeps (item 4), and multi-start (item 9) affordable. Prerequisite-grade for the
+   validity re-baselining runs too.
 8. **Extract SLSQP Lagrange multipliers (shadow prices). [↓, near-free]** Computed by
    the optimizer, currently discarded (`laminate_sizing.py:565–569`). One run tells you
    what a degree of twist limit, a millimetre of deflection budget, or 0.1 of buckling
@@ -271,8 +272,9 @@ Validity first — three of the fixes (panel pressure, self-weight, D11 directio
 move the honest baseline *up*, and lever gains must be measured against a trustworthy
 baseline:
 
-1. Merge the analytic-Jacobian caching (current branch); extract multipliers while in
-   that code (Performance #8 — a few lines).
+1. ~~Merge the analytic-Jacobian caching~~ (done, `78c5d3d`, 1.98×). Extract Lagrange
+   multipliers while the sizer code is warm (Performance #8 — a few lines), and
+   consider KS aggregation (Performance #7) if the re-baselining runs feel slow.
 2. Mesh-convergence study + eigenvalue buckling check of the current optimum
    (Validity #1, #9). Run the 5-minute prestress post-processing probe (Performance #2)
    alongside.
