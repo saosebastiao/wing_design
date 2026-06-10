@@ -69,6 +69,7 @@ def test_feasible_check_true_and_false():
     assert laminate_result_is_feasible(_result(min_skin_strength_ratio=1.2), cfg_tw) is False
 
 
+@pytest.mark.sizing  # measured 31 s (2026-06-10)
 def test_x0_roundtrip_backward_compat():
     P, spec, model, loads = _small()
     cfg = _cfg(sigma_allow_Pa=P.sigma_allow_Pa, tip_defl_max_m=0.02 * spec.span,

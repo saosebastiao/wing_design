@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from wing_design.geometry import small_wingsail
 from wing_design.materials.unidir import T700_EPOXY
@@ -44,6 +45,7 @@ def test_clt_tailors_layup_when_twist_binds():
     assert abs(res.f0 + res.f45 + res.f90 - 1.0) < 1e-6    # valid partition
 
 
+@pytest.mark.sizing  # measured 7 s (2026-06-10)
 def test_laminate_buckling_constraint_respected():
     spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=4)

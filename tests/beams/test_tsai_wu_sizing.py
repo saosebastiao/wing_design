@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from wing_design.geometry import small_wingsail
 from wing_design.beams.shell_model import build_beam_shell_model, solve_beam_shell_model
@@ -42,6 +43,7 @@ def _scenario_small(n_beams=8, n_levels=5):
     return P, spec, model, loads
 
 
+@pytest.mark.sizing  # measured 16 s (2026-06-10)
 def test_von_mises_default_has_none_ratio():
     P, spec, model, loads = _scenario_small()
     cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,
@@ -50,6 +52,7 @@ def test_von_mises_default_has_none_ratio():
     assert r.min_skin_strength_ratio is None
 
 
+@pytest.mark.sizing  # measured 22 s (2026-06-10)
 def test_tsai_wu_feasible_and_active():
     P, spec, model, loads = _scenario_small()
     sf = 2.0

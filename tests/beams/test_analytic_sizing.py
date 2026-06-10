@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.sizing  # full SLSQP sizing runs (measured 15-99 s each)
+
 import numpy as np
 
 from wing_design.geometry import small_wingsail

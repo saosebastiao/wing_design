@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from wing_design.scenario import small_scenario
 from wing_design.beams.shell_model import build_beam_shell_model, model_with_tip_gusset
 from wing_design.beams.tip_coupling import tip_clique_elements
@@ -82,6 +83,7 @@ def _sizer_case(gusset=False, n_beams=8, n_levels=5):
     return P, m, loads, cfg
 
 
+@pytest.mark.sizing  # measured 192 s (2026-06-10)
 def test_sizer_with_gusset_feasible_not_heavier():
     P, m, loads, cfg = _sizer_case(gusset=True)
     Pn, mn, loadsn, cfgn = _sizer_case(gusset=False)
@@ -102,6 +104,7 @@ def test_sizer_with_gusset_feasible_not_heavier():
     assert rg.mass_kg <= rn.mass_kg + 2.0     # twist relief shouldn't cost mass
 
 
+@pytest.mark.sizing  # measured 34 s (2026-06-10)
 def test_analytic_jacobian_composes_with_gusset():
     P, m, loads, cfg = _sizer_case(gusset=True)
     cfg_an = LaminateSizingConfig(sigma_allow_Pa=cfg.sigma_allow_Pa, tip_defl_max_m=cfg.tip_defl_max_m,

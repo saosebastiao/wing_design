@@ -31,3 +31,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "sizing: SLSQP/FEA sizing test (slow; runs in the separate CI sizing job, not on every push)",
+]

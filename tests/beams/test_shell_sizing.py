@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from wing_design.geometry import small_wingsail
 from wing_design.beams.shell_model import build_beam_shell_model
@@ -70,6 +71,7 @@ def test_size_beam_shell_binding_constraint():
     assert worst > 0.5 * cfg.sigma_allow_Pa        # genuinely constraint-limited, not min-gauge
 
 
+@pytest.mark.sizing  # measured 8 s (2026-06-10)
 def test_buckling_constraint_respected():
     spec = small_wingsail
     model = build_beam_shell_model(spec, n_beams=8, n_levels=4)

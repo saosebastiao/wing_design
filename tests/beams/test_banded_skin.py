@@ -93,6 +93,7 @@ def _scenario_small(n_beams=8, n_levels=5):
     return P, spec, model, loads
 
 
+@pytest.mark.sizing  # measured 16 s (2026-06-10)
 def test_uniform_band_one_is_consistent():
     P, spec, model, loads = _scenario_small()
     cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,
@@ -104,6 +105,7 @@ def test_uniform_band_one_is_consistent():
     assert np.isclose(r.skin_mass_kg, P.rho_kgm3 * r.t_skin * skin_areas(model).sum(), rtol=1e-6)
 
 
+@pytest.mark.sizing  # measured 166 s (2026-06-10)
 def test_banded_feasible_and_not_heavier():
     P, spec, model, loads = _scenario_small()
     base_cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,

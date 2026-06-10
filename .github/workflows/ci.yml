@@ -1,0 +1,38 @@
+# V.0.7 — CI with a fast/slow split. The full suite measured 19 m 30 s (160 tests,
+# 2026-06-09, Python 3.13): the SLSQP sizing tests dominate, so they run as a separate
+# job on main pushes + nightly, while the fast unit layer guards every push/PR.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * *"   # nightly sizing job (UTC)
+  workflow_dispatch:
+
+jobs:
+  fast:
+    name: fast unit tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -m "not sizing"
+
+  sizing:
+    name: SLSQP sizing tests (slow)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -m sizing
