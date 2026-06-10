@@ -25,7 +25,8 @@ from wing_design.beams import (
 from wing_design.beams.body_loads import body_load_vector
 from wing_design.beams.fea_model import panel_pressure_per_tri, project_panels_to_skin
 from wing_design.beams.laminate_sizing import laminate_result_is_feasible
-from wing_design.beams.shell_model import skin_datum_angles, skin_band_map
+from wing_design.beams.shell_model import skin_datum_angles
+from wing_design.beams.shell_sizing import skin_band_map
 from wing_design.materials.unidir import T700_EPOXY, laminate_stiffness_offset
 from wing_design.structural.beam_shell import (
     solve_beam_shell_laminate, solve_beam_shell_laminate_factored,
