@@ -142,11 +142,11 @@ Make the model behave like the real structure before harvesting levers. Three of
 these fixes may move the honest baseline *up*; lever gains must be measured against a
 trustworthy baseline, not the current one.
 
-- **V.1 Shadow prices.** Extract the SLSQP Lagrange multipliers and report kg-per-unit
-  for each limit (twist 5°, deflection 2% span, buckling SF 1.5) — tells us which
-  *requirement* to renegotiate first. Verified available: scipy ≥ 1.15 exposes
-  `res.multipliers` from SLSQP (project venv has 1.17.1); they are for the
-  *normalized* constraints, so un-normalize back to physical units. (P#8)
+- **V.1 Shadow prices. — DONE (2026-06-10).** `result.shadow_prices` (FD-validated
+  0.02–0.5%; `examples/42_shadow_prices.py`). Headline (4-band): twist **−41.3 kg/deg**
+  (cheapest requirement), beam/panel buckling SF +266/+152 kg/SF-unit, deflection +
+  σ_allow free. Renegotiate twist first; V.3 prices the buckling SFs in fidelity terms.
+  See findings.md. (P#8)
 - **V.2 Mesh-convergence study of the optimized design.** Sweep n_levels (and spot-check
   n_beams) at fixed constraints; quantifies the element-length-Euler mesh dependence,
   which currently rewards refinement unconservatively. (V#9, V#3)
