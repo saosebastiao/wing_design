@@ -153,11 +153,22 @@ trustworthy baseline, not the current one.
   bias unconservative as predicted; 16×12 diverged (diagnostic). 20-beam spot ≈ equal
   total mass, consistent with the V#1 ∝n mis-scaling — P.4 stays gated. Conclusion
   feeds V.3: fix the physics, not the mesh. See findings.md. (V#9, V#3)
-- **V.3 Eigenvalue buckling check (K + Kσ).** Linear buckling solve of the current
-  optimum: curvature credit, stiffness-direction match, combined loading, global
-  ovalization modes — validates or relaxes *both* binding closed-form checks. Includes
-  the cheap parametric hoop-pretension post-processing probe to bound the prestress
-  prize before P.2. (V#1, V#2)
+- **V.3 Eigenvalue buckling check (K + Kσ). — DONE (2026-06-10).**
+  `structural/geometric_stiffness.py` + `structural/eigen_buckling.py`
+  (reference-validated), `examples/45_eigen_buckling.py`. Verdict: worst λ_cr = 2.443
+  vs the closed-form's claimed 1.5 (≥1.6× conservative; λ → 5.67 on finer meshes of
+  the same design → lower bound); worst mode = distributed skin-normal waving;
+  hoop-pretension parametric is **null** at this optimum (λ 2.443→2.445, mode cluster)
+  → P.2 demoted. Follow-up that harvests this: **V.3b width-based panel check**
+  (physical strip width + per-direction D, calibrated against the eigen solve) —
+  fixes the level AND the ∝n mis-scaling, unlocks P.4, then V.6 re-baseline.
+  See findings.md. (V#1, V#2)
+- **V.3b Width-based panel-buckling check (harvests V.3's verdict).** Replace
+  `b = √(triangle area)` with the physical panel-strip width (arc distance between
+  adjacent beams at that station) and the compression-direction D; validate the new
+  level against `linear_buckling` on the optimum (target: closed-form within ~20%
+  of eigen, conservative side); keep an imperfection margin. Then re-size (V.6)
+  and run P.4. (V#1)
 - **V.4 Self-weight + inertial/heel load cases.** First-order for the 2.3-tonne medium
   cantilever. (V#5)
 - **V.5 Distributed panel pressure + skin bending stress in the failure check.**
@@ -211,7 +222,10 @@ before the next lever starts.
   check. If the tube alone doesn't capture the win, add straight in-wing wound beam
   segments spliced to RTM'd solid curved transition segments. Likely the biggest
   single lever (beams are solid rods today). (P#1)
-- **P.2 Skin prestress + compression cross-members.** Winding pretension as a
+- **P.2 Skin prestress + compression cross-members. — DEMOTED (2026-06-10):** the
+  V.3 eigen parametric shows λ_cr 2.443→2.445 under 5–20 MPa hoop pretension at the
+  current optimum (the critical-mode cluster is pretension-insensitive); revisit only
+  if the binding set changes after V.3b/V.6. Original scope: winding pretension as a
   self-equilibrated load case (the build already commits to the tensioned hoop wrap);
   spreader struts / shear webs concentrate the equilibrating compression into short,
   buckling-cheap members. New DVs: strut radii + pretension magnitude(s); the adjoint

@@ -694,6 +694,45 @@ compare within columns only. V.3's eigen solve with a prestress load case is the
 decision-grade follow-up. (Probe post-processing ≈ seconds on top of the re-size;
 analytic Jacobian.)
 
+**V.3 eigenvalue buckling check done (2026-06-10) — closed-form buckling is
+conservative by ≥1.6× (likely 2–4×) at the binding point; the prestress prize is
+~zero at the current optimum; the in-loop fix is a width-based panel check, not a
+finer mesh.** New machinery: `structural/geometric_stiffness.py` (consistent beam Kg
+from axial force; w-linear triangle Kg from local membrane stress) +
+`structural/eigen_buckling.py` (dense Cholesky-reduced `K φ = −λ Kσ φ`), validated
+against closed form (Euler columns ≤0.2% at 8 elements, SS-plate kc=4 ≤5% at 12×12,
+tension → no mode; `tests/structural/test_eigen_buckling.py`).
+`examples/45_eigen_buckling.py` on the medium optimum (1-band config, 2471.7 kg,
+converged+feasible, 374 s re-size; closed-form beam & panel util = 1.000): worst
+**λ_cr = 2.443** (lc3; per-case 12.1 / 3.8 / 3.5 / 2.4; loads pre-factored, so the
+closed-form claims capacity at exactly 1.5) — eigen modes exported to
+`exports/eigen_mode_lc*.vtu` (regenerate: `just example 45_eigen_buckling`). Worst
+mode is **skin-normal waving (89% normal motion) spread across both surfaces and
+most of the span** (peaks z≈3.3/7.0 m), modes clustered 2.44–3.07.
+**Mesh honesty of λ itself (same design resampled, eigen-only re-solves, 1–2 s each):
+λ_cr = 2.443 (16×8) → 3.847 (16×12) → 5.669 (16×16)** — rising because (a) the
+linear membrane stress field redistributes with mesh (the known 8.6×→2.4× skin
+stiffening shift) and (b) the mesh topology has no nodes *between* beam lines, so no
+member of this mesh family can represent the physical across-width panel half-wave:
+treat 2.443 as a **lower bound** on the model's eigen capacity at the optimum.
+**Eigen-grade pretension parametric (one-sided, worst case): λ_cr 2.443 → 2.445 at
+5–20 MPa hoop pretension** — the panel mechanism lifts slightly and the critical
+mode immediately flips to a pretension-insensitive global mode at the same λ:
+**the P.2 prize at this optimum is bounded by the mode-cluster spacing (~15%), not
+the ex-44 interaction-formula bound** (that formula models an isolated panel
+mechanism the coupled structure doesn't exhibit at this design point).
+**Interpretation:** even the harshest SP-8007-style shell knockdown (γ≈0.65) on the
+*lower-bound* λ gives 1.59 ≥ 1.5 (and the plate-like mode character argues for a
+much milder knockdown) — the optimum is not buckling-deficient; the conservatism is
+real mass on the table. The audited `b=√area` level bias ((0.85/0.46)² ≈ 3.4×,
+backlog V#1) is consistent with the fine-mesh λ ≈ 5.7. **Implications:** (1) the
+in-loop fix is a **width-based panel check** (physical strip width + per-direction
+D), calibrated against this eigen machinery — it fixes both the level and the ∝n
+mis-scaling, unlocking P.4; (2) P.2 prestress is demoted until the binding set
+changes; (3) beam element-length Euler (V#3) is subsumed: at λ ≥ 2.4 the beams are
+not the critical mechanism at this optimum. (Sizing 374 s + eigen solves ~0.1–2 s
+each; analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -732,6 +771,7 @@ analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.3 eigenvalue buckling (2026-06-10) | K+Kσ linear buckling built + reference-validated (columns ≤0.2%, plate kc=4 ≤5%). Medium optimum: worst λ_cr = 2.443 vs the closed-form's claimed 1.5 → ≥1.6× conservative; λ rises to 5.67 on finer meshes of the same design (stress-field redistribution + no nodes between beam lines) → 2.44 is a lower bound. Worst mode = distributed skin-normal waving. Pretension moves λ 2.443→2.445 (null at this optimum) → P.2 demoted. Even γ=0.65 knockdown × 2.443 = 1.59 ≥ 1.5 → design not deficient; conservatism is harvestable. Next: width-based panel check calibrated by eigen (fixes level + ∝n scaling), then P.4. |
 | P#2 prestress probe (2026-06-10) | Hoop pretension superposed on the medium optimum's panel stresses: scalar principal check sees ≤12% credit (saturates 0.88), direction-resolved biaxial interaction goes 1.17→0.72 (5 MPa)→0.31 (10 MPa)→0 (20 MPa) — the P.2 prize is large but requires a biaxial panel check or the V.3 eigen solve to price; probe is one-sided (no equilibrating compression, no retention knockdown applied). P.2 sizing work stays gated on V.3. |
 | V.2 mesh convergence (2026-06-10) | n_levels 6→10 (feasible points): 2807→2486→2271 kg, −9–11% per refinement, no plateau — headlines NOT mesh-converged; bias is unconservative (element-length Euler + b=√area both gain capacity from refinement). 16×12 diverged (diagnostic). n_beams 20×8 ≈ 16×8 total mass, consistent with the V#1 ∝n mis-scaling muting the physical ∝n² panel win — P.4 sweep stays gated on the panel-model fix. Headline comparisons remain valid at fixed 16×8; absolute level carries mesh bias. V.3 (eigenvalue/physical buckling length) is the fix, not finer meshes. |
 | V.1 shadow prices (2026-06-10) | KKT multipliers captured + converted to kg-per-unit (`shadow_prices` on the result; FD-validated 0.02–0.5%). Medium headline (4-band, 2264.6 kg reproduced exactly): twist −41.35 kg/deg (binding, cheapest requirement), beam-buck SF +266.5 / panel-buck SF +151.7 kg/SF-unit, deflection + σ_allow free. 1-band: buckling-only (panel +352.2). Renegotiation order: twist limit first, then buckling SF — which V.3 prices in model-fidelity terms. |
