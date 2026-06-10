@@ -836,6 +836,27 @@ beams, radii densified 8→40 levels) + `exports/rebaseline_medium_worst_mode.vt
 regenerate via `just example 49_rebaseline`. All Phase-P levers measure against
 these numbers. (165+239+784+466 s sizing + eigen seconds, measured.)
 
+**P#9 multi-start at scale done (2026-06-10) — banding is DEAD under the honest
+model (best 4-band +0.9% vs 1-band, inside noise); measured basin scatter 2.9%;
+the parallel machinery works (12 starts / 41 min).** First at-scale run of
+`size_beam_shell_laminate_multistart` with the new V.0.4 process pool (12 starts,
+11 workers, medium 4-band V.6 config, maxiter 500): **wall 2489 s** for 12 runs
+(~2.9× over serial-estimate — stragglers at high iteration counts + core
+contention bound the speedup; parallel==serial verified bit-exact by test).
+8/12 starts converged feasible, spanning **2267.4–2332.5 kg (2.9% basin scatter** —
+the noise floor measured directly at medium scale); 4 infeasible (random cold
+starts are poor; the default start was feasible). **Best feasible 4-band 2267.4 kg
+vs the 1-band headline 2248.0 kg = +0.9%** across 13 total 4-band attempts
+(12 starts + ex-49's warm start). **Why banding died:** the −8.1% banding lever
+(2026-06-08) was earned under the legacy `b=√area` panel check — thinning outboard
+bands paid because panel buckling over-priced the skin everywhere; with the V.3b
+strip widths the panel constraint is honest and the optimizer can no longer
+harvest it band-by-band. **Decisions:** (1) the medium headline stays **2248.0 kg
+(1-band)**; (2) **1-band becomes the standard P-phase config** (fewer DVs, faster,
+nothing lost within noise); banding revisits only if a future lever re-prices the
+skin (e.g. P.3 sandwich). 1-band 12-start basin check running for the same
+scrutiny of the headline itself. (2489 s measured, 11 workers.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -874,6 +895,7 @@ these numbers. (165+239+784+466 s sizing + eigen seconds, measured.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P#9 multi-start at scale (2026-06-10) | 12 parallel starts (V.0.4 pool, 11 workers, 41 min) on the medium 4-band config: best feasible 2267.4 kg = +0.9% vs the 1-band 2248.0 → **banding dead under strip-mode buckling** (its −8.1% was a legacy-panel-model artifact); 1-band becomes the standard P-phase config. Feasible basin scatter 2.9% = the noise floor measured at medium scale. Parallel==serial bit-exact (tested); speedup ~2.9× (stragglers + contention). |
 | V.6 re-baseline (2026-06-10) | New eigen-verified headlines under the honest model (strip widths + upright/heel gravity + distributed pressure): **small 25.13 kg** (4-band, λ 2.00; −9.2% vs old 27.67) / **medium 2248.0 kg** (1-band, λ 2.26; old 4-band 2264.6 not comparable — legacy checks, aero-only). Medium 4-band landed +4.4% heavier in a beam-buck-dominated basin (warm start included) → banding's value under strip-mode buckling unresolved, P#9 multistart running. Beam-buck SF is now the dominant price (+531 kg/SF) — beams are the next physics to attack (P.1 hollow members). STL + worst-mode VTU exported (`just example 49_rebaseline`). |
 | Slam envelope deferred (2026-06-10) | DECISION (user): the 1 g lateral slam case (V#12; ex-47 diagnostic: → +110%, infeasible at maxiter 400) is re-introduced only AFTER the Phase-P performance harvest (hollow members, etc.) lightens/strengthens the structure. V.6 standard load set stays aero × {upright, 30° heel} gravity. When re-introduced: warm-start from the gravity optimum; IPOPT if SLSQP stalls. |
 | V.5 panel pressure + bending (2026-06-10) | Skin-distributed projection (force-conserving CST lumping) −1.6% vs node-lumped = neutral (noise floor) but adopted as V.6 standard. Strip-bending failure term σ_b = 0.75qw²/t²: zero effect at medium scale (skin vM 34 vs 1100 MPa — strength margin ~30×); kept as guard for thin-skin/high-pressure/large-scale regimes. Buckling-pressure interaction + Tsai-Wu bending deferred (caveats recorded). |
