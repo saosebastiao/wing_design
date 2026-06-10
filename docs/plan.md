@@ -182,9 +182,12 @@ trustworthy baseline, not the current one.
   (2006.3 → 2316.9 kg). The 1 g lateral slam static-equivalent is envelope-dominating
   (diagnostic: → +110%, unconverged) — **deferred to the V#12 load-envelope
   decision**; V.6 standard set = upright + heel. `examples/47_self_weight.py`. (V#5)
-- **V.5 Distributed panel pressure + skin bending stress in the failure check.**
-  Panels currently receive no pressure; DKT bending moments are recovered but unused.
-  (V#4)
+- **V.5 Distributed panel pressure + skin bending stress in the failure check. —
+  DONE (2026-06-10).** Skin-distributed projection ~neutral (−1.6%, noise floor;
+  adopted as standard), strip-bending failure term σ_b = 0.75qw²/t² measures zero
+  effect at medium scale (skin strength margin ~30×) — kept as the guard for
+  thin-skin / high-pressure / large-scale regimes. Buckling–pressure interaction +
+  Tsai-Wu bending deferred (recorded). `examples/48_panel_pressure.py`. (V#4)
 - **V.6 Re-baseline.** Re-run the small and medium headlines with V.4/V.5 active; all
   Phase-P levers are measured against these numbers.
 

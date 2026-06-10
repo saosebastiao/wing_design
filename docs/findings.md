@@ -785,6 +785,25 @@ question (V#12)** — excluded from the V.6 default pending an envelope decision
 (3) warm-start C from B and/or IPOPT if the envelope keeps it. (201 s + 720 s +
 2127 s measured, analytic Jacobian.)
 
+**V.5 panel pressure + strip-bending done (2026-06-10) — skin-distributed
+projection is ~neutral (−1.6%, inside the noise floor); the pressure-bending term
+measures ZERO effect at medium scale because skin strength carries ~30× margin.**
+`examples/48_panel_pressure.py`, medium 16×8 strip-mode, peak panel pressure
+1.9 kPa, all three runs converged AND feasible: **A node-lumped 2006.3 kg**
+(reproduces the baseline exactly) → **B skin-distributed 1973.7 kg (−1.6%)** —
+within the 2–3% noise floor, so claimed as *neutral*, but adopted as the V.6
+standard anyway (physically cleaner: per-triangle CST lumping, total force
+conserved, no single-node snapping) → **C + strip-bending failure term: 1973.7 kg,
+bit-identical trajectory to B** (same iters/wall). **Why C changes nothing here:**
+the skin von-Mises sits at 34 MPa vs 1100 MPa allowable — the audited ~7× Tsai-Wu
+strength margin is ~30× on this lighter strip-mode design, so augmenting a deeply
+slack constraint cannot move the optimum. The σ_b = 0.75·q·w²/t² term (FD-validated
+gradient) stays in as the guard for regimes where it CAN bind: thin-skin small
+wings, slam pressures (V#12), and the >100 m retargeting where q·w²/t² scales up.
+Pressure–compression buckling interaction and Tsai-Wu bending remain recorded
+caveats (spec 2026-06-10-panel-pressure-design.md). (198 s + 232 s + 232 s
+measured, analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -823,6 +842,7 @@ question (V#12)** — excluded from the V.6 default pending an envelope decision
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.5 panel pressure + bending (2026-06-10) | Skin-distributed projection (force-conserving CST lumping) −1.6% vs node-lumped = neutral (noise floor) but adopted as V.6 standard. Strip-bending failure term σ_b = 0.75qw²/t²: zero effect at medium scale (skin vM 34 vs 1100 MPa — strength margin ~30×); kept as guard for thin-skin/high-pressure/large-scale regimes. Buckling-pressure interaction + Tsai-Wu bending deferred (caveats recorded). |
 | V.4 self-weight/inertial (2026-06-10) | `accel_vectors` body loads (mass lumped per evaluate) + the λᵀ·∂f/∂x adjoint term (FD-validated ≤2e-4; also the P.2 prerequisite). Medium strip baseline 2006.3 → **2316.9 kg (+15.5%)** with upright + 30° heel gravity (converged/feasible). 1 g lateral slam: diagnostic — unconverged/infeasible at maxiter 400, mass heading +110% → slam envelope deferred to the V#12 requirements decision; V.6 default = upright + heel only. |
 | V.3b width-based panels (2026-06-10) | Opt-in `panel_width_mode="strip"`: b = physical chordwise beam spacing (median 0.449 vs 0.897 m √area surrogate). Calibration: implied capacity 5.14× at the old optimum ≈ converged eigen 5.7 (conservative side). Harvest: medium 1-band **2471.4 → 2006.3 kg (−18.8%)**, converged+feasible; twist now co-binds. Eigen verify of new optimum: λ_cr 2.286 ≥ 1.5. Fixes V#1 level + ∝n scaling → P.4 unlocked. Default stays sqrt_area until V.6 re-baseline (after V.4/V.5). kc=4 edge + V#2 direction caveats open. |
 | V.0.7 CI split (2026-06-10) | `sizing` pytest marker assigned from measured durations (19 tests ≥5 s; top 192/166/99 s). Fast job: 149 tests / **12.2 s measured** on every push/PR; sizing job on main pushes + nightly (uv, locked sync). Full suite green 168/168 post-cache-fix. Example smoke layer + flag matrix still open; example 14 broken (meshio gone from venv) — smoke layer would have caught it. |
