@@ -266,7 +266,8 @@ def _active_beam_force(factored, e):
     return floc, M, dofs
 
 
-def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
+def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
+                 dF: np.ndarray | None = None):
     """beam von-Mises feasibility constraint gradient.
 
     con = 1 − max_e(vM_e)/σ_allow. Returns (con_value, grad (nx,)).
@@ -327,6 +328,9 @@ def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     du_part = -dkx
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        du_part += lam @ dF
 
     # explicit ∂vM/∂r for the group of e*. Two pieces:
     #  (1) section A,Iz,J depend on r (the stress formula);
@@ -346,7 +350,8 @@ def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
     return con_value, grad
 
 
-def grad_beam_buckling(factored, ds, *, euler_K, safety_factor, cache: "SensCache | None" = None):
+def grad_beam_buckling(factored, ds, *, euler_K, safety_factor,
+                       cache: "SensCache | None" = None, dF: np.ndarray | None = None):
     """beam Euler-buckling feasibility constraint gradient.
 
     con = 1 − max_e(util_e), util = comp·SF/Pcr, comp=max(0,−axial),
@@ -386,6 +391,9 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor, cache: "SensCach
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     du_part = -dkx
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        du_part += lam @ dF
 
     # explicit ∂util/∂r for the group of e*. Two pieces:
     #  (1) Pcr ∝ r⁴ ⇒ util ∝ r^−4 ⇒ ∂util/∂r = −4·util/r;
@@ -446,7 +454,8 @@ def _active_tri_stress(factored, ds, t):
     return s, eps, Gt, area, dofs, C_t
 
 
-def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
+def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
+                 dF: np.ndarray | None = None):
     """skin von-Mises feasibility constraint gradient.
 
     con = 1 − max_t(vM_t)/σ_allow, membrane stress is thickness-independent.
@@ -482,6 +491,9 @@ def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     du_part = -dkx
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        du_part += lam @ dF
 
     # explicit f terms (no t term: membrane stress is thickness-independent)
     b = int(ds.band_of_tri[t_star])
@@ -497,7 +509,8 @@ def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None):
     return con_value, grad
 
 
-def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas, cache: "SensCache | None" = None):
+def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas,
+                        cache: "SensCache | None" = None, dF: np.ndarray | None = None):
     """skin (panel) buckling feasibility constraint gradient.
 
     con = 1 − max_t(util_t), util = comp·SF/σcr, comp=max(0,−s_min),
@@ -550,6 +563,9 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas, cache: 
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     du_part = -dkx
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        du_part += lam @ dF
 
     # explicit t: util ∝ 1/σcr ∝ 1/t² ⇒ ∂util/∂t = −2·util/t
     b = int(ds.band_of_tri[t_star])
@@ -581,7 +597,8 @@ def _Teps(theta_deg):
     ])
 
 
-def grad_skin_tsai_wu(factored, ds, *, safety_factor, cache: "SensCache | None" = None):
+def grad_skin_tsai_wu(factored, ds, *, safety_factor,
+                      cache: "SensCache | None" = None, dF: np.ndarray | None = None):
     """Per-ply Tsai-Wu skin feasibility constraint gradient.
 
     con = min_R/SF − 1, where min_R is the minimum Tsai-Wu strength ratio over all
@@ -644,12 +661,16 @@ def grad_skin_tsai_wu(factored, ds, *, safety_factor, cache: "SensCache | None" 
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     dR_dx = -dkx  # explicit term is zero
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        dR_dx += lam @ dF
 
     grad = dR_dx / SF
     return con_value, grad
 
 
-def grad_tip_defl(factored, ds, cache: "SensCache | None" = None):
+def grad_tip_defl(factored, ds, cache: "SensCache | None" = None,
+                  dF: np.ndarray | None = None):
     """g = max tip ||u_trans||; returns (g, grad (nx,)). Explicit term is 0."""
     u = factored.u.reshape(-1, 6)
     tip = ds.model.tip_nodes
@@ -664,10 +685,14 @@ def grad_tip_defl(factored, ds, cache: "SensCache | None" = None):
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     grad = -dkx
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        grad += lam @ dF
     return g, grad
 
 
-def grad_tip_twist(factored, ds, cache: "SensCache | None" = None):
+def grad_tip_twist(factored, ds, cache: "SensCache | None" = None,
+                   dF: np.ndarray | None = None):
     """g = max tip |u_twist (dof 5)|; returns (g, grad (nx,)). Explicit term is 0."""
     u = factored.u.reshape(-1, 6)
     tip = ds.model.tip_nodes
@@ -682,4 +707,7 @@ def grad_tip_twist(factored, ds, cache: "SensCache | None" = None):
     _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
     dkx = lambdaT_dK_x_cached(_cache, lam, factored.u)
     grad = -dkx
+    # design-dependent loads (V.4): dg/dx implicit = lam^T (dF - dK u)
+    if dF is not None:
+        grad += lam @ dF
     return g, grad

@@ -39,6 +39,7 @@ from .sensitivity import (
 from ..structural.buckling import beam_euler_utilization, panel_buckling_utilization
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
+from .body_loads import body_load_jacobian, body_load_vector
 from .shell_model import BeamShellModel, skin_datum_angles, skin_panel_widths
 from .shell_sizing import (
     beam_lengths, beam_mass, beam_radius_groups, skin_areas, skin_band_areas,
@@ -64,6 +65,12 @@ class LaminateSizingConfig:
     # SS-plate model, eigen-calibrated 2026-06-10). Default unchanged for
     # comparability with recorded headlines until the V.6 re-baseline.
     panel_width_mode: str = "sqrt_area"
+    # V.4 self-weight/inertial accelerations (m/s², wing frame, z = span). Empty =
+    # aero-only (recorded headlines unchanged). Non-empty: every aero load case is
+    # paired with every acceleration vector (include (0,0,0) to keep an aero-only
+    # combo); the design's own mass is lumped to nodes each evaluate and the
+    # analytic adjoint carries the lam^T dF/dx term (loads depend on the design).
+    accel_vectors: tuple[tuple[float, float, float], ...] = ()
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -284,6 +291,18 @@ def size_beam_shell_laminate(
 
     cache: dict = {}
 
+    accels = [np.asarray(a, dtype=float) for a in config.accel_vectors]
+
+    def effective_loads(radii, t_tri):
+        """Aero × accel combos; aero-only when no accelerations configured."""
+        if not accels:
+            return load_arrays
+        out = []
+        for lc in load_arrays:
+            for acc in accels:
+                out.append(lc + body_load_vector(model, radii, t_tri, rho=rho, accel=acc))
+        return out
+
     def evaluate(x):
         key = np.asarray(x, dtype=float).tobytes()
         hit = cache.get(key)
@@ -323,7 +342,7 @@ def size_beam_shell_laminate(
         worst_beam_buck = 0.0
         worst_panel_buck = 0.0
         worst_R = np.inf
-        for loads in load_arrays:
+        for loads in effective_loads(radii, t_tri):
             res = solve_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
                 E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
@@ -454,15 +473,26 @@ def size_beam_shell_laminate(
                 offset_tri = np.asarray(datum_offsets_deg, dtype=float)
 
             sections = [BeamSection.circular(float(r)) for r in radii]
+            loads_eff = effective_loads(radii, t_tri)
+            # V.4: one ∂f/∂x per accel vector (zero for pure aero); fac k pairs
+            # with accel k % len(accels) by the effective_loads combo order.
+            if accels:
+                dFs = [body_load_jacobian(
+                           model, radii, group_of_element=group_of_element,
+                           band_of_tri=band_of_tri, rho=rho, accel=acc, G=G, B=B, L=L)
+                       for acc in accels]
+                dF_of_fac = [dFs[k % len(accels)] for k in range(len(loads_eff))]
+            else:
+                dF_of_fac = [None] * len(loads_eff)
             # Factor once for load case 0, reuse the factorization for the rest.
             fac0 = solve_beam_shell_laminate_factored(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
                 E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
-                fixed_nodes=model.fixed_nodes, loads=load_arrays[0],
+                fixed_nodes=model.fixed_nodes, loads=loads_eff[0],
                 gusset_elements=gusset_elements, gusset_section=gusset_section,
             )
             facs = [fac0]
-            for loads in load_arrays[1:]:
+            for loads in loads_eff[1:]:
                 f = loads.reshape(-1).astype(float)
                 u = np.zeros(fac0.ndof)
                 u[fac0.free] = fac0.lu.solve(f[fac0.free])
@@ -496,7 +526,7 @@ def size_beam_shell_laminate(
             # across every load case and every constraint-gradient call below.
             from .sensitivity import prepare_sensitivity
             sens_cache = prepare_sensitivity(ds, facs[0])
-            return facs, ds, sections, sens_cache
+            return facs, ds, sections, sens_cache, dF_of_fac
 
         def _jac_lookup(x):
             key = np.asarray(x, dtype=float).tobytes()
@@ -508,17 +538,17 @@ def size_beam_shell_laminate(
 
         def _binding_grad(x, grad_fn):
             """Evaluate grad_fn over all load cases, pick the binding (min con) lc, return its row."""
-            facs, ds, _sections, sens_cache = _jac_lookup(x)
+            facs, ds, _sections, sens_cache, dF_of_fac = _jac_lookup(x)
             best_con = np.inf
             best_grad = None
-            for fac in facs:
-                con, grad = grad_fn(fac, ds, sens_cache)
+            for fac, dF in zip(facs, dF_of_fac):
+                con, grad = grad_fn(fac, ds, sens_cache, dF)
                 if con < best_con:
                     best_con = con
                     best_grad = grad
             return best_grad
 
-        def _beam_vm_grad_one(fac, ds, e_star, sens_cache):
+        def _beam_vm_grad_one(fac, ds, e_star, sens_cache, dF=None):
             """∂(1 − vM_{e_star}/σ)/∂x as an (nx,) row, for a chosen beam element."""
             sa = config.sigma_allow_Pa
             floc, Mmat, dofs = _active_beam_force(fac, e_star)
@@ -555,6 +585,8 @@ def size_beam_shell_laminate(
             dg_du[dofs] = dvm_dfloc @ Mmat
             lam = adjoint_lambda(fac, dg_du)
             du_part = -lambdaT_dK_x_cached(sens_cache, lam, fac.u)
+            if dF is not None:   # design-dependent loads (V.4)
+                du_part += lam @ dF
 
             dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
             dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
@@ -568,7 +600,7 @@ def size_beam_shell_laminate(
 
         def beam_con_jac(x):
             """Full (n, nx) Jacobian: row e is ∂(1 − vM_e/σ)/∂x at e's binding load case."""
-            facs, ds, sections, sens_cache = _jac_lookup(x)
+            facs, ds, sections, sens_cache, dF_of_fac = _jac_lookup(x)
             # per-element binding lc = the lc achieving max vM_e (matches evaluate's max).
             vm_lc = np.empty((len(facs), n))
             for li, fac in enumerate(facs):
@@ -576,29 +608,30 @@ def size_beam_shell_laminate(
             binding = np.argmax(vm_lc, axis=0)
             Jrows = np.empty((n, nx))
             for e in range(n):
-                Jrows[e] = _beam_vm_grad_one(facs[int(binding[e])], ds, e, sens_cache)
+                bi = int(binding[e])
+                Jrows[e] = _beam_vm_grad_one(facs[bi], ds, e, sens_cache, dF=dF_of_fac[bi])
             return Jrows
 
         def skin_con_jac(x):
             if config.skin_failure == "tsai_wu":
                 row = _binding_grad(
-                    x, lambda fac, ds, cache: grad_skin_tsai_wu(
-                        fac, ds, safety_factor=config.tsai_wu_safety_factor, cache=cache))
+                    x, lambda fac, ds, cache, dF: grad_skin_tsai_wu(
+                        fac, ds, safety_factor=config.tsai_wu_safety_factor, cache=cache, dF=dF))
             else:
                 row = _binding_grad(
-                    x, lambda fac, ds, cache: grad_skin_vm(
-                        fac, ds, config.sigma_allow_Pa, cache=cache))
+                    x, lambda fac, ds, cache, dF: grad_skin_vm(
+                        fac, ds, config.sigma_allow_Pa, cache=cache, dF=dF))
             return row.reshape(1, nx)
 
         def defl_con_jac(x):
-            def gf(fac, ds, cache):
-                g, grad_g = grad_tip_defl(fac, ds, cache=cache)
+            def gf(fac, ds, cache, dF):
+                g, grad_g = grad_tip_defl(fac, ds, cache=cache, dF=dF)
                 return 1.0 - g / config.tip_defl_max_m, -grad_g / config.tip_defl_max_m
             return _binding_grad(x, gf).reshape(1, nx)
 
         def twist_con_jac(x):
-            def gf(fac, ds, cache):
-                g, grad_g = grad_tip_twist(fac, ds, cache=cache)
+            def gf(fac, ds, cache, dF):
+                g, grad_g = grad_tip_twist(fac, ds, cache=cache, dF=dF)
                 return 1.0 - g / config.tip_twist_max_deg, -np.degrees(grad_g) / config.tip_twist_max_deg
             return _binding_grad(x, gf).reshape(1, nx)
 
@@ -628,15 +661,15 @@ def size_beam_shell_laminate(
         if config.buckling_safety_factor is not None:
             def beam_buck_con_jac(x):
                 return _binding_grad(
-                    x, lambda fac, ds, cache: grad_beam_buckling(
+                    x, lambda fac, ds, cache, dF: grad_beam_buckling(
                         fac, ds, euler_K=config.euler_K,
-                        safety_factor=config.buckling_safety_factor, cache=cache)).reshape(1, nx)
+                        safety_factor=config.buckling_safety_factor, cache=cache, dF=dF)).reshape(1, nx)
 
             def panel_buck_con_jac(x):
                 return _binding_grad(
-                    x, lambda fac, ds, cache: grad_panel_buckling(
+                    x, lambda fac, ds, cache, dF: grad_panel_buckling(
                         fac, ds, panel_kc=config.panel_kc,
-                        safety_factor=config.buckling_safety_factor, areas=b2_panel, cache=cache)).reshape(1, nx)
+                        safety_factor=config.buckling_safety_factor, areas=b2_panel, cache=cache, dF=dF)).reshape(1, nx)
 
             constraints[idx]["jac"] = beam_buck_con_jac
             constraints[idx + 1]["jac"] = panel_buck_con_jac
