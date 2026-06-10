@@ -733,6 +733,33 @@ changes; (3) beam element-length Euler (V#3) is subsumed: at λ ≥ 2.4 the beam
 not the critical mechanism at this optimum. (Sizing 374 s + eigen solves ~0.1–2 s
 each; analytic Jacobian.)
 
+**V.3b width-based panel check done (2026-06-10) — −18.8% on the medium design
+(2471.4 → 2006.3 kg), eigen-verified; the strip formula lands within ~10% of the
+converged eigen capacity.** `skin_panel_widths(model)` gives each skin triangle the
+physical strip width (chordwise distance between its two bounding beam lines —
+median **0.449 m vs 0.897 m** for the old `√area`, a ~4.3× σcr level credit);
+opt-in `LaminateSizingConfig.panel_width_mode="strip"` substitutes width² for area
+at both buckling call sites, so the analytic Jacobian stays exact (FD-validated;
+b is design-independent). Default remains `"sqrt_area"` until the V.6 re-baseline.
+`examples/46_width_based_panels.py` (medium 16×8, 1-band config, all converged AND
+feasible): **(1) calibration** — the strip check at the √area optimum reads worst
+util 0.292 = implied capacity 5.14×, vs the V.3 eigen 2.44 (16×8 lower bound) and
+~5.7 (16×16, same design): within ~10% of the converged eigen value, conservative
+side. **(2) harvest** — re-sized strip-mode optimum **2006.3 kg vs 2471.4 kg
+baseline = −18.8%** (145 iters, 193 s; twist now binds at 5.0° alongside beam+panel
+buckling at 1.0 — the V.1 twist shadow price now applies to the lighter design too).
+**(3) eigen verification** — worst λ_cr of the new optimum **2.286 ≥ 1.5**: every
+mechanism the mesh can represent (beam, global, coupled) keeps ≥52% margin; the
+across-width panel half-wave the mesh cannot see is exactly what the strip formula
+checks. **Why:** σcr ∝ 1/b² and the physical b is half the √area surrogate, so the
+binding constraint was ~4× too strict in level — V.3's verdict converted to mass.
+**Caveats:** kc=4 assumes simply-supported strip edges (flexible beams could be
+softer — the eigen check guards the coupled modes it can see); D11 direction
+mismatch (V#2) still open; NOT yet the official headline — the 4-band config +
+V.4/V.5 load additions come first (V.6 re-baseline). CAD of the strip optimum is
+exportable via the example-37 sized-export path with `panel_width_mode="strip"`.
+(321 s baseline + 193 s strip re-size + eigen seconds; analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -771,6 +798,7 @@ each; analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.3b width-based panels (2026-06-10) | Opt-in `panel_width_mode="strip"`: b = physical chordwise beam spacing (median 0.449 vs 0.897 m √area surrogate). Calibration: implied capacity 5.14× at the old optimum ≈ converged eigen 5.7 (conservative side). Harvest: medium 1-band **2471.4 → 2006.3 kg (−18.8%)**, converged+feasible; twist now co-binds. Eigen verify of new optimum: λ_cr 2.286 ≥ 1.5. Fixes V#1 level + ∝n scaling → P.4 unlocked. Default stays sqrt_area until V.6 re-baseline (after V.4/V.5). kc=4 edge + V#2 direction caveats open. |
 | V.0.7 CI split (2026-06-10) | `sizing` pytest marker assigned from measured durations (19 tests ≥5 s; top 192/166/99 s). Fast job: 149 tests / **12.2 s measured** on every push/PR; sizing job on main pushes + nightly (uv, locked sync). Full suite green 168/168 post-cache-fix. Example smoke layer + flag matrix still open; example 14 broken (meshio gone from venv) — smoke layer would have caught it. |
 | V.3 eigenvalue buckling (2026-06-10) | K+Kσ linear buckling built + reference-validated (columns ≤0.2%, plate kc=4 ≤5%). Medium optimum: worst λ_cr = 2.443 vs the closed-form's claimed 1.5 → ≥1.6× conservative; λ rises to 5.67 on finer meshes of the same design (stress-field redistribution + no nodes between beam lines) → 2.44 is a lower bound. Worst mode = distributed skin-normal waving. Pretension moves λ 2.443→2.445 (null at this optimum) → P.2 demoted. Even γ=0.65 knockdown × 2.443 = 1.59 ≥ 1.5 → design not deficient; conservatism is harvestable. Next: width-based panel check calibrated by eigen (fixes level + ∝n scaling), then P.4. |
 | P#2 prestress probe (2026-06-10) | Hoop pretension superposed on the medium optimum's panel stresses: scalar principal check sees ≤12% credit (saturates 0.88), direction-resolved biaxial interaction goes 1.17→0.72 (5 MPa)→0.31 (10 MPa)→0 (20 MPa) — the P.2 prize is large but requires a biaxial panel check or the V.3 eigen solve to price; probe is one-sided (no equilibrating compression, no retention knockdown applied). P.2 sizing work stays gated on V.3. |

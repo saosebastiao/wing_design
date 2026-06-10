@@ -24,20 +24,26 @@ wound skin is modeled as a **load-bearing shell**.
 The repo is meant to evolve from a 5 m demo wingsail to a process applicable from
 ~1 m FPV drone wings up to >100 m wind turbine blades.
 
-## Where we are (2026-06-09)
+## Where we are (2026-06-10)
 
-The shell-beam pipeline is built end-to-end and sized FEA-in-the-loop. Defensible
+The shell-beam pipeline is built end-to-end and sized FEA-in-the-loop. Recorded
 headlines: small (5 m) **30.15 kg** fully constrained / **27.67 kg** with 4 thickness
-bands; medium (22 m) **2264.6 kg** (analytic Jacobian). The design is robustly
-**panel-buckling/stiffness-governed — strength never binds** (Tsai-Wu R = 7.0 vs
-required 2.0), and beam-layout levers are mined out (all negative or marginal).
+bands; medium (22 m) **2264.6 kg** (4-band, reproduced exactly 2026-06-10). The design
+is **buckling/stiffness-governed — strength never binds** (Tsai-Wu R = 7.0 vs 2.0),
+and beam-layout levers are mined out.
 
-Both governing constraints sit at utilization 1.0 on **closed-form approximations**,
-so the plan below first firms up validity (some fixes will move the honest baseline
-*up*), then exploits the huge strength margin and the manufacturing concept's hollow /
-prestressed options (the step-change levers change *what kind of section resists
-buckling*, not where material sits). The analytic adjoint Jacobian is merged (1.98×
-vs FD, exact). Full record: [`findings.md`](./findings.md).
+The 2026-06-10 validity sprint changed the picture: the medium gradient path is
+**~23× faster** (cache fix; sizing ≈ 5–8 min, compute is no longer the rate limiter);
+shadow prices put all binding-requirement mass on twist (−41 kg/deg, 4-band) and the
+two closed-form buckling SFs; the **eigenvalue buckling solve (V.3) showed the
+closed-form checks ≥1.6× (converged ~4–5×) conservative**, and the **width-based
+panel check (V.3b) converted that to −18.8% on the medium 1-band design
+(2471 → 2006 kg, eigen-verified)**; winding-pretension (P.2) measured **null** at the
+optimum and is demoted. Headlines are NOT mesh-converged under the legacy checks
+(V.2); the strip check + eigen verification is the honest pair going forward. Next:
+V.4/V.5 load-completeness (will move mass *up*), then the V.6 re-baseline with
+`panel_width_mode="strip"`, then P.0/P.1 (hollow members) against the new baseline.
+Full record: [`findings.md`](./findings.md).
 
 ## Working specification (first design point)
 
@@ -162,12 +168,14 @@ trustworthy baseline, not the current one.
   (physical strip width + per-direction D, calibrated against the eigen solve) —
   fixes the level AND the ∝n mis-scaling, unlocks P.4, then V.6 re-baseline.
   See findings.md. (V#1, V#2)
-- **V.3b Width-based panel-buckling check (harvests V.3's verdict).** Replace
-  `b = √(triangle area)` with the physical panel-strip width (arc distance between
-  adjacent beams at that station) and the compression-direction D; validate the new
-  level against `linear_buckling` on the optimum (target: closed-form within ~20%
-  of eigen, conservative side); keep an imperfection margin. Then re-size (V.6)
-  and run P.4. (V#1)
+- **V.3b Width-based panel-buckling check. — DONE (2026-06-10).** Opt-in
+  `panel_width_mode="strip"` (`skin_panel_widths`); analytic Jacobian exact in both
+  modes (FD-validated). Calibration: implied capacity 5.14× at the old optimum vs
+  converged eigen ~5.7 (conservative side, ~10%). **Harvest: medium 1-band 2471.4 →
+  2006.3 kg (−18.8%)**, eigen-verified (λ_cr 2.286 ≥ 1.5). Compression-direction D
+  (V#2) deliberately left open; kc=4 SS-edge caveat documented. Default flips to
+  "strip" at the V.6 re-baseline; P.4 unlocked. `examples/46_width_based_panels.py`.
+  (V#1)
 - **V.4 Self-weight + inertial/heel load cases.** First-order for the 2.3-tonne medium
   cantilever. (V#5)
 - **V.5 Distributed panel pressure + skin bending stress in the failure check.**
