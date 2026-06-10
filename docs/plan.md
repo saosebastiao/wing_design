@@ -120,11 +120,19 @@ change) except KS, which is testable.
 - **V.0.6 Opportunistic cleanups.** The uncached `_beam_vm_grad_one` path; sparse
   Cholesky instead of `splu` only if the profile shows factorization mattering at
   finer meshes.
-- **V.0.7 Engineering guardrails.** GitHub Actions CI for the (fast) unit suite; an
-  example smoke layer (2–3 representative examples at maxiter≈10 / tiny mesh); a
-  pairwise config-flag smoke matrix (untested combos exist, e.g. `per_band_layup ×
-  tsai_wu`); declare `gmsh` in pyproject. Land any time — these guard the V/M/P code
-  churn. (Toolbox #2, #3, #5)
+- **V.0.7 Engineering guardrails.** GitHub Actions CI — but with a fast/slow split:
+  the full suite **measured 19 m 30 s** (160 tests, 2026-06-09, Python 3.13), so CI
+  needs a pytest marker separating fast unit tests (every push) from the SLSQP sizing
+  tests (separate/less frequent job). Plus: an example smoke layer (2–3 representative
+  examples at maxiter≈10 / tiny mesh); a pairwise config-flag smoke matrix (untested
+  combos exist, e.g. `per_band_layup × tsai_wu`); declare `gmsh` in pyproject. Land
+  any time — these guard the V/M/P code churn. (Toolbox #2, #3, #5)
+- **V.0.8 Python version.** Migrated to **3.13** (2026-06-09; full suite green,
+  160/160). **3.14 is blocked solely by build123d 0.10.0** (`requires-python <3.14`,
+  OCP pin `<7.9`; the cp314 OCP wheels already exist and build123d's dev branch
+  already supports `<3.15` + OCP 7.9) — bump to 3.14 when build123d's next release
+  ships; that's where the real interpreter gains live (tail-call interpreter,
+  incremental GC).
 
 V.0.1 runs now; the rest pull in as the profile directs. Don't block V.1 on this —
 shadow prices is a few independent lines.

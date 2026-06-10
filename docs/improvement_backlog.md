@@ -322,11 +322,13 @@ adjoints; AeroSandbox, build123d, CP-SAT, and scipy.sparse all fit their roles.*
    named-block `DesignVector` (pack/unpack once) + a small `Constraint` object (value,
    optional analytic gradient, feasibility entry) consumed by one driver loop. Schedule
    after V.3 (its new constraint shape informs the design), before P.1.
-2. **CI + example smoke layer.** No `.github/` exists; the unit suite (fast — long runs
-   live in examples/) never runs automatically, and the numbered examples — the
-   project's measurement record — have no guard against API drift. Add a GitHub Actions
-   workflow (uv + pytest) and a smoke suite running 2–3 representative examples at
-   maxiter≈10 / tiny mesh.
+2. **CI + example smoke layer.** No `.github/` exists; the suite never runs
+   automatically, and the numbered examples — the project's measurement record — have
+   no guard against API drift. **Measured (2026-06-09): the full suite is 19 m 30 s
+   (160 tests), NOT fast** — the SLSQP sizing tests dominate. CI therefore needs a
+   pytest marker split: fast unit tests on every push, sizing tests as a separate job.
+   Add a GitHub Actions workflow (uv + pytest) and a smoke suite running 2–3
+   representative examples at maxiter≈10 / tiny mesh.
 3. **Feature-flag interaction coverage.** `LaminateSizingConfig` has 6 opt-in flags;
    combinations like `per_band_layup × tsai_wu` and `per_band_layup × ply_angle_datum`
    are never exercised. Add a pairwise smoke matrix (tiny mesh, maxiter≈5, assert
