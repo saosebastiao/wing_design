@@ -208,7 +208,13 @@ def size_beam_shell_laminate(
     maxiter: int = 80,
     ftol: float = 1.0e-4,
     x0: np.ndarray | None = None,
+    panel_pressures: list[np.ndarray] | None = None,
 ) -> LaminateSizingResult:
+    """Co-size beam radii + skin bands + layup. ``panel_pressures`` (V.5): one
+    (n_tris,) lateral-pressure array [Pa] per aero load case (see
+    `fea_model.panel_pressure_per_tri`); adds the sub-mesh strip-bending fiber
+    stress sigma_b = 0.75 q w^2 / t^2 to the skin von-Mises failure metric
+    (Tsai-Wu mode keeps membrane-only — recorded caveat). None = unchanged."""
     if not load_arrays:
         raise ValueError("load_arrays is empty")
     gusset_elements = model.tip_gusset_elements
@@ -229,6 +235,15 @@ def size_beam_shell_laminate(
         b2_panel = Atri
     else:
         raise ValueError(f"unknown panel_width_mode: {config.panel_width_mode!r}")
+    # V.5 strip-bending: 0.75*q*w^2 per aero case (physical strip width regardless
+    # of the buckling b mode); sigma_b = qw2 / t^2 at evaluate time.
+    if panel_pressures is not None:
+        if len(panel_pressures) != len(load_arrays):
+            raise ValueError("panel_pressures must have one entry per load case")
+        _w2_bend = skin_panel_widths(model) ** 2
+        qw2_cases = [0.75 * np.asarray(q, dtype=float) * _w2_bend for q in panel_pressures]
+    else:
+        qw2_cases = None
     A_skin_area = float(Atri.sum())
     band_of_tri = skin_band_map(model, B)
     band_area = skin_band_areas(model, band_of_tri, B)
@@ -342,7 +357,9 @@ def size_beam_shell_laminate(
         worst_beam_buck = 0.0
         worst_panel_buck = 0.0
         worst_R = np.inf
-        for loads in effective_loads(radii, t_tri):
+        n_acc = max(len(accels), 1)
+        for ci, loads in enumerate(effective_loads(radii, t_tri)):
+            qw2 = qw2_cases[ci // n_acc] if qw2_cases is not None else None
             res = solve_beam_shell_laminate(
                 model.nodes, model.beam_elements, sections, model.shell_tris,
                 E_beam=model.E_beam, G_beam=model.G_beam, A_skin=A_arg, D_skin=D_arg,
@@ -351,7 +368,10 @@ def size_beam_shell_laminate(
             )
             wb = np.maximum(wb, von_mises_per_element(res, sections))
             skin_s = recover_membrane_stress_C(model.nodes, model.shell_tris, res.displacements, C=C_arg)
-            ws = max(ws, float(membrane_von_mises(skin_s).max()))
+            vm_skin = membrane_von_mises(skin_s)
+            if qw2 is not None and config.skin_failure != "tsai_wu":
+                vm_skin = vm_skin + qw2 / t_tri**2     # V.5 strip-bending fiber stress
+            ws = max(ws, float(vm_skin.max()))
             if config.skin_failure == "tsai_wu":
                 eps = recover_membrane_strain(model.nodes, model.shell_tris, res.displacements)
                 offs = datum_offsets_deg if datum_offsets_deg is not None else np.zeros(eps.shape[0])
@@ -541,8 +561,8 @@ def size_beam_shell_laminate(
             facs, ds, _sections, sens_cache, dF_of_fac = _jac_lookup(x)
             best_con = np.inf
             best_grad = None
-            for fac, dF in zip(facs, dF_of_fac):
-                con, grad = grad_fn(fac, ds, sens_cache, dF)
+            for ci, (fac, dF) in enumerate(zip(facs, dF_of_fac)):
+                con, grad = grad_fn(fac, ds, sens_cache, dF, ci)
                 if con < best_con:
                     best_con = con
                     best_grad = grad
@@ -615,22 +635,24 @@ def size_beam_shell_laminate(
         def skin_con_jac(x):
             if config.skin_failure == "tsai_wu":
                 row = _binding_grad(
-                    x, lambda fac, ds, cache, dF: grad_skin_tsai_wu(
+                    x, lambda fac, ds, cache, dF, ci: grad_skin_tsai_wu(
                         fac, ds, safety_factor=config.tsai_wu_safety_factor, cache=cache, dF=dF))
             else:
                 row = _binding_grad(
-                    x, lambda fac, ds, cache, dF: grad_skin_vm(
-                        fac, ds, config.sigma_allow_Pa, cache=cache, dF=dF))
+                    x, lambda fac, ds, cache, dF, ci: grad_skin_vm(
+                        fac, ds, config.sigma_allow_Pa, cache=cache, dF=dF,
+                        qw2_tri=(qw2_cases[ci // max(len(accels), 1)]
+                                 if qw2_cases is not None else None)))
             return row.reshape(1, nx)
 
         def defl_con_jac(x):
-            def gf(fac, ds, cache, dF):
+            def gf(fac, ds, cache, dF, ci):
                 g, grad_g = grad_tip_defl(fac, ds, cache=cache, dF=dF)
                 return 1.0 - g / config.tip_defl_max_m, -grad_g / config.tip_defl_max_m
             return _binding_grad(x, gf).reshape(1, nx)
 
         def twist_con_jac(x):
-            def gf(fac, ds, cache, dF):
+            def gf(fac, ds, cache, dF, ci):
                 g, grad_g = grad_tip_twist(fac, ds, cache=cache, dF=dF)
                 return 1.0 - g / config.tip_twist_max_deg, -np.degrees(grad_g) / config.tip_twist_max_deg
             return _binding_grad(x, gf).reshape(1, nx)
@@ -661,13 +683,13 @@ def size_beam_shell_laminate(
         if config.buckling_safety_factor is not None:
             def beam_buck_con_jac(x):
                 return _binding_grad(
-                    x, lambda fac, ds, cache, dF: grad_beam_buckling(
+                    x, lambda fac, ds, cache, dF, ci: grad_beam_buckling(
                         fac, ds, euler_K=config.euler_K,
                         safety_factor=config.buckling_safety_factor, cache=cache, dF=dF)).reshape(1, nx)
 
             def panel_buck_con_jac(x):
                 return _binding_grad(
-                    x, lambda fac, ds, cache, dF: grad_panel_buckling(
+                    x, lambda fac, ds, cache, dF, ci: grad_panel_buckling(
                         fac, ds, panel_kc=config.panel_kc,
                         safety_factor=config.buckling_safety_factor, areas=b2_panel, cache=cache, dF=dF)).reshape(1, nx)
 

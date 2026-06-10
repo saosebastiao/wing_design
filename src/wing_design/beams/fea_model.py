@@ -108,6 +108,59 @@ def project_panels_to_beam_nodes(
     return loads
 
 
+def project_panels_to_skin(
+    model,
+    panels: PanelLoads,
+    *,
+    safety_factor: float = 1.0,
+) -> np.ndarray:
+    """(n_nodes, 6) nodal loads: each panel force spread over its nearest skin triangle.
+
+    V.5 (backlog V#4): instead of snapping each aero panel's force to one node
+    (`project_panels_to_beam_nodes`), assign it a third each to the 3 nodes of the
+    skin triangle whose centroid is nearest — the consistent CST lumping of a
+    uniform pressure over that triangle. Loads remain design-independent.
+    """
+    loads = np.zeros((model.nodes.shape[0], 6))
+    centers_geom = panels.centers_xyz @ R_GEOM_FROM_AERO.T
+    forces_geom = (panels.forces_xyz * safety_factor) @ R_GEOM_FROM_AERO.T
+    centroids = model.nodes[model.shell_tris].mean(axis=1)
+    for k in range(panels.n_panels):
+        d = np.linalg.norm(centroids - centers_geom[k], axis=1)
+        tri = model.shell_tris[int(d.argmin())]
+        for n in tri:
+            loads[int(n), :3] += forces_geom[k] / 3.0
+    return loads
+
+
+def panel_pressure_per_tri(
+    model,
+    panels: PanelLoads,
+    *,
+    safety_factor: float = 1.0,
+) -> np.ndarray:
+    """(n_tris,) lateral pressure magnitude [Pa] per skin triangle.
+
+    Each aero panel's force magnitude is assigned to its nearest skin triangle
+    (centroid distance) and divided by that triangle's area; triangles receiving
+    no panel carry zero. Feeds the V.5 strip-bending term in the skin failure
+    check (sigma_b = 0.75 q w^2 / t^2 — the sub-mesh physics this mesh cannot
+    resolve with DKT moments).
+    """
+    centers_geom = panels.centers_xyz @ R_GEOM_FROM_AERO.T
+    forces_geom = (panels.forces_xyz * safety_factor) @ R_GEOM_FROM_AERO.T
+    tris = model.shell_tris
+    centroids = model.nodes[tris].mean(axis=1)
+    v1 = model.nodes[tris[:, 1]] - model.nodes[tris[:, 0]]
+    v2 = model.nodes[tris[:, 2]] - model.nodes[tris[:, 0]]
+    areas = 0.5 * np.linalg.norm(np.cross(v1, v2), axis=1)
+    force_sum = np.zeros(tris.shape[0])
+    for k in range(panels.n_panels):
+        d = np.linalg.norm(centroids - centers_geom[k], axis=1)
+        force_sum[int(d.argmin())] += float(np.linalg.norm(forces_geom[k]))
+    return force_sum / np.maximum(areas, 1e-30)
+
+
 def solve_beam_frame(frame: BeamFrame, loads: np.ndarray) -> FrameResult:
     sections = [frame.section] * frame.elements.shape[0]
     return solve_frame(

@@ -455,27 +455,29 @@ def _active_tri_stress(factored, ds, t):
 
 
 def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
-                 dF: np.ndarray | None = None):
+                 dF: np.ndarray | None = None, qw2_tri: np.ndarray | None = None):
     """skin von-Mises feasibility constraint gradient.
 
-    con = 1 − max_t(vM_t)/σ_allow, membrane stress is thickness-independent.
-    Returns (con_value, grad (nx,)).
+    con = 1 − max_t(vM_t + σ_b,t)/σ_allow, with σ_b = qw2/t² the V.5 strip-bending
+    fiber stress when ``qw2_tri`` (= 0.75·q·w²) is given (else 0). Membrane stress
+    is thickness-independent; σ_b is design-explicit only. Returns (con_value, grad).
     """
     tris = ds.model.shell_tris
     M = tris.shape[0]
+    sb = (qw2_tri / ds.t_tri**2) if qw2_tri is not None else np.zeros(M)
     vms = np.empty(M)
     rows = []
     for t in range(M):
         s, eps, Gt, area, dofs, C_t = _active_tri_stress(factored, ds, t)
         sxx, syy, sxy = s
         vm = np.sqrt(sxx**2 - sxx * syy + syy**2 + 3.0 * sxy**2)
-        vms[t] = vm
+        vms[t] = vm + sb[t]
         rows.append((s, eps, Gt, area, dofs, C_t, vm))
 
     t_star = int(np.argmax(vms))
     s, eps, Gt, area, dofs, C_t, vm = rows[t_star]
     sxx, syy, sxy = s
-    con_value = 1.0 - vm / sigma_allow
+    con_value = 1.0 - (vm + sb[t_star]) / sigma_allow
 
     # ∂vM/∂s
     dg_ds = np.array([
@@ -495,8 +497,11 @@ def grad_skin_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
     if dF is not None:
         du_part += lam @ dF
 
-    # explicit f terms (no t term: membrane stress is thickness-independent)
+    # explicit terms. Membrane stress is thickness-independent, but the V.5
+    # strip-bending adder is: ∂(qw2/t²)/∂t = −2·qw2/t³ on the active band.
     b = int(ds.band_of_tri[t_star])
+    if qw2_tri is not None:
+        du_part[ds.G + b] += -2.0 * float(qw2_tri[t_star]) / float(ds.t_tri[t_star]) ** 3
     lg = int(ds.layup_group_of_band[b])
     off = float(ds.offset_tri[t_star])
     for which, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
