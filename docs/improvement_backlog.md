@@ -69,10 +69,20 @@ discussion, 2026-06-09):
 
 1. **Eigenvalue buckling (K + Kσ linear buckling solve). [?]** The single
    highest-leverage validity item: replaces/validates *both* binding closed-form checks
-   at once. Captures panel curvature (flat-plate kc=4 ignores it → conservative, mass
-   recoverable), combined membrane stress states, beam–panel mode interaction, and
-   **global modes** (section ovalization/crimping) that no closed-form check sees. Also
-   the natural home for prestress effects (see Performance #2).
+   at once. Captures panel curvature (flat-plate kc=4 ignores it → conservative; any
+   recovered credit must still be taken with an imperfection knockdown, NASA
+   SP-8007-style, since curved-shell buckling is imperfection-sensitive), combined
+   membrane stress states, beam–panel mode interaction, and **global modes** (section
+   ovalization/crimping) that no closed-form check sees. Also the natural home for
+   prestress effects (see Performance #2). **Panel-geometry mischaracterization
+   (audited 2026-06-09):** the implemented `b = √(triangle area)` ignores that the
+   physical panels are *long* (h/w ≈ 7 on the 16×8 medium mesh) — physically σcr is
+   set by the panel **width** w ≈ 0.46 m, not b ≈ 0.85 m, so the check is ~3×
+   conservative in level, **mis-scales with beam count** (σcr ∝ n_beams in-model vs
+   ∝ n² physically), and **falsely credits length-cutting members** (rings/webs)
+   that barely raise the real compression σcr. Edge restraint (beams are flexible,
+   not rigid supports) cuts the other way and is uncharacterized. Fix (or eigenvalue-
+   solve) this **before** running Performance #3/#4, which it directly biases.
 2. **Panel-buckling stiffness direction mismatch. [↑?]** The check compares the
    most-compressive *principal* stress (any direction) against a single `D11`
    (`buckling.py:37–59`). With chordwise-heavy banded layups, bending stiffness in the
@@ -199,8 +209,9 @@ Ranked by expected leverage.*
 1. **Hollow sections where the build allows them. [↓, likely the biggest single
    lever]** Beams are *solid* rods — A=πr², I=πr⁴/4 (`frame.py:36–40`), 585 kg of the
    medium design, with Euler buckling binding. Buckling/stiffness-governed members are
-   the textbook case for tubes: at equal mass a tube with R/t≈10 has ~25–50× the I of a
-   solid rod. **The build constrains where hollow is possible** (Manufacturing concept
+   the textbook case for tubes: at equal mass a thin-walled tube has **(R/t)× the I of
+   a solid rod** (~10× at R/t = 10), and at equal I it is severalfold lighter (~0.2×
+   the mass at R/t ≈ 20; bounded by wall buckling and geometry). **The build constrains where hollow is possible** (Manufacturing concept
    shape constraints): only completely straight members, and wound members must be
    convex about the winding axis. So the lever splits into:
    (a) **the straight wound core tube** — promoted from "optional" to the prime hollow
@@ -215,38 +226,58 @@ Ranked by expected leverage.*
    straight↔curved splices. Plausible −10–15% total mass on the medium design even
    after local checks, with (a) likely the cleanest path.
 2. **Skin prestress via winding tension + compression cross-members (tensegrity
-   section). [↓, potentially large]** The arbitrage: skin strength margin is ~7× while
-   panel buckling binds, and tensile prestress raises effective panel buckling capacity
-   ~additively. The build *already intends* a tensioned first wrap. Equilibrate the
+   section). [↓, potentially large]** The arbitrage: skin strength margin is ~7× to
+   failure (2.0 required) while panel buckling binds, and tensile prestress raises
+   effective panel buckling capacity ~additively *in the tensioned direction*.
+   **Direction caveat (audited 2026-06-09):** the hoop wrap's pretension is
+   **chordwise**, transverse to the mostly *spanwise* bending compression — transverse
+   tension still stabilizes, but by a geometry-dependent factor, so the probe and any
+   sizing must use a direction-resolved (biaxial) buckling check, not a scalar offset.
+   The build *already intends* a tensioned first wrap. Equilibrate the
    skin tension with short through-thickness **spreader struts** (and/or webs, #3) that
    concentrate the compression into short members that are cheap to make buckling-proof
    (Euler ∝ 1/L²). Modeling path that fits the current linear framework: prestress as
    one extra self-equilibrated load case (negative-thermal-strain trick), superposed
    onto each aero case; buckling checks use net stress; strut radii + prestress
-   magnitude become DVs; composes with the analytic adjoint. **Cheap first experiment
+   magnitude become DVs. Composes with the analytic adjoint **with one addition**: the
+   prestress nodal load `f_pre = ∫BᵀD(x)ε₀` depends on skin/strut DVs, so the adjoint
+   gains a `λᵀ·∂f_pre/∂x` term (the framework currently assumes design-independent
+   loads). **Cheap first experiment
    (minutes, no re-sizing):** superpose a parametric hoop pretension on the recovered
    membrane stresses of the current optimum and re-evaluate panel-buckling utilization
    — bounds the prize before building anything. Guard with the relaxation knockdown
    (Validity #10) and bond/peel checks at strut feet (Validity #8).
 3. **Shear webs. [↓?]** CNC-cut sandwich webs are already in the manufacturing concept,
-   resist Brazier crush (Validity #7), shorten panel height (buckling ∝ 1/b²), and act
-   as the prestress reaction path. Distinct from the failed F.2 diagonals: webs are
+   resist Brazier crush (Validity #7), restrain the beams laterally, and act as the
+   prestress reaction path. Distinct from the failed F.2 diagonals: webs are
    short-depth chordwise/through-thickness members, not long compression diagonals.
-   Never tried in the sizer.
-4. **Sweep n_beams (and/or reintroduce light rings as panel-breakers). [↓?]** Panel
-   size is the proven currency (the symmetric-spacing negative result), yet beam count
-   has never been varied — no sweep exists anywhere. More, thinner beams shrink every
-   panel quadratically while beam mass grows ~linearly. Cheap with the analytic
-   Jacobian: n_beams ∈ {12, 16, 20, 24, 28} at fixed constraints.
+   Never tried in the sizer. **Corrected expectation (audited 2026-06-09):** for a
+   long panel in spanwise compression, σcr is set by panel *width*, nearly independent
+   of length — so cutting spanwise panel length helps shear buckling but not the
+   governing compression mode. The implemented `b = √area` check would *falsely*
+   reward length-cutting members (Validity #1); credit webs for crush/restraint/
+   prestress, not panel buckling, until the panel model is fixed.
+4. **Sweep n_beams. [↓?]** Panel *width* is the proven currency (the symmetric-spacing
+   negative result), yet beam count has never been varied — no sweep exists anywhere.
+   More, thinner beams cut panel width: physically σcr ∝ 1/w² (~n², long panels) while
+   beam mass grows ~linearly — though the implemented `b = √area` check only credits
+   ~n, so **fix the panel model (Validity #1) before/alongside the sweep** or it will
+   understate the win. Rings cut panel *length*, which buys little against spanwise
+   compression (see #3) — credit them for crush restraint only. Cheap with the
+   analytic Jacobian: n_beams ∈ {12, 16, 20, 24, 28} at fixed constraints (even counts
+   preserve mirror-symmetry grouping).
 5. **Sandwich (cored) skin. [↓]** Skin is ~2/3–3/4 of mass and buckling-governed;
    σcr ∝ D, and a thin core multiplies D at ~5% of the mass of equivalent monolithic
    thickening. Build-compatible: wind inner skin → place core → wind outer skin.
    Needs core wrinkling/shear-crimping checks. Partially redundant with #2 (prestress)
    — measure which wins, probably don't need both at full strength.
-6. **Curvature credit via the eigenvalue buckling solve. [↓]** Validity #1 doubles as
-   a mass lever: flat-plate kc=4 leaves real curved-panel capacity on the table in the
-   constraint that sizes most of the structure. Every recovered Pa of σcr converts
-   directly to thinner skin.
+6. **Curvature + panel-width credit via the eigenvalue buckling solve. [↓]** Validity
+   #1 doubles as a mass lever twice over: flat-plate kc=4 ignores curvature, and the
+   `b = √area` level is ~3× conservative vs a width-based check on the long medium
+   panels. Every recovered Pa of σcr converts directly to thinner skin in the
+   constraint that sizes most of the structure — but take curved-shell credit with an
+   imperfection knockdown (NASA SP-8007-style), and remember the soft edge restraint
+   (flexible beams) claws some margin back.
 7. **KS aggregation of the vector beam constraint. [enabler]** The ∂K caching is
    merged (1.58×→1.98× measured) — still far below the ~n_DV ceiling, which confirms
    the next wall: the vector-valued `beam_con` needs ~n adjoint back-substitutions per

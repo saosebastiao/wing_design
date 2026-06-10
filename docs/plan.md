@@ -92,7 +92,7 @@ wall-clock for every sizing run. Backlog references (V#/M#/P#) point into
 Phase V multiplies the number of sizing runs (mesh sweeps, re-baselines) and Phase P
 adds parameter sweeps and multi-start; at ~1.5 h per medium sizing, compute speed is
 the rate limiter on the whole plan. The FEA system is tiny (768 DOF — `splu` is
-microseconds), so wall-clock is almost certainly dominated by **per-element Python
+sub-millisecond), so wall-clock is almost certainly dominated by **per-element Python
 loops run every evaluate** (K assembly, SensCache build, adjoint contraction, stress
 recovery). Items V.0.2–V.0.5 compose multiplicatively and are exact (no formulation
 change) except KS, which is testable.
@@ -130,9 +130,11 @@ Make the model behave like the real structure before harvesting levers. Three of
 these fixes may move the honest baseline *up*; lever gains must be measured against a
 trustworthy baseline, not the current one.
 
-- **V.1 Shadow prices.** Extract the SLSQP Lagrange multipliers (computed, currently
-  discarded) and report kg-per-unit for each limit (twist 5°, deflection 2% span,
-  buckling SF 1.5) — tells us which *requirement* to renegotiate first. (P#8)
+- **V.1 Shadow prices.** Extract the SLSQP Lagrange multipliers and report kg-per-unit
+  for each limit (twist 5°, deflection 2% span, buckling SF 1.5) — tells us which
+  *requirement* to renegotiate first. Verified available: scipy ≥ 1.15 exposes
+  `res.multipliers` from SLSQP (project venv has 1.17.1); they are for the
+  *normalized* constraints, so un-normalize back to physical units. (P#8)
 - **V.2 Mesh-convergence study of the optimized design.** Sweep n_levels (and spot-check
   n_beams) at fixed constraints; quantifies the element-length-Euler mesh dependence,
   which currently rewards refinement unconservatively. (V#9, V#3)
@@ -188,13 +190,19 @@ before the next lever starts.
 - **P.2 Skin prestress + compression cross-members.** Winding pretension as a
   self-equilibrated load case (the build already commits to the tensioned hoop wrap);
   spreader struts / shear webs concentrate the equilibrating compression into short,
-  buckling-cheap members. New DVs: strut radii + pretension magnitude(s); guard with a
-  prestress-retention knockdown and strut-foot peel checks. (P#2, P#3)
+  buckling-cheap members. New DVs: strut radii + pretension magnitude(s); the adjoint
+  gains a `λᵀ·∂f_pre/∂x` term (prestress load depends on DVs). Use a
+  direction-resolved (biaxial) buckling check — hoop pretension is transverse to the
+  spanwise panel compression. Guard with a prestress-retention knockdown and
+  strut-foot peel checks. (P#2, P#3)
 - **P.3 Sandwich (cored) skin.** Core multiplies panel D at ~5% of the monolithic mass
   cost; needs wrinkling/shear-crimping checks. Partially redundant with P.2 — measure
   which wins. (P#5)
-- **P.4 n_beams sweep + light rings as panel-breakers.** Panel size is the proven
-  currency; beam count has never been varied. (P#4)
+- **P.4 n_beams sweep.** Panel *width* is the proven currency; beam count has never
+  been varied. **Gated on V.3's panel-model verdict**: the current `b = √area` check
+  mis-scales with beam count (∝n vs ∝n² physically) and falsely credits length-cutting
+  members like rings, so sweeping before the fix would understate the win and mis-rank
+  rings vs beams. (P#4)
 - **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
   and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
 

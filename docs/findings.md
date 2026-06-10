@@ -12,12 +12,12 @@ Small wingsail (5 m span, NACA 0018, n_beams=16, n_levels=8) progression:
 
 | Design increment | Mass | Governing constraint | Example |
 | --- | --- | --- | --- |
-| Phase-C beams-only (ring frame) | 43.5 kg | tip deflection | `22_sized_beams.py` |
+| Phase-C beams-only (ring frame) | 43.5 kg | tip deflection | `25_resize_with_skin.py` (baseline leg) |
 | + load-bearing skin co-sized (E.2) | 27.5 kg | tip twist | `25_resize_with_skin.py` |
 | + CLT anisotropic skin (E.4, per-tri-local) | 25.6 kg | tip twist | `26_clt_skin.py` |
 | + span ply datum, no buckling (E.4b) | 19.0 kg | deflection + twist | `28_ply_datum.py` |
 | **Fully constrained:** datum + buckling SF 1.5 | **30.15 kg** | beam + panel buckling | `32_final_design.py` |
-| + 4 spanwise thickness bands | **27.67 kg** (−8.1%) | tip twist | `33_banded_skin.py` |
+| + 4 spanwise thickness bands | **27.67 kg** (−8.1% vs its 30.11 kg uniform re-run) | tip twist | `33_banded_skin.py` |
 
 Medium wingsail (22 m span; symmetric+monotonic radii, span datum, 4 bands, buckling SF 1.5):
 
