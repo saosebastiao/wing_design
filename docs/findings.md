@@ -668,6 +668,32 @@ warm-started here reached 2486.5 vs 2471.7 cold in ex-42 (+0.6%, inside the 2–
 noise floor). (Sweep total ≈ 24 min measured, shared the machine with ex-42's runs
 for its first ~14 min.)
 
+**P#2 prestress probe done (2026-06-10) — the hoop-pretension prize is large and
+invisible to the scalar buckling check.** `examples/44_prestress_probe.py`: medium
+optimum (1-band config, 2471.7 kg, converged+feasible, 382 s re-size), parametric
+chordwise (hoop) pretension superposed on the recovered per-panel membrane stresses
+of all 4 load cases, two metrics: (a) the implemented scalar most-compressive-
+principal check on the net stress, (b) a direction-resolved linear biaxial
+interaction in the span/chord datum frame (util = SF·comp_span/σcr_span −
+SF·tens_chord/σcr_chord + SF·comp_chord/σcr_chord, per-direction σcr from the
+optimized band layup's D11/D22). **Measured:** (a) 1.000 → 0.949 (5 MPa) → 0.880
+(≥50 MPa, saturated — ~12% max credit); (b) 1.174 (0 MPa) → 0.724 (5 MPa) → 0.307
+(10 MPa) → 0.000 (≥20 MPa). **Why:** the hoop wrap tensions the chord direction,
+transverse to the spanwise compression — a scalar principal-stress offset barely
+moves (the principal circle shifts, the compressive branch stays), while a biaxial
+interaction credits transverse tension directly. **Implications:** (1) ~5–10 MPa
+*retained* pretension (winding at 10–20 MPa with the 50% retention knockdown of
+V#10) neutralizes most of the binding panel-buckling utilization — potentially the
+skin-mass lever P.2 hoped for; (2) the sizer cannot price this without a
+direction-resolved panel check or the V.3 eigenvalue solve (prestress enters Kσ);
+(3) **one-sided bound:** the probe superposes tension WITHOUT its equilibrating
+compression (which lands in beams/spreader struts and must be bought) and the
+linear interaction is a crude plate approximation; (b)'s zero-pretension level
+(1.17 > 1.0) also shows the scalar and biaxial checks are not mutually calibrated —
+compare within columns only. V.3's eigen solve with a prestress load case is the
+decision-grade follow-up. (Probe post-processing ≈ seconds on top of the re-size;
+analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -706,6 +732,7 @@ for its first ~14 min.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P#2 prestress probe (2026-06-10) | Hoop pretension superposed on the medium optimum's panel stresses: scalar principal check sees ≤12% credit (saturates 0.88), direction-resolved biaxial interaction goes 1.17→0.72 (5 MPa)→0.31 (10 MPa)→0 (20 MPa) — the P.2 prize is large but requires a biaxial panel check or the V.3 eigen solve to price; probe is one-sided (no equilibrating compression, no retention knockdown applied). P.2 sizing work stays gated on V.3. |
 | V.2 mesh convergence (2026-06-10) | n_levels 6→10 (feasible points): 2807→2486→2271 kg, −9–11% per refinement, no plateau — headlines NOT mesh-converged; bias is unconservative (element-length Euler + b=√area both gain capacity from refinement). 16×12 diverged (diagnostic). n_beams 20×8 ≈ 16×8 total mass, consistent with the V#1 ∝n mis-scaling muting the physical ∝n² panel win — P.4 sweep stays gated on the panel-model fix. Headline comparisons remain valid at fixed 16×8; absolute level carries mesh bias. V.3 (eigenvalue/physical buckling length) is the fix, not finer meshes. |
 | V.1 shadow prices (2026-06-10) | KKT multipliers captured + converted to kg-per-unit (`shadow_prices` on the result; FD-validated 0.02–0.5%). Medium headline (4-band, 2264.6 kg reproduced exactly): twist −41.35 kg/deg (binding, cheapest requirement), beam-buck SF +266.5 / panel-buck SF +151.7 kg/SF-unit, deflection + σ_allow free. 1-band: buckling-only (panel +352.2). Renegotiation order: twist limit first, then buckling SF — which V.3 prices in model-fidelity terms. |
 | V.0.1 profile → cache fix (2026-06-10) | cProfile of 10 medium SLSQP iters (examples/41): 93% of wall = uncached `_beam_vm_grad_one` rebuilding triangle ∂K per beam-vM row. Fixed by threading the existing `SensCache` through `beam_con_jac` (exact; 21 equivalence/FD tests unchanged). 1.13 s/iter raw vs ~26 s/iter recorded → ~23×; medium sizing now ~minutes. V.0.2 vectorization + V.0.3 KS deprioritized — no dominant wall remains; re-profile before investing further. |
