@@ -857,6 +857,15 @@ nothing lost within noise); banding revisits only if a future lever re-prices th
 skin (e.g. P.3 sandwich). 1-band 12-start basin check running for the same
 scrutiny of the headline itself. (2489 s measured, 11 workers.)
 
+**P#9 follow-up: 1-band headline basin check (2026-06-10) — the 2248.0 kg headline
+is basin-robust.** Same 12-start parallel protocol on the medium 1-band V.6 config:
+**12/12 converged feasible, wall 1404 s**; best 2242.5 kg (−0.25% vs the
+default-start 2248.0 — inside noise), worst 2421.6 (+7.7% — random cold starts can
+land in clearly worse basins, reinforcing warm-start discipline). The quoted
+headline stays **2248.0 kg** (default start: deterministic and reproducible via
+`just example 49_rebaseline`); best-of-12 confirms no materially better basin
+exists under this formulation. (1404 s measured, 11 workers.)
+
 ## Decisions log
 
 | Decision | Choice |
