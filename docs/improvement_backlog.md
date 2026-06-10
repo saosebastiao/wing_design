@@ -176,7 +176,7 @@ discussion, 2026-06-09):
    #3/#4) needs these as layout constraints, or its output won't be buildable.
 7. **As-built mass model. [↑]** Mass is ideal-laminate ρπr²L + ρ·t·A
    (`shell_sizing.py:144–151`). Add adders for: realistic wound Vf (local resin-rich
-   zones), LE/TE turnaround overlaps, wrap joints and bond fillets (~770 m of bondline
+   zones), LE/TE turnaround overlaps, wrapped joints and bond fillets (~770 m of bondline
    on the medium wing — order 10–30 kg), the tip gusset (currently *massless* by
    construction), and root socket/bearing hardware. Report "ideal" and "as-built" mass
    separately so optimization findings stay comparable.
