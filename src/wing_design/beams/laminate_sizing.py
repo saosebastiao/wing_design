@@ -40,6 +40,8 @@ from ..structural.buckling import beam_euler_utilization, panel_buckling_utiliza
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
 from .body_loads import body_load_jacobian, body_load_vector
+from .constraints import ConstraintSpec, shadow_prices_from_specs
+from .design_vector import DesignVector
 from .shell_model import BeamShellModel, skin_datum_angles, skin_panel_widths
 from .shell_sizing import (
     beam_lengths, beam_mass, beam_radius_groups, skin_areas, skin_band_areas,
@@ -146,58 +148,6 @@ def laminate_result_is_feasible(
     return True
 
 
-def _shadow_prices(
-    multipliers,
-    *,
-    n: int,
-    L: int,
-    n_mono: int,
-    config: LaminateSizingConfig,
-    m_ref: float,
-) -> dict[str, float] | None:
-    """Convert SLSQP KKT multipliers (normalized problem) to physical shadow prices.
-
-    scipy >= 1.15 returns ``res.multipliers`` = [eq | ineq] rows in constraint-list
-    order (bounds excluded). The sizer's problem is min m/m_ref s.t. g_i >= 0 with
-    g = 1 - v/limit (limits) or 1 - SF*demand/capacity (buckling) or R/SF - 1
-    (Tsai-Wu), so at a binding constraint dm*/dlimit = -m_ref*lam/limit and
-    dm*/dSF = +m_ref*lam/SF. The beam rows share sigma_allow, so their multipliers
-    sum (non-binding rows carry lam = 0). Returns None on layout mismatch rather
-    than mis-attributing rows.
-    """
-    if multipliers is None:
-        return None
-    lam = np.asarray(multipliers, dtype=float).ravel()
-    rows = [("beam", n), ("skin", 1), ("defl", 1), ("twist", 1), ("frac", L)]
-    if n_mono > 0:
-        rows.append(("mono", n_mono))
-    if config.buckling_safety_factor is not None:
-        rows += [("beam_buck", 1), ("panel_buck", 1)]
-    if lam.size != sum(sz for _, sz in rows):
-        return None
-    grp: dict[str, np.ndarray] = {}
-    pos = 0
-    for name, sz in rows:
-        grp[name] = lam[pos:pos + sz]
-        pos += sz
-
-    out: dict[str, float] = {}
-    sigma_lam = float(grp["beam"].sum())
-    if config.skin_failure == "tsai_wu":
-        out["tsai_wu_safety_factor"] = (
-            m_ref * float(grp["skin"][0]) / config.tsai_wu_safety_factor)
-    else:
-        sigma_lam += float(grp["skin"][0])
-    out["sigma_allow_Pa"] = -m_ref * sigma_lam / config.sigma_allow_Pa
-    out["tip_defl_max_m"] = -m_ref * float(grp["defl"][0]) / config.tip_defl_max_m
-    out["tip_twist_max_deg"] = -m_ref * float(grp["twist"][0]) / config.tip_twist_max_deg
-    if config.buckling_safety_factor is not None:
-        sf = config.buckling_safety_factor
-        out["buckling_sf_beam"] = m_ref * float(grp["beam_buck"][0]) / sf
-        out["buckling_sf_panel"] = m_ref * float(grp["panel_buck"][0]) / sf
-    return out
-
-
 def size_beam_shell_laminate(
     model: BeamShellModel,
     load_arrays: list[np.ndarray],
@@ -232,7 +182,12 @@ def size_beam_shell_laminate(
     if config.panel_width_mode == "strip":
         b2_panel = skin_panel_widths(model) ** 2
     elif config.panel_width_mode == "sqrt_area":
-        b2_panel = Atri
+        # sqrt-roundtrip kept deliberately: the historical check computed
+        # b = sqrt(area) then b**2, which differs from the raw area by ~1 ulp -
+        # enough to flip SLSQP cold-start basins on small problems
+        # (test_analytic_matches_fd_optimum, 2026-06-10). Keeps every legacy-mode
+        # result bit-reproducible.
+        b2_panel = np.sqrt(Atri) ** 2
     else:
         raise ValueError(f"unknown panel_width_mode: {config.panel_width_mode!r}")
     # V.5 strip-bending: 0.75*q*w^2 per aero case (physical strip width regardless
@@ -247,9 +202,10 @@ def size_beam_shell_laminate(
     A_skin_area = float(Atri.sum())
     band_of_tri = skin_band_map(model, B)
     band_area = skin_band_areas(model, band_of_tri, B)
-    nx = G + B + 2 * L
-    f0_lo = G + B
-    f45_lo = G + B + L
+    dv = DesignVector(("r_group", G), ("t_band", B), ("f0", L), ("f45", L))
+    nx = dv.nx
+    f0_lo = dv.slice("f0").start
+    f45_lo = dv.slice("f45").start
     if x0 is None:
         x0 = np.concatenate([
             np.full(G, config.r_max), np.full(B, config.t_max),
@@ -432,22 +388,14 @@ def size_beam_shell_laminate(
 
     lo_b, hi_b = laminate_design_bounds(model, config)
     bounds = [(float(lo_b[i]), float(hi_b[i])) for i in range(nx)]
-    constraints = [
-        {"type": "ineq", "fun": beam_con},
-        {"type": "ineq", "fun": skin_con},
-        {"type": "ineq", "fun": defl_con},
-        {"type": "ineq", "fun": twist_con},
-        {"type": "ineq", "fun": frac_con},
-    ]
-    if mono_lo.size > 0:
-        constraints.append({"type": "ineq", "fun": monotonic_con})
     if config.buckling_safety_factor is not None:
         def beam_buck_con(x):
             return np.array([1.0 - evaluate(x)[4]])
         def panel_buck_con(x):
             return np.array([1.0 - evaluate(x)[5]])
-        constraints += [{"type": "ineq", "fun": beam_buck_con}, {"type": "ineq", "fun": panel_buck_con}]
 
+    # Analytic Jacobian closures (registered by name in the spec list below).
+    jacs: dict = {}
     if config.use_analytic_jacobian:
         from ..structural.beam_shell import FactoredBeamShell
 
@@ -671,15 +619,10 @@ def size_beam_shell_laminate(
                 J[k, int(mono_hi[k])] += -1.0
             return J
 
-        constraints[0]["jac"] = beam_con_jac
-        constraints[1]["jac"] = skin_con_jac
-        constraints[2]["jac"] = defl_con_jac
-        constraints[3]["jac"] = twist_con_jac
-        constraints[4]["jac"] = frac_con_jac
-        idx = 5
-        if mono_lo.size > 0:
-            constraints[idx]["jac"] = monotonic_con_jac
-            idx += 1
+        jacs = {
+            "beam_vm": beam_con_jac, "skin": skin_con_jac, "defl": defl_con_jac,
+            "twist": twist_con_jac, "frac": frac_con_jac, "mono": monotonic_con_jac,
+        }
         if config.buckling_safety_factor is not None:
             def beam_buck_con_jac(x):
                 return _binding_grad(
@@ -693,8 +636,36 @@ def size_beam_shell_laminate(
                         fac, ds, panel_kc=config.panel_kc,
                         safety_factor=config.buckling_safety_factor, areas=b2_panel, cache=cache, dF=dF)).reshape(1, nx)
 
-            constraints[idx]["jac"] = beam_buck_con_jac
-            constraints[idx + 1]["jac"] = panel_buck_con_jac
+            jacs["beam_buck"] = beam_buck_con_jac
+            jacs["panel_buck"] = panel_buck_con_jac
+
+    # P.0: one named spec per constraint — append HERE to add a constraint; the
+    # scipy dicts, Jacobian registration, and shadow-price attribution all follow.
+    specs = [
+        ConstraintSpec("beam_vm", beam_con, n, jacs.get("beam_vm"),
+                       ("limit", "sigma_allow_Pa", config.sigma_allow_Pa)),
+        ConstraintSpec("skin", skin_con, 1, jacs.get("skin"),
+                       (("sf", "tsai_wu_safety_factor", config.tsai_wu_safety_factor)
+                        if config.skin_failure == "tsai_wu"
+                        else ("limit", "sigma_allow_Pa", config.sigma_allow_Pa))),
+        ConstraintSpec("defl", defl_con, 1, jacs.get("defl"),
+                       ("limit", "tip_defl_max_m", config.tip_defl_max_m)),
+        ConstraintSpec("twist", twist_con, 1, jacs.get("twist"),
+                       ("limit", "tip_twist_max_deg", config.tip_twist_max_deg)),
+        ConstraintSpec("frac", frac_con, L, jacs.get("frac"), None),
+    ]
+    if mono_lo.size > 0:
+        specs.append(ConstraintSpec("mono", monotonic_con, int(mono_lo.size),
+                                    jacs.get("mono"), None))
+    if config.buckling_safety_factor is not None:
+        sf = config.buckling_safety_factor
+        specs += [
+            ConstraintSpec("beam_buck", beam_buck_con, 1, jacs.get("beam_buck"),
+                           ("sf", "buckling_sf_beam", sf)),
+            ConstraintSpec("panel_buck", panel_buck_con, 1, jacs.get("panel_buck"),
+                           ("sf", "buckling_sf_panel", sf)),
+        ]
+    constraints = [s.scipy_dict() for s in specs]
 
     res = minimize(
         mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
@@ -702,10 +673,8 @@ def size_beam_shell_laminate(
         options={"maxiter": maxiter, "ftol": ftol},
     )
 
-    shadow = _shadow_prices(
-        getattr(res, "multipliers", None), n=n, L=L, n_mono=int(mono_lo.size),
-        config=config, m_ref=m_ref,
-    )
+    shadow = shadow_prices_from_specs(
+        getattr(res, "multipliers", None), specs, m_ref=m_ref)
 
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
