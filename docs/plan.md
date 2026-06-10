@@ -119,13 +119,12 @@ change) except KS, which is testable.
   2026-06-10 — this WAS the wall; see V.0.1); sparse Cholesky instead of `splu` only
   if the profile shows factorization mattering at finer meshes (it doesn't today:
   `splu` ≈ 0.3 s / 10 medium iterations).
-- **V.0.7 Engineering guardrails.** GitHub Actions CI — but with a fast/slow split:
-  the full suite **measured 19 m 30 s** (160 tests, 2026-06-09, Python 3.13), so CI
-  needs a pytest marker separating fast unit tests (every push) from the SLSQP sizing
-  tests (separate/less frequent job). Plus: an example smoke layer (2–3 representative
-  examples at maxiter≈10 / tiny mesh); a pairwise config-flag smoke matrix (untested
-  combos exist, e.g. `per_band_layup × tsai_wu`); declare `gmsh` in pyproject. Land
-  any time — these guard the V/M/P code churn. (Toolbox #2, #3, #5)
+- **V.0.7 Engineering guardrails. — CI LANDED (2026-06-10).** `sizing` marker on the
+  19 SLSQP tests measured ≥5 s; fast subset = **149 tests / 12.2 s** on every push/PR,
+  sizing job on main + nightly (`.github/workflows/ci.yml`). gmsh already declared.
+  Still pending: example smoke layer (2–3 examples at maxiter≈10 — note example 14
+  is currently broken: imports `meshio`, no longer in the venv) and the pairwise
+  config-flag smoke matrix. (Toolbox #2, #3, #5)
 - **V.0.8 Python version.** Migrated to **3.13** (2026-06-09; full suite green,
   160/160). **3.14 is blocked solely by build123d 0.10.0** (`requires-python <3.14`,
   OCP pin `<7.9`; the cp314 OCP wheels already exist and build123d's dev branch
