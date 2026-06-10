@@ -418,7 +418,11 @@ def size_beam_shell_laminate(
                 f45_tri=(f45_tri if config.skin_failure == "tsai_wu" else None),
                 f90_tri=(f90_tri if config.skin_failure == "tsai_wu" else None),
             )
-            return facs, ds, sections
+            # Design-only ∂K/∂x assembly, built ONCE per design point and reused
+            # across every load case and every constraint-gradient call below.
+            from .sensitivity import prepare_sensitivity
+            sens_cache = prepare_sensitivity(ds, facs[0])
+            return facs, ds, sections, sens_cache
 
         def _jac_lookup(x):
             key = np.asarray(x, dtype=float).tobytes()
@@ -430,11 +434,11 @@ def size_beam_shell_laminate(
 
         def _binding_grad(x, grad_fn):
             """Evaluate grad_fn over all load cases, pick the binding (min con) lc, return its row."""
-            facs, ds, _sections = _jac_lookup(x)
+            facs, ds, _sections, sens_cache = _jac_lookup(x)
             best_con = np.inf
             best_grad = None
             for fac in facs:
-                con, grad = grad_fn(fac, ds)
+                con, grad = grad_fn(fac, ds, sens_cache)
                 if con < best_con:
                     best_con = con
                     best_grad = grad
@@ -490,7 +494,7 @@ def size_beam_shell_laminate(
 
         def beam_con_jac(x):
             """Full (n, nx) Jacobian: row e is ∂(1 − vM_e/σ)/∂x at e's binding load case."""
-            facs, ds, sections = _jac_lookup(x)
+            facs, ds, sections, _sens_cache = _jac_lookup(x)
             # per-element binding lc = the lc achieving max vM_e (matches evaluate's max).
             vm_lc = np.empty((len(facs), n))
             for li, fac in enumerate(facs):
@@ -504,22 +508,23 @@ def size_beam_shell_laminate(
         def skin_con_jac(x):
             if config.skin_failure == "tsai_wu":
                 row = _binding_grad(
-                    x, lambda fac, ds: grad_skin_tsai_wu(
-                        fac, ds, safety_factor=config.tsai_wu_safety_factor))
+                    x, lambda fac, ds, cache: grad_skin_tsai_wu(
+                        fac, ds, safety_factor=config.tsai_wu_safety_factor, cache=cache))
             else:
                 row = _binding_grad(
-                    x, lambda fac, ds: grad_skin_vm(fac, ds, config.sigma_allow_Pa))
+                    x, lambda fac, ds, cache: grad_skin_vm(
+                        fac, ds, config.sigma_allow_Pa, cache=cache))
             return row.reshape(1, nx)
 
         def defl_con_jac(x):
-            def gf(fac, ds):
-                g, grad_g = grad_tip_defl(fac, ds)
+            def gf(fac, ds, cache):
+                g, grad_g = grad_tip_defl(fac, ds, cache=cache)
                 return 1.0 - g / config.tip_defl_max_m, -grad_g / config.tip_defl_max_m
             return _binding_grad(x, gf).reshape(1, nx)
 
         def twist_con_jac(x):
-            def gf(fac, ds):
-                g, grad_g = grad_tip_twist(fac, ds)
+            def gf(fac, ds, cache):
+                g, grad_g = grad_tip_twist(fac, ds, cache=cache)
                 return 1.0 - g / config.tip_twist_max_deg, -np.degrees(grad_g) / config.tip_twist_max_deg
             return _binding_grad(x, gf).reshape(1, nx)
 
@@ -549,15 +554,15 @@ def size_beam_shell_laminate(
         if config.buckling_safety_factor is not None:
             def beam_buck_con_jac(x):
                 return _binding_grad(
-                    x, lambda fac, ds: grad_beam_buckling(
+                    x, lambda fac, ds, cache: grad_beam_buckling(
                         fac, ds, euler_K=config.euler_K,
-                        safety_factor=config.buckling_safety_factor)).reshape(1, nx)
+                        safety_factor=config.buckling_safety_factor, cache=cache)).reshape(1, nx)
 
             def panel_buck_con_jac(x):
                 return _binding_grad(
-                    x, lambda fac, ds: grad_panel_buckling(
+                    x, lambda fac, ds, cache: grad_panel_buckling(
                         fac, ds, panel_kc=config.panel_kc,
-                        safety_factor=config.buckling_safety_factor, areas=Atri)).reshape(1, nx)
+                        safety_factor=config.buckling_safety_factor, areas=Atri, cache=cache)).reshape(1, nx)
 
             constraints[idx]["jac"] = beam_buck_con_jac
             constraints[idx + 1]["jac"] = panel_buck_con_jac
