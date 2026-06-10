@@ -866,6 +866,37 @@ headline stays **2248.0 kg** (default start: deterministic and reproducible via
 `just example 49_rebaseline`); best-of-12 confirms no materially better basin
 exists under this formulation. (1404 s measured, 11 workers.)
 
+**P.1 core tube done (2026-06-10) — NEGATIVE result at medium scale, clear lesson:
+the optimizer zeroes a centroidal tube; the hollow-member lever must go to the
+form beams (P#1b).** Full machinery built and FD-validated: annular sections
+(`BeamSection.annular`), tube geometry on the pivot axis with per-segment fit
+bounds and stiff massless bonds (`build_beam_shell_model(core_tube=True)`),
+`r_tube(S)`/`t_wall(S)` DV blocks via the P.0 `DesignVector`, annulus validity +
+monotonic-taper linear specs, the NEW wall-crimping check (σcr = 0.65·0.605·E·t/r,
+SP-8007-class knockdown) as a vector `ConstraintSpec`, annulus ∂K
+(`dkloc_annular`) through the SensCache/adjoint with tube explicit terms in the
+vM/Euler gradients, tube columns in the V.4 body-load ∂f/∂x — wall-crimping
+gradient FD-validated ≤2e-4 and the analytic tube optimum is FD-stationary
+(`tests/beams/test_core_tube.py`). `examples/50_core_tube.py`, medium 16×8 V.6
+config, both runs converged AND feasible, eigen-verified (λ 2.24/2.21):
+**baseline 2261.4 kg → tube 2260.7 kg (−0.0%)**, with the optimizer pinning
+r_tube = 20 mm (the lower bound; fit bounds allowed 233–378 mm) and t_wall = 1 mm
+— a vestigial 5 kg tube, wall util 0.00, beams unchanged at 812 kg. **Why:** the
+tube sits on the pivot axis — the section centroid — where added material has
+near-zero bending leverage; the existing structure is already a monocoque of
+depth 0.5–1.9 m, so a centroidal tube's I (∝ r³t) is negligible against the OML
+section. The textbook (R/t)× tube advantage applies to a standalone column, not
+to a member at the neutral axis of a far deeper section. **Implications:**
+(1) P#1a (core tube as a mass lever) is dead at this scale — it remains a
+manufacturing aid (mandrel/assembly datum) whose ~5 kg is affordable;
+(2) the hollow lever redirects to **P#1b: hollow straight FORM-beam segments**
+(at the OML where the leverage lives; beam-buck SF still carries +514 kg/SF on
+the baseline) — gated on per-beam path-straightness verification (M#4); (3) a
+second ulp-association regression (body-load product regrouping, baseline
+2248.0→2261.4 cold-start shift, inside noise) was caught by the acceptance
+protocol and bit-compat restored — the protocol works. (636 s + 1037 s measured,
+analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -904,6 +935,7 @@ exists under this formulation. (1404 s measured, 11 workers.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P.1 core tube (2026-06-10) | Full annular-member machinery built + FD-validated (sections, fit-bounded r/t DV blocks, wall-crimping check w/ 0.65 knockdown, annulus ∂K through the adjoint). **NEGATIVE at medium scale: optimizer zeroes the tube** (r→20 mm bound, −0.0% mass, eigen 2.21 ✓) — a centroidal tube has no bending leverage inside a 0.5–1.9 m-deep monocoque. P#1a dead as a mass lever (kept as manufacturing aid); hollow lever redirects to **P#1b hollow form-beam segments** (OML leverage; beam-buck SF +514 kg/SF still dominant). Machinery reusable for P#1b. |
 | P.0 sizer refactor (2026-06-10) | `DesignVector` (named blocks = single source of x-layout) + `ConstraintSpec` (name, closures, rows, shadow conversion per constraint; scipy dicts/Jacobian registration/multiplier attribution derive from one list). Behavior-preserving: 189 tests green, V.6 medium headline reproduced bit-exactly (2248.0284 kg, 290 iters, shadows to the digit). Adding a constraint or DV block is now one append — the P.1 gate is open. Bonus lesson: a 1-ulp change (sqrt(area)² → area in panel b²) flipped an FD cold-start basin 10% on a small problem — bisected, sqrt-roundtrip deliberately retained in the legacy path for bit-reproducibility; cold-start optima are ulp-sensitive, warm starts + deterministic default starts are the protocol. |
 | P#9 multi-start at scale (2026-06-10) | 12 parallel starts (V.0.4 pool, 11 workers, 41 min) on the medium 4-band config: best feasible 2267.4 kg = +0.9% vs the 1-band 2248.0 → **banding dead under strip-mode buckling** (its −8.1% was a legacy-panel-model artifact); 1-band becomes the standard P-phase config. Feasible basin scatter 2.9% = the noise floor measured at medium scale. Parallel==serial bit-exact (tested); speedup ~2.9× (stragglers + contention). |
 | V.6 re-baseline (2026-06-10) | New eigen-verified headlines under the honest model (strip widths + upright/heel gravity + distributed pressure): **small 25.13 kg** (4-band, λ 2.00; −9.2% vs old 27.67) / **medium 2248.0 kg** (1-band, λ 2.26; old 4-band 2264.6 not comparable — legacy checks, aero-only). Medium 4-band landed +4.4% heavier in a beam-buck-dominated basin (warm start included) → banding's value under strip-mode buckling unresolved, P#9 multistart running. Beam-buck SF is now the dominant price (+531 kg/SF) — beams are the next physics to attack (P.1 hollow members). STL + worst-mode VTU exported (`just example 49_rebaseline`). |

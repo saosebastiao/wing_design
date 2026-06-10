@@ -233,11 +233,15 @@ before the next lever starts.
   Behavior-preserving verified: 189 tests green + the V.6 medium headline reproduced
   bit-exactly. IPOPT fallback unchanged (trigger: SLSQP stalls or DVs > ~150 — watch
   during P.1). (Toolbox #1, #4)
-- **P.1 Hollow members.** New member type: the straight filament-wound **core tube**
-  (permanent structural mandrel) with `r(z)`, `t_wall(z)` DVs + wall-buckling/crimping
-  check. If the tube alone doesn't capture the win, add straight in-wing wound beam
-  segments spliced to RTM'd solid curved transition segments. Likely the biggest
-  single lever (beams are solid rods today). (P#1)
+- **P.1 Hollow members. — P#1a core tube DONE (2026-06-10): NEGATIVE.** Full annular
+  machinery built + FD-validated (reusable), but the optimizer zeroes a centroidal
+  tube (−0.0% mass, r pinned at the lower bound) — no bending leverage at the
+  neutral axis of a 0.5–1.9 m-deep monocoque. Tube stays as a manufacturing aid
+  only. **Next: P#1b hollow straight FORM-beam segments** — at the OML where the
+  leverage lives (beam-buck SF +514 kg/SF still dominant); verify per-beam path
+  straightness against the splines (M#4), wound-hollow only where straight, solid
+  RTM through the curved transition, splice joints checked. `examples/50_core_tube.py`.
+  (P#1)
 - **P.2 Skin prestress + compression cross-members. — DEMOTED (2026-06-10):** the
   V.3 eigen parametric shows λ_cr 2.443→2.445 under 5–20 MPa hoop pretension at the
   current optimum (the critical-mode cluster is pretension-insensitive); revisit only

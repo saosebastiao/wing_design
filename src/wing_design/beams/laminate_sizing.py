@@ -310,8 +310,12 @@ def size_beam_shell_laminate(
         """Aero × accel combos; aero-only when no accelerations configured."""
         if not accels:
             return load_arrays
-        sections = build_sections(x, radii)
-        areas_e = np.array([sec.A for sec in sections])
+        # areas only when a tube is present: the no-tube path keeps the original
+        # radii-based product association inside body_load_vector (bit-compat —
+        # regrouping 0.5*rho*pi*r^2*L is a 1-ulp change that shifts cold-start
+        # basins; see the P.0 ulp lesson).
+        areas_e = (np.array([sec.A for sec in build_sections(x, radii)])
+                   if tube else None)
         out = []
         for lc in load_arrays:
             for acc in accels:
