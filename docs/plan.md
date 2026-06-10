@@ -450,6 +450,22 @@ per-element/per-triangle ∂K matrices once per design point (reused across `bea
 rows) and/or aggregate the beam-stress constraint (KS/max → 1 adjoint), and vectorize the
 assembly. Default stays FD until that lands.
 
+**Analytic-Jacobian caching done (2026-06-09) — exact, 1.58×→1.98×.** Implemented the
+first follow-up above: `beams.sensitivity.prepare_sensitivity(ds, factored) -> SensCache`
+precomputes every beam element's `∂kg/∂r` and every triangle's `∂ke/∂t`,`∂ke/∂f0`,`∂ke/∂f45`
+(the trig/Q-transform builds) **once per design point**; `lambdaT_dK_x_cached` reuses them as
+cheap `λ[dofs]·(∂k·u[dofs])` dots. Each `grad_*` takes an optional `cache=` (lazy-builds if
+None, so the FD-validation tests are unchanged), and `evaluate_jac` builds one cache per
+design point and threads it through all constraints (reused across `beam_con`'s n rows and
+all load cases — the cache is design-only). **Exact:** gradients are bit-for-bit identical
+(same math, not recomputed) — cached==uncached to ≤1e-12, and every existing FD-grad test
+passes unchanged. Re-measured `examples/38` (same small problem): FD 546.4 s → analytic
+**276.2 s = 1.98× faster** (up from 1.58×), same feasible optimum (31.13 vs 31.15 kg,
+buckling 1.0). The remaining gap to the ~n_DV× ceiling is now the n adjoint *back-substitutions*
+for the vector `beam_con` (KS/max aggregation → 1 adjoint is the deferred next lever; one
+non-cached path, `_beam_vm_grad_one`, still calls `lambdaT_dK_x` directly — a candidate
+follow-up). Default stays FD.
+
 **Tip gusset in the sizer done (2026-06-09) — NEGATIVE result (heavier).** A rigid,
 massless tip-gusset (stiff connector-beam clique among the tip-ring nodes) is now opt-in
 in the laminate sizer (`build_beam_shell_model(tip_gusset_radius=...)` /
@@ -487,6 +503,18 @@ default; the helper is kept (built+tested) for completeness. **Takeaway across F
 diagonals / tip gusset / this:** the design is robustly skin/panel-buckling-dominated, so
 beam-layout levers don't reduce mass — only direct skin tailoring (per-band thickness,
 −8.1%) does.
+
+**Re-spacing under a *binding* deflection budget (2026-06-09) — small positive (−0.6%).**
+Re-ran even-vs-symmetric-weighted on the medium wingsail with the tip-deflection budget
+*tightened to bind* (0.5% span = 110 mm; the default 2% is slack, deflects ~156 mm only at
+the unconstrained optimum). Both converged feasible at **defl 110/110 mm and buckling
+1.00/1.00** (deflection and panel-buckling *co-bind*): even **2362.1 kg → symmetric-weighted
+2347.9 kg = −14.3 kg (−0.6%)** (beams 479→501, skin 1883→1847). So once *stiffness* governs
+rather than buckling alone, clustering beams toward the high-stress regions flips re-spacing
+from negative (+2.7% at the slack budget) to a small positive — but buckling still co-binds,
+so the skin keeps doing most of the work and the win stays marginal. Reinforces the
+cross-cutting lesson: layout levers move the needle only at the margin; skin tailoring is
+the real lever. (1 h 41 m, analytic Jacobian.)
 
 ### Phase F — Frame-field-driven layout
 
@@ -645,6 +673,8 @@ src/wing_design/
 | Multi-start sizing | Serial parallel-ready `size_beam_shell_laminate_multistart`: N seeded starts (start 0 = default → never worse), best-feasible-by-mass selection (`laminate_result_is_feasible`); sizer gained an `x0` param + `laminate_design_bounds` helper. Machinery built + unit-tested via a stubbed sizer; NOT run at scale (cost). Parallel exec + full converged headline deferred. |
 | Beam symmetry + monotonic taper | Sizer DEFAULT: mirror-paired beams share one radius DV (`beam_radius_groups`, auto-detect symmetric placement + fallback), radius monotonic non-increasing keel→tip (algebraic constraints). ~Halves radius DVs → faster FD-Jacobian. Changes the default (prior headlines historical); `result.radii` still full length n. Full medium run converged feasible: 2316.6 kg (beams 585 / skin 1731), twist 5.0° / buck 1.0, 187 iters, 1 h 22 m; beams taper 35.7→4.0 mm symmetric. Sized geometry exported as STL (`exports/wingsail_sized_*.stl`). |
 | Analytic (adjoint) Jacobian | Opt-in `use_analytic_jacobian` (default off; FD byte-identical): adjoint analytic gradients for objective + all 6 FEA constraints, one reused `splu` factorization (`beams.sensitivity`, `solve_beam_shell_laminate_factored`). Every gradient FD-validated (≤~1e-4); TDD caught the ∂klocal/∂r internal-force term + the vector-valued beam_con. Same feasible optimum as FD; measured **1.58× faster** (489→309 s, small problem). Speedup implementation-bound (vector beam_con = n adjoint solves; uncached Python ∂K assembly) — follow-up: cache per-element ∂K + aggregate beam constraint for the big win. |
+| Analytic-Jacobian caching | First follow-up to the above, **exact** (no formulation change): `prepare_sensitivity → SensCache` precomputes every element/triangle ∂K (the trig/Q-transform builds) once per design point; `lambdaT_dK_x_cached` reuses them as cheap dots; `grad_*` take an optional `cache=` (lazy if None → FD tests unchanged); `evaluate_jac` builds one cache per design point, threaded through all constraints + load cases. Cached==uncached ≤1e-12; all FD-grad tests pass unchanged. `examples/38` re-measured: FD 546→analytic **276 s = 1.98×** (was 1.58×), same optimum. Remaining gap = n adjoint back-subs for vector beam_con (KS aggregation = deferred next lever; `_beam_vm_grad_one` still uncached). Default stays FD. |
+| Re-spacing under binding deflection | Re-ran even-vs-symmetric-weighted spacing (medium) with the tip-deflection budget tightened to **bind** (0.5% span = 110 mm; default 2% is slack). Both feasible, defl & panel-buckling **co-bind** (110/110 mm, 1.00/1.00): even 2362.1 → symmetric-weighted 2347.9 kg = **−14.3 kg (−0.6%)**. So once stiffness governs (not buckling alone), re-spacing flips from +2.7% (slack) to a small positive — but buckling co-binds so the win stays marginal. Confirms layout levers help only at the margin; skin tailoring is the real lever. (1 h 41 m, analytic Jac.) |
 | Tip gusset in the sizer | Opt-in rigid massless tip-node clique (`build_beam_shell_model(tip_gusset_radius=...)`/`model_with_tip_gusset`), assembled into K but excluded from force recovery → composes with the analytic Jacobian (constant stiffness). **Negative for mass:** medium free-tip 2264.6 → gusset 2453.1 kg (+8.3%), both feasible/converged, despite twist 5.0°→0.03° and tip defl 156→71 mm. Buckling-governed design + rigid coupling redistributes load → must add material. Twist not the mass driver. Keep opt-in for twist/stiffness, not mass. |
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
