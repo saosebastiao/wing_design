@@ -121,8 +121,9 @@ class LaminateSizingResult:
     # P.1 core tube (None when the model has no tube)
     r_tube: np.ndarray | None = None
     t_wall: np.ndarray | None = None
+    t_hollow: np.ndarray | None = None     # P#1b wall per hollow radius-group
     tube_mass_kg: float = 0.0
-    max_tube_wall_util: float = 0.0
+    max_tube_wall_util: float = 0.0        # over ALL annular elements (tube + hollow)
 
 
 def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
@@ -137,6 +138,12 @@ def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
         rb = np.asarray(model.tube_r_bounds, dtype=float)
         lo = np.concatenate([lo, np.full(S, config.tube_r_min), np.full(S, config.tube_t_min)])
         hi = np.concatenate([hi, rb, rb])
+    if (getattr(model, "hollow_elements", None) is not None
+            and len(model.hollow_elements) > 0):
+        goe, _G = beam_radius_groups(model)
+        Hn = len({int(goe[e]) for e in model.hollow_elements})
+        lo = np.concatenate([lo, np.full(Hn, config.tube_t_min)])
+        hi = np.concatenate([hi, np.full(Hn, config.r_max)])
     return lo, hi
 
 
@@ -232,9 +239,33 @@ def size_beam_shell_laminate(
     tube = getattr(model, "tube_elements", None) is not None
     S = len(model.tube_elements) if tube else 0
     tube_el = model.tube_elements if tube else None
+    hollow = (getattr(model, "hollow_elements", None) is not None
+              and len(model.hollow_elements) > 0)
+    if hollow:
+        hollow_el = np.asarray(model.hollow_elements, dtype=int)
+        hollow_groups = sorted({int(group_of_element[e]) for e in hollow_el})
+        # all-or-none per group (mirror pairs share the segment, so this holds
+        # by construction; guard against future grouping changes)
+        hset = set(hollow_el.tolist())
+        for g in hollow_groups:
+            members = np.nonzero(group_of_element == g)[0]
+            if not all(int(e) in hset for e in members):
+                raise ValueError(f"radius group {g} mixes hollow and solid elements")
+        H = len(hollow_groups)
+        t_idx_of_group = {g: i for i, g in enumerate(hollow_groups)}
+        hollow_mask = np.zeros(model.n_form_elements, dtype=bool)
+        hollow_mask[hollow_el] = True
+        # per hollow element: its t_hollow index
+        t_idx_of_element = np.array([t_idx_of_group[int(group_of_element[e])]
+                                     for e in hollow_el], dtype=int)
+    else:
+        H = 0
+    annular = tube or hollow
     blocks = [("r_group", G), ("t_band", B), ("f0", L), ("f45", L)]
     if tube:
         blocks += [("r_tube", S), ("t_wall", S)]
+    if hollow:
+        blocks += [("t_hollow", H)]
     dv = DesignVector(*blocks)
     nx = dv.nx
     f0_lo = dv.slice("f0").start
@@ -247,12 +278,52 @@ def size_beam_shell_laminate(
         t_w = np.asarray(x[dv.slice("t_wall")], dtype=float)
         return r_t, np.minimum(t_w, r_t)
 
+    def decode_hollow(x, radii_form):
+        """(t_eff per hollow element,) clamped to the element's outer radius."""
+        t_h = np.asarray(x[dv.slice("t_hollow")], dtype=float)[t_idx_of_element]
+        return np.minimum(t_h, radii_form[hollow_el])
+
     def build_sections(x, radii_form):
-        if not tube:
-            return [BeamSection.circular(float(r)) for r in radii_form]
-        r_t, t_eff = decode_tube(x)
-        return ([BeamSection.circular(float(r)) for r in radii_form]
-                + [BeamSection.annular(float(r_t[s]), float(t_eff[s])) for s in range(S)])
+        if hollow:
+            t_eff_h = decode_hollow(x, radii_form)
+            secs = []
+            hi = {int(e): k for k, e in enumerate(hollow_el)}
+            for e, r in enumerate(radii_form):
+                if hollow_mask[e]:
+                    secs.append(BeamSection.annular(float(r), float(t_eff_h[hi[e]])))
+                else:
+                    secs.append(BeamSection.circular(float(r)))
+        else:
+            secs = [BeamSection.circular(float(r)) for r in radii_form]
+        if tube:
+            r_t, t_eff = decode_tube(x)
+            secs += [BeamSection.annular(float(r_t[s]), float(t_eff[s])) for s in range(S)]
+        return secs
+
+    def annular_arrays(x, radii_form):
+        """(elements, r, t, r_cols, t_cols) over the combined annular set
+        (hollow form elements first, then tube segments)."""
+        els, rs, ts, rcols, tcols = [], [], [], [], []
+        if hollow:
+            t_eff_h = decode_hollow(x, radii_form)
+            for k, e in enumerate(hollow_el):
+                els.append(int(e))
+                rs.append(float(radii_form[e]))
+                ts.append(float(t_eff_h[k]))
+                rcols.append(int(group_of_element[e]))
+                tcols.append(dv.slice("t_hollow").start + int(t_idx_of_element[k]))
+        if tube:
+            r_t, t_eff = decode_tube(x)
+            r0 = dv.slice("r_tube").start
+            t0 = dv.slice("t_wall").start
+            for s in range(S):
+                els.append(int(tube_el[s]))
+                rs.append(float(r_t[s]))
+                ts.append(float(t_eff[s]))
+                rcols.append(r0 + s)
+                tcols.append(t0 + s)
+        return (np.asarray(els, dtype=int), np.asarray(rs), np.asarray(ts),
+                np.asarray(rcols, dtype=int), np.asarray(tcols, dtype=int))
     if x0 is None:
         x0 = np.concatenate([
             np.full(G, config.r_max), np.full(B, config.t_max),
@@ -261,6 +332,8 @@ def size_beam_shell_laminate(
         if tube:
             x0 = np.concatenate([x0, 0.8 * np.asarray(model.tube_r_bounds, dtype=float),
                                  np.full(S, 0.003)])
+        if hollow:
+            x0 = np.concatenate([x0, np.full(H, 0.003)])
     else:
         x0 = np.asarray(x0, dtype=float)
         if x0.shape != (nx,):
@@ -323,7 +396,7 @@ def size_beam_shell_laminate(
         # regrouping 0.5*rho*pi*r^2*L is a 1-ulp change that shifts cold-start
         # basins; see the P.0 ulp lesson).
         areas_e = (np.array([sec.A for sec in build_sections(x, radii)])
-                   if tube else None)
+                   if annular else None)
         out = []
         for lc in load_arrays:
             for acc in accels:
@@ -365,9 +438,9 @@ def size_beam_shell_laminate(
         sections = build_sections(x, radii)
         areas_e = np.array([sec.A for sec in sections])
         I_e = np.array([sec.Iy for sec in sections])
-        if tube:
-            r_t, t_eff = decode_tube(x)
-            tube_util = np.zeros(S)
+        if annular:
+            ann_el, ann_r, ann_t, _arc, _atc = annular_arrays(x, radii)
+            tube_util = np.zeros(len(ann_el))
         wb = np.zeros(n)
         ws = 0.0
         md = 0.0
@@ -402,12 +475,12 @@ def size_beam_shell_laminate(
             if config.buckling_safety_factor is not None:
                 # I-based Euler when a tube is present (annular sections); the
                 # radii-based form is kept for the no-tube path bit-compatibly.
-                if tube:
+                if annular:
                     bu = beam_euler_utilization_I(res.axial_force, I_e, Lb, E=model.E_beam,
                                                   K=config.euler_K,
                                                   safety_factor=config.buckling_safety_factor)
-                    tu = tube_wall_utilization(res.axial_force[tube_el], r_t, t_eff,
-                                               areas_e[tube_el], E=model.E_beam,
+                    tu = tube_wall_utilization(res.axial_force[ann_el], ann_r, ann_t,
+                                               areas_e[ann_el], E=model.E_beam,
                                                safety_factor=config.buckling_safety_factor)
                     tube_util = np.maximum(tube_util, tu)
                 else:
@@ -418,7 +491,7 @@ def size_beam_shell_laminate(
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
         out = (wb, ws, md, mt, worst_beam_buck, worst_panel_buck, worst_R,
-               tube_util if tube else None)
+               tube_util if annular else None)
         cache[key] = out
         return out
 
@@ -429,7 +502,15 @@ def size_beam_shell_laminate(
 
     def mass(x):
         radii = x[:G][group_of_element]
-        m = rho * np.sum(np.pi * radii ** 2 * Lb_form) + rho * np.sum(x[G:G + B] * band_area)
+        if hollow:
+            area_form = np.pi * radii ** 2
+            t_eff_h = decode_hollow(x, radii)
+            rh = radii[hollow_el]
+            area_form[hollow_el] = np.pi * (rh**2 - (rh - t_eff_h)**2)
+            m = rho * np.sum(area_form * Lb_form) + rho * np.sum(x[G:G + B] * band_area)
+        else:
+            # plain-path expression kept character-identical (ulp discipline)
+            m = rho * np.sum(np.pi * radii ** 2 * Lb_form) + rho * np.sum(x[G:G + B] * band_area)
         if tube:
             r_t, t_eff = decode_tube(x)
             ri = r_t - t_eff
@@ -439,8 +520,19 @@ def size_beam_shell_laminate(
     def mass_grad(x):
         g = np.zeros(nx)
         radii = x[:G][group_of_element]
-        per_elem = rho * 2.0 * np.pi * radii * Lb_form / m_ref
-        np.add.at(g, group_of_element, per_elem)   # scatter element grads into the G groups
+        if hollow:
+            t_eff_h = decode_hollow(x, radii)
+            per_elem = rho * 2.0 * np.pi * radii * Lb_form / m_ref
+            per_elem[hollow_el] = rho * 2.0 * np.pi * t_eff_h * Lb_form[hollow_el] / m_ref
+            np.add.at(g, group_of_element, per_elem)
+            dA_dt = 2.0 * np.pi * (radii[hollow_el] - t_eff_h)
+            t0 = dv.slice("t_hollow").start
+            np.add.at(g, t0 + t_idx_of_element,
+                      rho * dA_dt * Lb_form[hollow_el] / m_ref)
+        else:
+            # plain-path expression kept character-identical (ulp discipline)
+            per_elem = rho * 2.0 * np.pi * radii * Lb_form / m_ref
+            np.add.at(g, group_of_element, per_elem)   # scatter element grads into the G groups
         g[G:G + B] = rho * band_area / m_ref
         if tube:
             r_t, t_eff = decode_tube(x)
@@ -529,9 +621,12 @@ def size_beam_shell_laminate(
             sections = build_sections(x, radii)
             loads_eff = effective_loads(x, radii, t_tri)
             tube_kw = {}
-            if tube:
-                r_t_j, t_eff_j = decode_tube(x)
-                tube_kw = dict(S=S, tube_elements=tube_el, tube_r=r_t_j, tube_t=t_eff_j)
+            if annular:
+                ann_el_j, ann_r_j, ann_t_j, ann_rc_j, ann_tc_j = annular_arrays(x, radii)
+                tube_kw = dict(S=len(ann_el_j), tube_elements=ann_el_j,
+                               tube_r=ann_r_j, tube_t=ann_t_j,
+                               tube_r_cols=ann_rc_j, tube_t_cols=ann_tc_j,
+                               nx_extra=nx - (G + B + 2 * L))
             # V.4: one ∂f/∂x per accel vector (zero for pure aero); fac k pairs
             # with accel k % len(accels) by the effective_loads combo order.
             if accels:
@@ -580,10 +675,13 @@ def size_beam_shell_laminate(
                 f0_tri=(f0_tri if config.skin_failure == "tsai_wu" else None),
                 f45_tri=(f45_tri if config.skin_failure == "tsai_wu" else None),
                 f90_tri=(f90_tri if config.skin_failure == "tsai_wu" else None),
-                S=S,
-                tube_elements=(tube_el if tube else None),
-                tube_r=(r_t_j if tube else None),
-                tube_t=(t_eff_j if tube else None),
+                S=(len(ann_el_j) if annular else 0),
+                tube_elements=(ann_el_j if annular else None),
+                tube_r=(ann_r_j if annular else None),
+                tube_t=(ann_t_j if annular else None),
+                tube_r_cols=(ann_rc_j if annular else None),
+                tube_t_cols=(ann_tc_j if annular else None),
+                nx_extra=(nx - (G + B + 2 * L)),
             )
             # Design-only ∂K/∂x assembly, built ONCE per design point and reused
             # across every load case and every constraint-gradient call below.
@@ -729,21 +827,22 @@ def size_beam_shell_laminate(
             "beam_vm": beam_con_jac, "skin": skin_con_jac, "defl": defl_con_jac,
             "twist": twist_con_jac, "frac": frac_con_jac, "mono": monotonic_con_jac,
         }
-        if tube and config.buckling_safety_factor is not None:
+        if annular and config.buckling_safety_factor is not None:
             def tube_wall_jac(x):
-                """(S, nx): row s at its binding load combo (max wall util)."""
+                """(Q, nx): row q at its binding load combo (max wall util)."""
                 facs, ds, _sections, sens_cache, dF_of_fac = _jac_lookup(x)
-                util = np.empty((len(facs), S))
+                Q = ds.S
+                util = np.empty((len(facs), Q))
                 c = TUBE_WALL_KNOCKDOWN * 0.605 * model.E_beam
                 for li, fac in enumerate(facs):
-                    ax = np.array([fac.result.axial_force[int(e)] for e in tube_el])
+                    ax = np.array([fac.result.axial_force[int(e)] for e in ds.tube_elements])
                     A_t = np.pi * (ds.tube_r**2 - (ds.tube_r - ds.tube_t)**2)
                     scr = c * ds.tube_t / ds.tube_r
                     util[li] = (np.maximum(0.0, -ax) / A_t
                                 * config.buckling_safety_factor / scr)
                 binding = np.argmax(util, axis=0)
-                Jrows = np.empty((S, nx))
-                for s_i in range(S):
+                Jrows = np.empty((Q, nx))
+                for s_i in range(Q):
                     bi = int(binding[s_i])
                     _con, row = grad_tube_wall_one(
                         facs[bi], ds, s_i, safety_factor=config.buckling_safety_factor,
@@ -768,10 +867,26 @@ def size_beam_shell_laminate(
             jacs["beam_buck"] = beam_buck_con_jac
             jacs["panel_buck"] = panel_buck_con_jac
 
-    if tube:
+    if hollow:
+        h_t0 = dv.slice("t_hollow").start
+
+        def hollow_validity_con(x):
+            t_h = x[dv.slice("t_hollow")]
+            r_g = np.array([x[g] for g in hollow_groups])
+            return r_g - t_h                   # >= 0: wall fits inside the radius
+
+        def hollow_validity_jac(x):
+            Jm = np.zeros((H, nx))
+            for i, g in enumerate(hollow_groups):
+                Jm[i, g] = 1.0
+                Jm[i, h_t0 + i] = -1.0
+            return Jm
+
+    if annular:
         def tube_wall_con(x):
             return 1.0 - evaluate(x)[7]
 
+    if tube:
         def tube_validity_con(x):
             r_t = x[dv.slice("r_tube")]
             t_w = x[dv.slice("t_wall")]
@@ -830,11 +945,16 @@ def size_beam_shell_laminate(
             ConstraintSpec("panel_buck", panel_buck_con, 1, jacs.get("panel_buck"),
                            ("sf", "buckling_sf_panel", sf)),
         ]
-    if tube:
+    if annular:
+        Q_ann = (len(hollow_el) if hollow else 0) + S
         if config.buckling_safety_factor is not None:
             specs.append(ConstraintSpec(
-                "tube_wall", tube_wall_con, S, jacs.get("tube_wall"),
+                "tube_wall", tube_wall_con, Q_ann, jacs.get("tube_wall"),
                 ("sf", "buckling_sf_tube_wall", config.buckling_safety_factor)))
+    if hollow:
+        specs.append(ConstraintSpec("hollow_validity", hollow_validity_con, H,
+                                    hollow_validity_jac if config.use_analytic_jacobian else None))
+    if tube:
         specs.append(ConstraintSpec("tube_validity", tube_validity_con, S,
                                     tube_validity_jac if config.use_analytic_jacobian else None))
         if S > 1:
@@ -892,8 +1012,9 @@ def size_beam_shell_laminate(
         shadow_prices=shadow,
         r_tube=(decode_tube(x)[0] if tube else None),
         t_wall=(decode_tube(x)[1] if tube else None),
+        t_hollow=(np.asarray(x[dv.slice("t_hollow")], dtype=float) if hollow else None),
         tube_mass_kg=tm,
-        max_tube_wall_util=(float(tube_util_vec.max()) if tube else 0.0),
+        max_tube_wall_util=(float(tube_util_vec.max()) if annular else 0.0),
     )
 
 

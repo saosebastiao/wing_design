@@ -142,25 +142,37 @@ class DesignSens:
     f0_tri: np.ndarray = None         # (M,)
     f45_tri: np.ndarray = None        # (M,)
     f90_tri: np.ndarray = None        # (M,)
-    # P.1 core tube (optional): tube rows of beam_elements carry annular sections
-    # sized by the r_tube/t_wall DV blocks appended after f45. S = 0 = no tube.
+    # Annular elements (P.1 core tube and/or P#1b hollow form beams): rows of
+    # beam_elements carrying annular sections. Despite the historical "tube_"
+    # names these describe ANY annular element; r/t DV columns are given
+    # explicitly via tube_r_cols/tube_t_cols (absolute columns — a hollow form
+    # beam's r col is its existing radius-group column). When the col arrays are
+    # None the legacy contiguous layout [.. | r_tube(S) | t_wall(S)] applies.
     S: int = 0
     tube_elements: np.ndarray = None  # (S,) element indices (into beam_elements)
-    tube_r: np.ndarray = None         # (S,) outer radii (segment order)
+    tube_r: np.ndarray = None         # (S,) outer radii
     tube_t: np.ndarray = None         # (S,) wall thicknesses
+    tube_r_cols: np.ndarray = None    # (S,) absolute DV col of each r (None = legacy)
+    tube_t_cols: np.ndarray = None    # (S,) absolute DV col of each t (None = legacy)
+    nx_extra: int = None              # DV cols beyond G+B+2L (None = legacy 2*S)
 
     @property
     def nx(self) -> int:
-        return self.G + self.B + 2 * self.L + 2 * self.S
+        extra = self.nx_extra if self.nx_extra is not None else 2 * self.S
+        return self.G + self.B + 2 * self.L + extra
 
     def tube_dv_r(self, s: int) -> int:
+        if self.tube_r_cols is not None:
+            return int(self.tube_r_cols[s])
         return self.G + self.B + 2 * self.L + s
 
     def tube_dv_t(self, s: int) -> int:
+        if self.tube_t_cols is not None:
+            return int(self.tube_t_cols[s])
         return self.G + self.B + 2 * self.L + self.S + s
 
     def tube_seg_of_element(self, e: int) -> int:
-        """Segment index of tube element e, or -1 if e is a form beam."""
+        """Annular-set index of element e, or -1 if e is a solid form beam."""
         if self.tube_elements is None:
             return -1
         hit = np.nonzero(self.tube_elements == e)[0]

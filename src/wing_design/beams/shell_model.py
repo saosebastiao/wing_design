@@ -63,6 +63,10 @@ class BeamShellModel:
     tube_elements: np.ndarray | None = None        # (S,) indices into beam_elements
     tube_r_bounds: np.ndarray | None = None        # (S,)
     tube_bond_elements: np.ndarray | None = None   # (M, 2) node pairs
+    # P#1b hollow form beams: form-element rows eligible for annular (wound-
+    # hollow) sections — both endpoint levels in-wing AND the beam path measured
+    # straight (the windability requirement; asserted at build).
+    hollow_elements: np.ndarray | None = None      # (Hn,) indices into beam_elements
 
     @property
     def n_form_elements(self) -> int:
@@ -84,6 +88,8 @@ def build_beam_shell_model(
     tip_gusset_radius: float | None = None,
     core_tube: bool = False,
     tube_bonds_per_level: int = 4,
+    hollow_beams: bool = False,
+    straightness_tol_m: float = 1.0e-3,
 ) -> BeamShellModel:
     """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing.
 
@@ -115,6 +121,28 @@ def build_beam_shell_model(
     G = E / (2.0 * (1.0 + nu))
     from .tip_coupling import tip_clique_elements  # local import to avoid circular dependency
     tip_gusset_elements = tip_clique_elements(tip_nodes) if tip_gusset_radius is not None else None
+
+    hollow_elements = None
+    if hollow_beams:
+        # in-wing levels: z >= 0 (the below-root spar transition stays solid RTM)
+        in_wing = z >= -1e-9
+        rows = []
+        for b in range(n_beams):
+            ks = sorted((k for k in range(n_levels) if in_wing[k]), key=lambda k: z[k])
+            if len(ks) >= 2:
+                pts = np.array([nodes[nid(b, k)] for k in ks])
+                d = pts[-1] - pts[0]
+                u = d / np.linalg.norm(d)
+                rel = pts - pts[0]
+                dev = float(np.linalg.norm(rel - np.outer(rel @ u, u), axis=1).max())
+                if dev > straightness_tol_m:
+                    raise ValueError(
+                        f"beam {b} in-wing path deviates {dev*1e3:.1f} mm from straight "
+                        f"(> {straightness_tol_m*1e3:.1f} mm) — not windable hollow")
+            for k in range(n_levels - 1):
+                if in_wing[k] and in_wing[k + 1]:
+                    rows.append(b * (n_levels - 1) + k)
+        hollow_elements = np.asarray(sorted(rows), dtype=int)
 
     tube_elements = tube_r_bounds = tube_bond_elements = None
     if core_tube:
@@ -162,6 +190,7 @@ def build_beam_shell_model(
         tube_elements=tube_elements,
         tube_r_bounds=tube_r_bounds,
         tube_bond_elements=tube_bond_elements,
+        hollow_elements=hollow_elements,
     )
 
 

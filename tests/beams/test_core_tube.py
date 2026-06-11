@@ -169,3 +169,72 @@ def test_sizer_assembles_tube_bonds(monkeypatch):
     bond_set = {tuple(sorted(r)) for r in m.tube_bond_elements.tolist()}
     gusset_set = {tuple(sorted(r)) for r in np.asarray(g).tolist()}
     assert bond_set <= gusset_set, "tube bonds missing from the sizing FEA"
+
+
+# --- P#1b hollow form-beam segments ----------------------------------------
+
+
+def _hollow_case():
+    m = build_beam_shell_model(small_wingsail, n_beams=4, n_levels=4,
+                               hollow_beams=True)
+    goe, G = beam_radius_groups(m)
+    M = m.shell_tris.shape[0]
+    loads = np.zeros((m.nodes.shape[0], 6))
+    loads[m.tip_nodes, 2] = 800.0
+    loads[m.tip_nodes, 0] = 400.0
+    return m, goe, G, M, loads
+
+
+def test_hollow_model_tags_in_wing_segments():
+    m, goe, G, M, loads = _hollow_case()
+    z = m.nodes[:m.n_levels, 2]
+    seg_in_wing = [(z[k] >= -1e-9 and z[k + 1] >= -1e-9) for k in range(m.n_levels - 1)]
+    expected = [b * (m.n_levels - 1) + k
+                for b in range(m.n_beams) for k in range(m.n_levels - 1)
+                if seg_in_wing[k]]
+    assert m.hollow_elements.tolist() == expected
+
+
+@pytest.mark.sizing
+def test_hollow_sizing_feasible_never_heavier():
+    m, goe, G, M, loads = _hollow_case()
+    solid = build_beam_shell_model(small_wingsail, n_beams=4, n_levels=4)
+
+    def cfg():
+        return LaminateSizingConfig(
+            sigma_allow_Pa=1.0e9, tip_defl_max_m=0.01, tip_twist_max_deg=90.0,
+            r_min=0.004, r_max=0.04, t_min=0.0005, t_max=0.02,
+            buckling_safety_factor=SF, use_analytic_jacobian=True)
+
+    base = size_beam_shell_laminate(solid, [loads], cfg(), ply=T700_EPOXY,
+                                    rho=RHO, maxiter=200)
+    hol = size_beam_shell_laminate(m, [loads], cfg(), ply=T700_EPOXY,
+                                   rho=RHO, maxiter=300)
+    assert laminate_result_is_feasible(base, cfg())
+    assert laminate_result_is_feasible(hol, cfg())
+    assert hol.t_hollow is not None
+    assert np.all(hol.t_hollow > 0)
+    assert hol.max_tube_wall_util <= 1.05
+    # hollow strictly contains solid designs (t = r) -> never materially heavier
+    assert hol.mass_kg <= base.mass_kg * 1.02
+
+
+@pytest.mark.sizing
+def test_hollow_fd_and_analytic_agree_cold():
+    # The decisive gradient check for the hollow path: cold FD and analytic land
+    # in the same basin (hollow r-cols REUSE the radius-group columns, so any
+    # error in the annular dK/dr mapping would split the optima immediately).
+    m, goe, G, M, loads = _hollow_case()
+    cfg_an = LaminateSizingConfig(
+        sigma_allow_Pa=1.0e9, tip_defl_max_m=0.01, tip_twist_max_deg=90.0,
+        r_min=0.004, r_max=0.04, t_min=0.0005, t_max=0.02,
+        buckling_safety_factor=SF, use_analytic_jacobian=True)
+    cfg_fd = LaminateSizingConfig(
+        sigma_allow_Pa=1.0e9, tip_defl_max_m=0.01, tip_twist_max_deg=90.0,
+        r_min=0.004, r_max=0.04, t_min=0.0005, t_max=0.02,
+        buckling_safety_factor=SF, use_analytic_jacobian=False)
+    an = size_beam_shell_laminate(m, [loads], cfg_an, ply=T700_EPOXY, rho=RHO, maxiter=300)
+    fd = size_beam_shell_laminate(m, [loads], cfg_fd, ply=T700_EPOXY, rho=RHO, maxiter=300)
+    assert laminate_result_is_feasible(an, cfg_an)
+    assert laminate_result_is_feasible(fd, cfg_fd)
+    assert np.isclose(fd.mass_kg, an.mass_kg, rtol=2e-2)

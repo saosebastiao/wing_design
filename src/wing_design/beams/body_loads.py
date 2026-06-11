@@ -65,6 +65,9 @@ def body_load_jacobian(
     tube_elements: np.ndarray | None = None,
     tube_r: np.ndarray | None = None,
     tube_t: np.ndarray | None = None,
+    tube_r_cols: np.ndarray | None = None,
+    tube_t_cols: np.ndarray | None = None,
+    nx_extra: int | None = None,
 ) -> np.ndarray:
     """∂f/∂x as a dense (ndof, nx) matrix,
     x = [r_group(G), t_band(B), f0(L), f45(L) | r_tube(S), t_wall(S)].
@@ -77,7 +80,7 @@ def body_load_jacobian(
     a = np.asarray(accel, dtype=float)
     nodes = model.nodes
     ndof = 6 * nodes.shape[0]
-    nx = G + B + 2 * L + 2 * S
+    nx = G + B + 2 * L + (nx_extra if nx_extra is not None else 2 * S)
     dF = np.zeros((ndof, nx))
     be = model.beam_elements
     r = np.asarray(radii, dtype=float)
@@ -88,8 +91,8 @@ def body_load_jacobian(
         if e in tube_seg:
             s = tube_seg[e]
             rt, tt = float(tube_r[s]), float(tube_t[s])
-            col_r = G + B + 2 * L + s
-            col_t = G + B + 2 * L + S + s
+            col_r = int(tube_r_cols[s]) if tube_r_cols is not None else G + B + 2 * L + s
+            col_t = int(tube_t_cols[s]) if tube_t_cols is not None else G + B + 2 * L + S + s
             dm_r = 0.5 * rho * 2.0 * np.pi * tt * Le
             dm_t = 0.5 * rho * 2.0 * np.pi * (rt - tt) * Le
             for n in (i, j):
