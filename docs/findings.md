@@ -1076,6 +1076,24 @@ running best, −25.0% vs the V.6 baseline) but not a certified optimum**
 (max_iter; KS slack remaining). Continuation polish from this feasible point is
 running. (4662 s, IPOPT + KS ρ=50, analytic Jacobian.)
 
+**P.3 sandwich skin CLOSED (2026-06-11) — NEW RUNNING BEST: 1679.3 kg, converged
++ feasible + eigen λ 3.55 (−12.7% vs 1924.6; −25.3% vs the V.6 baseline).**
+The continuation polish from the feasible 1685.0 kg point converged cleanly
+(IPOPT + KS ρ=50, 520 iterations, 1198 s): **t_core 4.3 mm, faces 1.91 mm —
+skin 519 + core 61 kg vs 1246 kg monolithic** (the panel-D arbitrage delivered
+≈ −53% skin mass at 5% core density), beams 1095 kg, tube 5 kg; wrinkle 0.27 /
+crimp 0.69; eigen-verified **λ_cr = 3.55**, the project's largest stability
+margin. The full campaign for this one lever: machinery (FD-validated) → six
+failed closure attempts across two optimizers → kink diagnosis → KS smoothing →
+breakthrough → converged close; cumulative compute ≈ 6.1 h. **Caveats:** the KS
+optimum is conservative (hard utilizations carry small slack — the documented
+ρ=50 cost; a hard-max polish from here could shave a little more); IPOPT local
+optimum (multi-start unexplored at this config); 1.9 mm faces ≈ 8 plies and
+4.3 mm core are manufacturable (M#2 rounding pending). **Binding economics
+flipped back to the beams (1095 kg, 65% of structure) → V.3c
+(beam-on-elastic-foundation length, +326 kg/SF evidence from the autopsy) is
+now the highest-leverage open item.** Running best: **1679.3 kg**.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1114,6 +1132,7 @@ running. (4662 s, IPOPT + KS ρ=50, analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |
 | P.3 KS+IPOPT breakthrough (2026-06-11) | KS smoothing merged (8 active constraints → smooth scalars; FD-audited through the live scipy closures). First feasible sandwich design in six attempts: **1685.0 kg, eigen λ 3.49** — t_core 4 mm / faces 2.1 mm, skin+core 617 kg vs 1246 monolithic. Upper bound (unconverged); polish leg running. Confirms the argmax-kink diagnosis. |
 | Beam autopsy / IsoTruss (2026-06-11) | No eigen-visible beam mode; beam-only Kσ λ = 2.54 = full λ0 (stiffened-panel mode, 69% margin). The +326 kg/SF closed-form price targets a mesh-artifact sub-element length; physical model = beam-on-elastic-foundation (continuously bonded skin = the "helicals"). Ties SHELVED (F.2-consistent); **V.3c foundation-length check queued**; re-check ties at the thin-skin sandwich endgame. |
 | P.3 + IPOPT follow-up (2026-06-11) | IPOPT backend merged (`optimizer="ipopt"`, cyipopt/brew Ipopt, equivalence-tested). Default options discard warm starts (barrier re-centering → 2080 kg wander); proper warm-start options give a coherent 1249 kg (−35%) trajectory but STILL no convergence at 2000 iters. Both optimizer families now fail the cored migration for the same root cause: **argmax-switching constraint Jacobians (piecewise smoothness)**. **P.3 gated on P#7 KS aggregation** (smooth max; doubly motivated: IPOPT smoothness + adjoint count). Running best stays 1924.6 kg. |

@@ -266,12 +266,12 @@ before the next lever starts.
   φ(t,c) sandwich D + wrinkle/crimp checks merged & FD-validated; the measured
   migration trajectory falls to ~1032 kg (−46%) but **SLSQP stalls unconverged on
   every leg — the documented IPOPT trigger is met** (119 DVs, persistent stalls).
-  IPOPT integrated (2026-06-11, `optimizer="ipopt"`) and properly warm-started —
-  still unconverged at 2000 iters (coherent −35% trajectory): both optimizer
-  families fail on the **argmax-switching constraint Jacobians**. **P.3 is gated
-  on V.0.3/P#7 KS aggregation** (smooth soft-max over elements + load cases;
-  doubly motivated now: C^∞ Jacobians AND collapsed back-substitutions;
-  conservative — re-validate vs hard-max, ρ≈50). Running best remains 1924.6 kg.
+  **CLOSED (2026-06-11) via KS (ρ=50) + IPOPT: 1679.3 kg converged + feasible +
+  eigen λ 3.55 — running best, −25.3% vs the V.6 baseline.** t_core 4.3 mm,
+  faces 1.91 mm; skin 519 + core 61 kg vs 1246 monolithic. Six hard-max attempts
+  failed first (argmax Jacobian kinks — both optimizer families); KS smoothing
+  was the unlock. KS-conservative local optimum (hard-max polish + multi-start =
+  optional refinements). Beams now 65% of mass → V.3c next.
   (P#5; P.2 redundancy resolved — prestress is null.) (P#5)
 - **P.4 n_beams sweep. — DONE (2026-06-10).** n ∈ {12…28} on the running-best
   config (tube + hollow), full warm protocol + eigen verification per point,
