@@ -241,7 +241,13 @@ before the next lever starts.
   Running-best medium: **2060.7 kg**. Follow-ups: tube_r_min sweep, tube CAD export,
   M#5 wrapped-joint model for the bond stiffness. **Next: P#1b hollow straight
   FORM-beam segments** — beam-buck SF still +455 kg/SF; paths measured exactly
-  straight in-wing (ruled planform), spec committed. `examples/50_core_tube.py`. (P#1)
+  straight in-wing (ruled planform), spec committed. `examples/50_core_tube.py`.
+  **P#1b DONE (2026-06-10): tube + hollow form beams = 1924.6 kg (eigen λ 2.54) —
+  running best, −14.4% vs the V.6 baseline.** Hollow-only is no win (+1.2%): the
+  levers are complementary (spine frees twist, hollow walls then harvest the beams).
+  Walls at the 1 mm floor (4 plies — M#2 rounding pending); the cold start was
+  eigen-REJECTED (λ 0.91) → warm-start protocol mandatory on this config.
+  `examples/51_hollow_beams.py`. Next: P.4 n_beams sweep (user-requested). (P#1)
 - **P.2 Skin prestress + compression cross-members. — DEMOTED (2026-06-10):** the
   V.3 eigen parametric shows λ_cr 2.443→2.445 under 5–20 MPa hoop pretension at the
   current optimum (the critical-mode cluster is pretension-insensitive); revisit only
