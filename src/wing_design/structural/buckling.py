@@ -109,3 +109,21 @@ def panel_buckling_utilization(
         b2 = np.maximum(np.asarray(areas, dtype=float), 1e-30)
     sigma_cr = kc * np.pi**2 * D11 / (b2 * t)
     return comp * safety_factor / np.maximum(sigma_cr, 1e-30)
+
+
+def beam_foundation_utilization(
+    axial_force,
+    EI,
+    k_found,
+    *,
+    safety_factor: float = 1.0,
+) -> "np.ndarray":
+    """Per-element buckling utilization for a stringer on an elastic foundation
+    (V.3c): Pcr = 2*sqrt(k*EI) — the continuous-mode minimum for a long beam
+    continuously restrained by the bonded skin (conservative vs the integer-mode
+    optimum; valid when the foundation half-wave fits the beam, which holds by
+    orders of magnitude for the in-wing spans). Tension returns 0.
+    """
+    comp = np.maximum(0.0, -np.asarray(axial_force, dtype=float))
+    pcr = 2.0 * np.sqrt(np.asarray(k_found, dtype=float) * np.asarray(EI, dtype=float))
+    return comp * safety_factor / np.maximum(pcr, 1e-30)

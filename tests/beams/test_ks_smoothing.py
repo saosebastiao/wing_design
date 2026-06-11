@@ -113,3 +113,58 @@ def test_ks_gradients_match_fd_through_scipy_closures():
             f"KS jac mismatch (max err {np.abs(g - fd).max():.3e}, scale {scale:.3e})"
         checked += 1
     assert checked >= 7                    # all 8 KS families minus any inactive
+
+
+def test_ks_foundation_gradients_match_fd():
+    # V.3c: beam-on-elastic-foundation model — FD-audit the beam_buck KS closure
+    # (k chains through t_band/f0/f45/t_core + EI chains through r/t_hollow).
+    from scipy.optimize import approx_fprime
+    import dataclasses
+    import wing_design.beams.laminate_sizing as ls
+    m, loads, cfg = _setup(core=PVC_H80, tube=True)
+    cfg = dataclasses.replace(cfg, ply_angle_datum=(0.0, 0.0, 1.0),
+                              beam_buckling_model="foundation")
+
+    captured = {}
+    orig = ls.minimize
+
+    def spy(fun, x0, jac=None, method=None, bounds=None, constraints=None, options=None):
+        captured["constraints"] = constraints
+        captured["x0"] = np.asarray(x0, dtype=float)
+
+        class R:
+            x = np.asarray(x0, dtype=float)
+            success = False
+            nit = 0
+        return R()
+
+    ls.minimize = spy
+    try:
+        size_beam_shell_laminate(m, loads, cfg, ply=T700_EPOXY, rho=RHO, maxiter=1)
+    finally:
+        ls.minimize = orig
+
+    x0 = captured["x0"] * 0.9 + 0.001
+    checked = 0
+    for con in captured["constraints"]:
+        if "jac" not in con:
+            continue
+        f = con["fun"]; J = con["jac"]
+        if np.atleast_1d(f(x0)).shape[0] != 1:
+            continue
+        g = np.atleast_2d(J(x0))[0]
+        fd = approx_fprime(x0, lambda x: float(np.atleast_1d(f(x))[0]), 1.5e-7)
+        scale = max(np.abs(fd).max(), 1e-12)
+        assert np.allclose(g, fd, rtol=5e-3, atol=5e-4 * scale), \
+            f"foundation KS jac mismatch (max err {np.abs(g - fd).max():.3e})"
+        checked += 1
+    assert checked >= 7
+
+
+def test_foundation_requires_ks_and_datum():
+    import dataclasses
+    m, loads, cfg = _setup()
+    bad = dataclasses.replace(cfg, beam_buckling_model="foundation",
+                              ply_angle_datum=None)
+    with pytest.raises(ValueError, match="foundation"):
+        size_beam_shell_laminate(m, loads, bad, ply=T700_EPOXY, rho=RHO, maxiter=2)

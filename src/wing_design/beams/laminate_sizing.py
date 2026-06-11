@@ -46,14 +46,16 @@ from .sensitivity import (
 )
 from ..structural.buckling import (
     TUBE_WALL_KNOCKDOWN, beam_euler_utilization, beam_euler_utilization_I,
-    panel_buckling_utilization, tube_wall_utilization,
+    beam_foundation_utilization, panel_buckling_utilization, tube_wall_utilization,
 )
 from ..structural.frame import BeamSection, von_mises_per_element
 from ..structural.shell import membrane_von_mises, recover_membrane_strain, recover_membrane_stress_C
 from .body_loads import body_load_jacobian, body_load_vector
 from .constraints import ConstraintSpec, shadow_prices_from_specs
 from .design_vector import DesignVector
-from .shell_model import BeamShellModel, skin_datum_angles, skin_panel_widths
+from .shell_model import (
+    BeamShellModel, beam_adjacent_widths, skin_datum_angles, skin_panel_widths,
+)
 from .shell_sizing import (
     beam_lengths, beam_mass, beam_radius_groups, skin_areas, skin_band_areas,
     skin_band_map, skin_mass,
@@ -104,6 +106,12 @@ class LaminateSizingConfig:
     # Conservative (KS >= max). Requires use_analytic_jacobian and the
     # von-Mises skin path. Hard maxes still drive reporting/feasibility.
     ks_rho: float | None = None
+    # V.3c beam buckling model: "element" (historical element-length Euler) or
+    # "foundation" (in-wing form beams as stringers on the bonded-skin elastic
+    # foundation, Pcr = 2*sqrt(k*EI), k = 3*D22_chord*(1/w_l^3 + 1/w_r^3) from
+    # the two adjacent strips). Requires ks_rho + ply_angle_datum (D22 needs a
+    # coherent chord direction). Transition + tube elements keep element Euler.
+    beam_buckling_model: str = "element"
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -306,6 +314,69 @@ def size_beam_shell_laminate(
     if sandwich:
         blocks += [("t_core", B)]
     dv = DesignVector(*blocks)
+    foundation = config.beam_buckling_model == "foundation"
+    if config.beam_buckling_model not in ("element", "foundation"):
+        raise ValueError(f"unknown beam_buckling_model: {config.beam_buckling_model!r}")
+    if foundation:
+        if config.ks_rho is None or config.ply_angle_datum is None:
+            raise ValueError("beam_buckling_model='foundation' requires ks_rho "
+                             "and ply_angle_datum")
+        n_form_f = model.n_form_elements
+        adj_w = beam_adjacent_widths(model)
+        kgeo = 3.0 * (1.0 / adj_w[:, 0] ** 3 + 1.0 / adj_w[:, 1] ** 3)   # (n_form,)
+        z_lv = model.nodes[:model.n_levels, 2]
+        seg_in_wing = np.array([(z_lv[k] >= -1e-9 and z_lv[k + 1] >= -1e-9)
+                                for k in range(model.n_levels - 1)])
+        found_mask_all = np.zeros(n, dtype=bool)
+        for e in range(n_form_f):
+            found_mask_all[e] = seg_in_wing[e % (model.n_levels - 1)]
+        # band of each form element = band of its segment level (skin_band_map
+        # tiles 2 tris per (level, beam); reuse the level->band mapping)
+        n_seg = model.n_levels - 1
+        band_of_level = np.array([band_of_tri[2 * k * model.n_beams]
+                                  for k in range(n_seg)])
+        band_of_elem = np.array([band_of_level[e % n_seg] for e in range(n_form_f)])
+
+        def foundation_k(x):
+            """(k_e (n_form,), per-element chain list [(col, dk/dcol), ...])."""
+            t_b = np.asarray(x[dv.slice("t_band")], dtype=float)
+            f0b, f45b, f90b = band_fracs(x)
+            c_b = (np.asarray(x[dv.slice("t_core")], dtype=float)
+                   if sandwich else np.zeros(B))
+            D22 = np.empty(B)
+            dD22_dt = np.empty(B); dD22_df0 = np.empty(B); dD22_df45 = np.empty(B)
+            dD22_dc = np.empty(B)
+            from .sensitivity import (dAD_dt, dAD_dt_sandwich, dD_dc_sandwich,
+                                      dQeff_df, sandwich_geom_factor)
+            for b in range(B):
+                _A, Dm, Qd = laminate_stiffness(ply, f0=float(f0b[b]), f45=float(f45b[b]),
+                                                f90=float(f90b[b]), thickness=float(t_b[b]))
+                tt = float(t_b[b]); cc = float(c_b[b])
+                geom = sandwich_geom_factor(tt, cc) if sandwich else tt**3 / 12.0
+                D22[b] = Qd[1, 1] * geom
+                if sandwich:
+                    _dA, dDt = dAD_dt_sandwich(Qd, tt, cc)
+                    dD22_dt[b] = dDt[1, 1]
+                    dD22_dc[b] = dD_dc_sandwich(Qd, tt, cc)[1, 1]
+                else:
+                    _dA, dDt = dAD_dt(Qd, tt)
+                    dD22_dt[b] = dDt[1, 1]
+                    dD22_dc[b] = 0.0
+                dD22_df0[b] = dQeff_df(ply, which="f0", offset_deg=0.0)[1, 1] * geom
+                dD22_df45[b] = dQeff_df(ply, which="f45", offset_deg=0.0)[1, 1] * geom
+            k_e = kgeo * D22[band_of_elem]
+            chains = []
+            lg_of_b = (np.arange(B) if config.per_band_layup else np.zeros(B, dtype=int))
+            for e in range(n_form_f):
+                b = int(band_of_elem[e])
+                lg = int(lg_of_b[b])
+                ch = [(G + b, kgeo[e] * dD22_dt[b]),
+                      (f0_lo + lg, kgeo[e] * dD22_df0[b]),
+                      (f45_lo + lg, kgeo[e] * dD22_df45[b])]
+                if sandwich:
+                    ch.append((dv.slice("t_core").start + b, kgeo[e] * dD22_dc[b]))
+                chains.append(ch)
+            return k_e, chains
     nx = dv.nx
     f0_lo = dv.slice("f0").start
     f45_lo = dv.slice("f45").start
@@ -543,6 +614,15 @@ def size_beam_shell_laminate(
                 else:
                     bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
                                                 K=config.euler_K, safety_factor=config.buckling_safety_factor)
+                if foundation:
+                    k_e, _ch = foundation_k(x)
+                    EI_form = model.E_beam * I_e[:model.n_form_elements]
+                    bu_f = beam_foundation_utilization(
+                        res.axial_force[:model.n_form_elements], EI_form, k_e,
+                        safety_factor=config.buckling_safety_factor)
+                    fm = found_mask_all[:model.n_form_elements]
+                    bu = bu.copy()
+                    bu[:model.n_form_elements][fm] = bu_f[fm]
                 pu = panel_buckling_utilization(skin_s, b2_panel, D11=D11, t=t_tri,
                                                 kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
@@ -764,6 +844,9 @@ def size_beam_shell_laminate(
                 c_tri=(c_tri_j if sandwich else None),
                 core_col_of_tri=((dv.slice("t_core").start
                                   + band_of_tri.astype(int)) if sandwich else None),
+                found_k=(foundation_k(x)[0] if foundation else None),
+                found_dk=(foundation_k(x)[1] if foundation else None),
+                found_mask=(found_mask_all if foundation else None),
             )
             # Design-only ∂K/∂x assembly, built ONCE per design point and reused
             # across every load case and every constraint-gradient call below.

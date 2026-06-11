@@ -270,3 +270,26 @@ def solve_beam_shell_model(model: BeamShellModel, loads: np.ndarray) -> FrameRes
         E_skin=model.E_skin, nu_skin=model.nu_skin, t_skin=model.t_skin,
         fixed_nodes=model.fixed_nodes, loads=loads,
     )
+
+
+def beam_adjacent_widths(model: BeamShellModel) -> "np.ndarray":
+    """(n_form_elements, 2) chordwise widths of the two skin strips adjacent to
+    each form-beam element (to beams b-1 and b+1 at the element's segment,
+    mean of the two level widths) — the V.3c foundation-stiffness geometry."""
+    nl = model.n_levels
+    nb = model.n_beams
+    out = np.empty((model.n_form_elements, 2))
+
+    def width(b0, b1, k):
+        w = 0.0
+        for kk in (k, k + 1):
+            w += float(np.linalg.norm(model.nodes[b0 * nl + kk]
+                                      - model.nodes[b1 * nl + kk]))
+        return 0.5 * w
+
+    for b in range(nb):
+        for k in range(nl - 1):
+            e = b * (nl - 1) + k
+            out[e, 0] = width(b, (b - 1) % nb, k)
+            out[e, 1] = width(b, (b + 1) % nb, k)
+    return out

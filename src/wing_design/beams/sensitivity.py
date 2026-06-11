@@ -178,6 +178,11 @@ class DesignSens:
     core: object = None               # CoreMaterial
     c_tri: np.ndarray = None          # (M,)
     core_col_of_tri: np.ndarray = None  # (M,) absolute DV columns
+    # V.3c beam-on-elastic-foundation (in-wing form beams): per-element k and
+    # its design chains. None = element-length Euler.
+    found_k: np.ndarray = None        # (n_form,) [N/m^2]
+    found_dk: list = None             # per form element: [(col, dk_dcol), ...]
+    found_mask: np.ndarray = None     # (n_all,) bool: use foundation for element
 
     @property
     def nx(self) -> int:
@@ -1194,6 +1199,8 @@ def provider_beam_buck(euler_K, safety_factor):
         for e in range(n):
             floc, Mx, dofs = _active_beam_force(fac, e)
             s_e = ds.tube_seg_of_element(e)
+            foundation = (ds.found_mask is not None and e < len(ds.found_mask)
+                          and bool(ds.found_mask[e]))
             if s_e >= 0:
                 r = float(ds.tube_r[s_e])
                 _A, Iy, _J, _dA, dI, _dJ = _annulus_props(r, float(ds.tube_t[s_e]))
@@ -1203,7 +1210,13 @@ def provider_beam_buck(euler_K, safety_factor):
             L = float(ds.beam_lengths[e])
             axial = floc[6]
             comp = max(0.0, -axial)
-            Pcr = np.pi**2 * E * Iy / (euler_K * L) ** 2
+            if foundation:
+                # V.3c: Pcr = 2*sqrt(k*EI), k from the bonded skin (design-dep.)
+                kf = float(ds.found_k[e])
+                EI = E * Iy
+                Pcr = 2.0 * np.sqrt(max(kf * EI, 1e-30))
+            else:
+                Pcr = np.pi**2 * E * Iy / (euler_K * L) ** 2
             util = comp * safety_factor / max(Pcr, 1e-30)
             vals[e] = util
             if comp == 0.0:
@@ -1216,16 +1229,30 @@ def provider_beam_buck(euler_K, safety_factor):
             if s_e >= 0:
                 rt = float(ds.tube_r[s_e]); tt = float(ds.tube_t[s_e])
                 for k, wrt in enumerate(("r", "t")):
-                    dutil = -util * dI[k] / Iy
+                    if foundation:
+                        dutil = -util * (E * dI[k]) / (2.0 * E * Iy)
+                    else:
+                        dutil = -util * dI[k] / Iy
                     dk = dkloc_annular(E, ds.model.G_beam, rt, tt, L, wrt=wrt)
                     dutil += dutil_daxial * (dk @ fac.transforms[e] @ fac.u[dofs])[6]
                     col = ds.tube_dv_r(s_e) if wrt == "r" else ds.tube_dv_t(s_e)
                     expl.append((col, dutil))
             else:
-                dutil_dr = -4.0 * util / r
+                if foundation:
+                    # util ∝ 1/sqrt(EI): ∂util/∂r = −util·(dEI/dr)/(2EI)
+                    dEI_dr = E * np.pi * r**3
+                    dutil_dr = -util * dEI_dr / (2.0 * E * Iy)
+                else:
+                    dutil_dr = -4.0 * util / r
                 dk_dr = dkloc_dr(E, ds.model.G_beam, r, L)
                 dutil_dr += dutil_daxial * (dk_dr @ fac.transforms[e] @ fac.u[dofs])[6]
                 expl.append((int(ds.group_of_element[e]), dutil_dr))
+            if foundation and ds.found_dk is not None:
+                # util ∝ 1/sqrt(k): ∂util/∂col = −util·(dk/dcol)/(2k)
+                # (applies to solid AND hollow/annular in-wing form elements)
+                kf = float(ds.found_k[e])
+                for col, dk_dcol in ds.found_dk[e]:
+                    expl.append((int(col), -util * dk_dcol / (2.0 * kf)))
             expl_l.append(expl)
         return vals, dofs_l, dgdu_l, expl_l
     return p
