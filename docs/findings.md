@@ -897,6 +897,39 @@ second ulp-association regression (body-load product regrouping, baseline
 protocol and bit-compat restored — the protocol works. (636 s + 1037 s measured,
 analytic Jacobian.)
 
+**P.1 CORRECTION (2026-06-10) — the earlier core-tube NEGATIVE was an artifact of
+a missing bond assembly (user-caught); the bonded tube is a REAL lever: −8.3%
+(2248.0 → 2060.7 kg), eigen-verified, acting as a TORSION SPINE, not a bending
+member.** The sizer's solve calls assembled only `tip_gusset_elements`;
+`tube_bond_elements` never reached the sizing FEA, so the earlier run optimized a
+tube connected to the wing only at its clamped root — structurally useless by
+construction (the FD-gradient tests and the eigen check passed their own solves
+*with* bonds, which is why every validation was green around the bug). Fix: tip
+gusset and tube bonds compose into the solver's stiff-massless path; tube+gusset
+tests pass; bonded FD-vs-analytic cold runs agree at 0.4%. A third ulp-association
+leak (body-load product regrouping) was caught by the acceptance protocol and
+restored — **the baseline control then reproduced bit-exactly (2248.0 kg, 290
+iters, shadows to the digit)**. `examples/50_core_tube.py` re-run, both converged
+AND feasible: **baseline 2248.0 kg (λ_cr 2.26, 776 s) → bonded tube 2060.7 kg
+(λ_cr 2.49, 1030 s) = −8.3% (−187 kg)**. **Mechanism:** the optimizer keeps the
+tube MINIMAL — r_tube pinned at the 20 mm lower bound, 1 mm walls, 5.8 mm at the
+root segment, 8 kg total — so the centroidal-bending argument from the invalid
+finding still holds (a centroidal tube buys no bending). What it buys is
+**torsion**: the closed section to the root un-binds the twist constraint (shadow
+−50.7 → 0.0 kg/deg) and the skin sheds 180 kg of torsion-carrying plies
+(1440 → 1260 kg); beams −16 kg. Binding set is now beam-buck (+455 kg/SF) +
+panel-buck (+208 kg/SF), twist free. Wall-crimping never binds (util 0.00).
+**Implications:** (1) P#1a re-verdicted POSITIVE as a torsion spine — the wingsail
+wants its pivot-axis tube after all (manufacturing concept vindicated: the
+"optional structural mandrel" earns 187 kg); (2) running-best medium mass is
+**2060.7 kg**; (3) beam-buck SF still carries +455 kg/SF → **P#1b hollow form
+beams remains the next lever**; (4) follow-ups: tube_r_min sweep (r pinned at the
+bound), CAD export of the tube cylinder in the sized-export path (trivial,
+pending), wrapped-joint model for the bond stiffness (M#5 — bonds are idealized
+stiff). Lesson recorded: a "plausible mechanism" fitted to a measurement is not a
+finding until the model's load path is verified — the bond check belongs in the
+smoke tests. (776 s + 1030 s measured, analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -935,6 +968,7 @@ analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P.1 CORRECTION (2026-06-10) | Earlier negative INVALID — tube bonds never assembled in the sizer (user-caught). Bonded re-run: **2248.0 → 2060.7 kg (−8.3%), eigen λ 2.49** — the tube stays minimal (8 kg, r at the 20 mm bound) and acts as a **torsion spine**: twist constraint un-binds (−50.7 → 0 kg/deg), skin sheds 180 kg of torsion plies. Centroidal-bending uselessness confirmed; torsion value missed by the artifact. Running-best medium 2060.7 kg; beam-buck +455 kg/SF → P#1b next. Follow-ups: tube_r_min sweep, tube CAD export, M#5 joint model. |
 | P.1 core tube (2026-06-10) | Full annular-member machinery built + FD-validated (sections, fit-bounded r/t DV blocks, wall-crimping check w/ 0.65 knockdown, annulus ∂K through the adjoint). **NEGATIVE at medium scale: optimizer zeroes the tube** (r→20 mm bound, −0.0% mass, eigen 2.21 ✓) — a centroidal tube has no bending leverage inside a 0.5–1.9 m-deep monocoque. P#1a dead as a mass lever (kept as manufacturing aid); hollow lever redirects to **P#1b hollow form-beam segments** (OML leverage; beam-buck SF +514 kg/SF still dominant). Machinery reusable for P#1b. |
 | P.0 sizer refactor (2026-06-10) | `DesignVector` (named blocks = single source of x-layout) + `ConstraintSpec` (name, closures, rows, shadow conversion per constraint; scipy dicts/Jacobian registration/multiplier attribution derive from one list). Behavior-preserving: 189 tests green, V.6 medium headline reproduced bit-exactly (2248.0284 kg, 290 iters, shadows to the digit). Adding a constraint or DV block is now one append — the P.1 gate is open. Bonus lesson: a 1-ulp change (sqrt(area)² → area in panel b²) flipped an FD cold-start basin 10% on a small problem — bisected, sqrt-roundtrip deliberately retained in the legacy path for bit-reproducibility; cold-start optima are ulp-sensitive, warm starts + deterministic default starts are the protocol. |
 | P#9 multi-start at scale (2026-06-10) | 12 parallel starts (V.0.4 pool, 11 workers, 41 min) on the medium 4-band config: best feasible 2267.4 kg = +0.9% vs the 1-band 2248.0 → **banding dead under strip-mode buckling** (its −8.1% was a legacy-panel-model artifact); 1-band becomes the standard P-phase config. Feasible basin scatter 2.9% = the noise floor measured at medium scale. Parallel==serial bit-exact (tested); speedup ~2.9× (stragglers + contention). |

@@ -233,15 +233,15 @@ before the next lever starts.
   Behavior-preserving verified: 189 tests green + the V.6 medium headline reproduced
   bit-exactly. IPOPT fallback unchanged (trigger: SLSQP stalls or DVs > ~150 — watch
   during P.1). (Toolbox #1, #4)
-- **P.1 Hollow members. — P#1a core tube DONE (2026-06-10): NEGATIVE.** Full annular
-  machinery built + FD-validated (reusable), but the optimizer zeroes a centroidal
-  tube (−0.0% mass, r pinned at the lower bound) — no bending leverage at the
-  neutral axis of a 0.5–1.9 m-deep monocoque. Tube stays as a manufacturing aid
-  only. **Next: P#1b hollow straight FORM-beam segments** — at the OML where the
-  leverage lives (beam-buck SF +514 kg/SF still dominant); verify per-beam path
-  straightness against the splines (M#4), wound-hollow only where straight, solid
-  RTM through the curved transition, splice joints checked. `examples/50_core_tube.py`.
-  (P#1)
+- **P.1 Hollow members. — P#1a core tube DONE (2026-06-10, corrected): POSITIVE
+  −8.3% (2248.0 → 2060.7 kg, eigen λ 2.49).** First run was an artifact (bonds not
+  assembled — user-caught); the bonded tube stays minimal (8 kg, r at the 20 mm
+  bound — centroidal bending is indeed worthless) but acts as a **torsion spine**:
+  twist un-binds (−50.7 → 0 kg/deg) and the skin sheds 180 kg of torsion plies.
+  Running-best medium: **2060.7 kg**. Follow-ups: tube_r_min sweep, tube CAD export,
+  M#5 wrapped-joint model for the bond stiffness. **Next: P#1b hollow straight
+  FORM-beam segments** — beam-buck SF still +455 kg/SF; paths measured exactly
+  straight in-wing (ruled planform), spec committed. `examples/50_core_tube.py`. (P#1)
 - **P.2 Skin prestress + compression cross-members. — DEMOTED (2026-06-10):** the
   V.3 eigen parametric shows λ_cr 2.443→2.445 under 5–20 MPa hoop pretension at the
   current optimum (the critical-mode cluster is pretension-insensitive); revisit only
