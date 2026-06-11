@@ -146,3 +146,26 @@ def test_tube_fd_and_analytic_agree_cold():
     assert laminate_result_is_feasible(an, _tube_cfg(True))
     assert laminate_result_is_feasible(fd, _tube_cfg(False))
     assert np.isclose(fd.mass_kg, an.mass_kg, rtol=2e-2)
+
+
+def test_sizer_assembles_tube_bonds(monkeypatch):
+    # Regression for the 2026-06-10 bug: tube_bond_elements existed on the model
+    # but never reached the sizing FEA (only tip_gusset_elements were passed), so
+    # the tube was optimized while floating. Capture the solver's gusset args.
+    import wing_design.beams.laminate_sizing as ls
+    m, goe, G, S, M, beam_len, loads = _tube_case()
+    captured = {}
+    orig = ls.solve_beam_shell_laminate_factored
+
+    def spy(*args, **kw):
+        captured["gusset"] = kw.get("gusset_elements")
+        return orig(*args, **kw)
+
+    monkeypatch.setattr(ls, "solve_beam_shell_laminate_factored", spy)
+    cfg = _tube_cfg(True)
+    size_beam_shell_laminate(m, [loads], cfg, ply=T700_EPOXY, rho=RHO, maxiter=2)
+    g = captured["gusset"]
+    assert g is not None
+    bond_set = {tuple(sorted(r)) for r in m.tube_bond_elements.tolist()}
+    gusset_set = {tuple(sorted(r)) for r in np.asarray(g).tolist()}
+    assert bond_set <= gusset_set, "tube bonds missing from the sizing FEA"
