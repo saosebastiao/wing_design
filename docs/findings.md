@@ -1035,6 +1035,32 @@ constraints per the nlp-sizing conventions. Running best remains **1924.6 kg**;
 the sandwich prize (trajectory floor ~1032–1249 kg across five attempts) is
 real, large, and waiting on the smooth formulation. (5254 s + 3861 s measured.)
 
+**Beam-constraint autopsy / IsoTruss question (2026-06-11) — the structure
+already has its "helicals": the bonded skin is the bracing, node-level beam
+stability has 69% margin, and the +326 kg/SF closed-form price is paid to a
+sub-element model whose length is a mesh artifact → fix the MODEL (V.3c
+beam-on-elastic-foundation), don't add members.** Asked (user): can IsoTruss-style
+helical/cross members relieve the beam-buckling price? Eigen mode autopsy of the
+1924.6 kg optimum (worst combo, 8 modes + a beam-only Kσ probe): **no
+eigen-visible single-beam mode exists** (all modes distributed skin-field/coupled,
+beam-line localization ≤ 0.43); **beam-only Kσ λ = 2.54 — identical to the full
+mode 0** — the lowest mode's destabilizing energy is almost entirely beam axial
+compression, but the shape is beams bowing WITH their bonded skin
+(stiffened-panel mode) at 69% margin over the 1.5 requirement. The closed-form
+element-length Euler (util = 1.0, +326 kg/SF) describes a SUB-ELEMENT bow the
+mesh cannot represent, with unsupported length = node spacing — a mesh artifact
+(the V.2 mesh-dependence had this as a driver); the physical configuration is a
+stringer continuously co-bonded to the skin → beam-on-elastic-foundation,
+Pcr = 2√(k·EI), typically ≫ π²EI/L². **Verdicts:** (1) IsoTruss's real lesson
+(role separation: brace vs carry) is already embodied — skin + tube bonds ARE the
+bracing; F.2's +83% negative tested helicals in the wrong role (primary
+compression) and is consistent with this; (2) tie members now would buy relief
+from a largely artificial constraint with real mass + joints (M#5) — SHELVED;
+(3) **V.3c queued: eigen-calibrated foundation-length beam check** (V.3b
+playbook) to harvest the +326 kg/SF honestly; (4) ties become relevant again in
+the thin-skin sandwich endgame (foundation k softens) — re-check after P.3.
+(Autopsy ≈ 3 min, post-processing only.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1073,6 +1099,7 @@ real, large, and waiting on the smooth formulation. (5254 s + 3861 s measured.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| Beam autopsy / IsoTruss (2026-06-11) | No eigen-visible beam mode; beam-only Kσ λ = 2.54 = full λ0 (stiffened-panel mode, 69% margin). The +326 kg/SF closed-form price targets a mesh-artifact sub-element length; physical model = beam-on-elastic-foundation (continuously bonded skin = the "helicals"). Ties SHELVED (F.2-consistent); **V.3c foundation-length check queued**; re-check ties at the thin-skin sandwich endgame. |
 | P.3 + IPOPT follow-up (2026-06-11) | IPOPT backend merged (`optimizer="ipopt"`, cyipopt/brew Ipopt, equivalence-tested). Default options discard warm starts (barrier re-centering → 2080 kg wander); proper warm-start options give a coherent 1249 kg (−35%) trajectory but STILL no convergence at 2000 iters. Both optimizer families now fail the cored migration for the same root cause: **argmax-switching constraint Jacobians (piecewise smoothness)**. **P.3 gated on P#7 KS aggregation** (smooth max; doubly motivated: IPOPT smoothness + adjoint count). Running best stays 1924.6 kg. |
 | P.3 sandwich skin (2026-06-11, OPEN) | Machinery merged + FD-validated (φ(t,c) D-factor, wrinkle/crimp checks, core gravity, gradients). Measurement: SLSQP stalls unconverged across 4 warm legs while mass falls 1924.6 → 1032 kg (−46%, skin 1246→270 kg at 1 mm faces + 5 mm core) — **prize is large but no leg is a result**. IPOPT trigger formally met (119 DVs, persistent stalls): integrate IPOPT (needs `brew install ipopt` for cyipopt, or casadi-bundled via adapter), then re-measure. Running best stays **1924.6 kg**. |
 | P.4 n_beams sweep (2026-06-10) | n ∈ {12…28} on the running-best config, full per-point protocol, parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5% at λ 1.51; **n=24 closed-form-feasible but eigen-REJECTED (λ 1.22)** — skin thins ∝n as predicted but beam mass grows faster and coupled eigen modes erode monotonically (2.54→1.51→1.22). P.4 closes; the historical 16 is now measured. When future levers slim members toward λ=1.5, move the eigen check in-loop (Toolbox #7 gradient). |
