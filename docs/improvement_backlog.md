@@ -70,11 +70,11 @@ discussion, 2026-06-09):
 1. **Eigenvalue buckling (K + Kσ linear buckling solve). [?; DONE 2026-06-10 — see
    findings; one premise corrected]** The single
    highest-leverage validity item: replaces/validates *both* binding closed-form checks
-   at once. ~~Captures panel curvature~~ **(2026-06-10: it does NOT capture
-   inter-beam panel curvature — flat facets, no mid-panel nodes; see Performance #6
-   for the open curvature credit)**. Captures (flat-plate kc=4 ignores it → conservative; any
-   recovered credit must still be taken with an imperfection knockdown, NASA
-   SP-8007-style, since curved-shell buckling is imperfection-sensitive), combined
+   at once. ~~Captures panel curvature~~ **(corrected 2026-06-10: it does NOT
+   capture inter-beam panel curvature — the skin is flat facets with no mid-panel
+   nodes; see Performance #6 for the still-open curvature credit; flat-plate kc=4
+   remains conservative, and any future curvature credit still needs an NASA
+   SP-8007-style imperfection knockdown)**. Captures combined
    membrane stress states, beam–panel mode interaction, and **global modes** (section
    ovalization/crimping) that no closed-form check sees. Also the natural home for
    prestress effects (see Performance #2). **Panel-geometry mischaracterization
