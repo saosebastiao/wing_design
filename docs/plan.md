@@ -259,9 +259,13 @@ before the next lever starts.
   direction-resolved (biaxial) buckling check — hoop pretension is transverse to the
   spanwise panel compression. Guard with a prestress-retention knockdown and
   strut-foot peel checks. (P#2, P#3)
-- **P.3 Sandwich (cored) skin.** Core multiplies panel D at ~5% of the monolithic mass
-  cost; needs wrinkling/shear-crimping checks. Partially redundant with P.2 — measure
-  which wins. (P#5)
+- **P.3 Sandwich (cored) skin. — MACHINERY DONE, LEVER OPEN (2026-06-11).**
+  φ(t,c) sandwich D + wrinkle/crimp checks merged & FD-validated; the measured
+  migration trajectory falls to ~1032 kg (−46%) but **SLSQP stalls unconverged on
+  every leg — the documented IPOPT trigger is met** (119 DVs, persistent stalls).
+  Next: IPOPT integration (cyipopt needs `brew install ipopt`; or casadi-bundled
+  adapter), then re-measure under the converged+feasible+eigen protocol. Running
+  best remains 1924.6 kg. (P#5; P.2 redundancy resolved — prestress is null.) (P#5)
 - **P.4 n_beams sweep. — DONE (2026-06-10).** n ∈ {12…28} on the running-best
   config (tube + hollow), full warm protocol + eigen verification per point,
   parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5%

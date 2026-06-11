@@ -983,6 +983,35 @@ multistart/continuation needed if those counts ever matter. (Sweep wall 7719 s
 total = 2 h 09 m for 10 sizings + 3 eigen verifications across 5 processes;
 analytic Jacobian.)
 
+**P.3 sandwich skin — machinery done + FD-validated; prize measured LARGE but
+UNCLOSED: SLSQP cannot converge the skin→core migration and the documented IPOPT
+trigger is now formally met (2026-06-11).** Implementation (committed, all
+FD-validated ≤2e-4, core-off path bit-compatible): `CoreMaterial` (PVC-H80-class
+default), sandwich D factor φ(t,c) = 1/4 + 3(c/t+1/2)² (exactly 1 at c = 0 —
+monolithic continuously recoverable), per-band `t_core` DVs, Hoff face-wrinkling +
+shear-crimping checks with a smooth c/(c+1 mm) activation, core mass in the
+objective and the V.4 body loads, sandwich-aware ∂D/∂t + new ∂D/∂c through the
+SensCache, sandwich branch in the panel-buckling gradient
+(`tests/beams/test_sandwich.py`, 5 tests). **Measurement (medium running-best
+config, warm from the 1924.6 kg optimum at c = 0 + 3 continuation restarts,
+5662 s total): every leg stalls unconverged+infeasible while mass falls
+1924.6 → 1543 → 1342 → 1339 → 1032 kg (−46%)** with the physics behaving exactly
+as designed — 5 mm core, 1.0 mm faces, skin 1246 → 270 kg + 71 kg core, wrinkle
+0.39 / crimp 0.59 (not the blockers), panel-buck shadow +567 kg/SF at the last
+stall. **None of these numbers is a result** (nothing converged/feasible/
+eigen-verified). **Why SLSQP fails:** the cored optimum is across a ~900 kg
+design migration from the start point; the active set churns through
+panel/wrinkle/crimp/Euler handoffs and SLSQP (dense active-set) exits with
+direction errors — at 119 DVs and persistent stalls this is exactly the
+documented IPOPT trigger (Toolbox #4). **cyipopt needs the Ipopt binary** (no
+macOS arm64 wheel; `brew install ipopt` or conda — a machine-level decision) or
+the casadi-bundled IPOPT via a callback adapter. **Decisions:** (1) the lever
+stays OPEN with its machinery merged and the prize bounded below ~1032 kg-
+trajectory level (likely hundreds of kg once closed properly); (2) next session:
+IPOPT integration, then re-measure with the converged+feasible+eigen protocol;
+(3) running best REMAINS 1924.6 kg until then. (Leg walls 1342 s + 5662 s
+measured; analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1021,6 +1050,7 @@ analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P.3 sandwich skin (2026-06-11, OPEN) | Machinery merged + FD-validated (φ(t,c) D-factor, wrinkle/crimp checks, core gravity, gradients). Measurement: SLSQP stalls unconverged across 4 warm legs while mass falls 1924.6 → 1032 kg (−46%, skin 1246→270 kg at 1 mm faces + 5 mm core) — **prize is large but no leg is a result**. IPOPT trigger formally met (119 DVs, persistent stalls): integrate IPOPT (needs `brew install ipopt` for cyipopt, or casadi-bundled via adapter), then re-measure. Running best stays **1924.6 kg**. |
 | P.4 n_beams sweep (2026-06-10) | n ∈ {12…28} on the running-best config, full per-point protocol, parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5% at λ 1.51; **n=24 closed-form-feasible but eigen-REJECTED (λ 1.22)** — skin thins ∝n as predicted but beam mass grows faster and coupled eigen modes erode monotonically (2.54→1.51→1.22). P.4 closes; the historical 16 is now measured. When future levers slim members toward λ=1.5, move the eigen check in-loop (Toolbox #7 gradient). |
 | P#1b hollow form beams (2026-06-10) | Annular machinery generalized (r-col = existing radius group; t_hollow block per group). Hollow-only: +1.2% = NO win (axial-stiffness loss feeds the skin; twist binds without the tube). Tube+hollow warm-started: **1924.6 kg, eigen λ 2.54 — running best, −14.4% vs V.6**; beams 674 kg at ~1 mm walls (4 plies). Cold start was eigen-REJECTED at λ 0.91 (verification layer works). Levers are complementary: spine frees twist, hollow walls then harvest the beams. Next: P.4 n_beams sweep (user-requested) on this config. |
 | P.1 CORRECTION (2026-06-10) | Earlier negative INVALID — tube bonds never assembled in the sizer (user-caught). Bonded re-run: **2248.0 → 2060.7 kg (−8.3%), eigen λ 2.49** — the tube stays minimal (8 kg, r at the 20 mm bound) and acts as a **torsion spine**: twist constraint un-binds (−50.7 → 0 kg/deg), skin sheds 180 kg of torsion plies. Centroidal-bending uselessness confirmed; torsion value missed by the artifact. Running-best medium 2060.7 kg; beam-buck +455 kg/SF → P#1b next. Follow-ups: tube_r_min sweep, tube CAD export, M#5 joint model. |
