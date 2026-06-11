@@ -177,3 +177,29 @@ def test_sandwich_sizing_feasible_never_heavier():
     assert sand.max_wrinkle_util <= 1.05 and sand.max_crimp_util <= 1.05
     # c = 0 (monolithic) is in the sandwich design space
     assert sand.mass_kg <= base.mass_kg * 1.02
+
+
+@pytest.mark.sizing
+def test_ipopt_matches_slsqp_on_small_problem():
+    # Toolbox #4 fallback: IPOPT must reach the same feasible optimum class as
+    # SLSQP on a problem SLSQP handles fine (basin tolerance 2%).
+    m, goe, G, M, beam_len, _ = _case()
+    loads = np.zeros((m.nodes.shape[0], 6))
+    loads[m.tip_nodes, 2] = 800.0
+    loads[m.tip_nodes, 0] = 400.0
+
+    def cfg(opt):
+        return LaminateSizingConfig(
+            sigma_allow_Pa=1.0e9, tip_defl_max_m=1.0, tip_twist_max_deg=90.0,
+            r_min=0.004, r_max=0.04, t_min=0.0005, t_max=0.02,
+            buckling_safety_factor=SF, use_analytic_jacobian=True,
+            core=CORE, optimizer=opt)
+
+    s = size_beam_shell_laminate(m, [loads], cfg("slsqp"), ply=T700_EPOXY,
+                                 rho=RHO, maxiter=250)
+    i = size_beam_shell_laminate(m, [loads], cfg("ipopt"), ply=T700_EPOXY,
+                                 rho=RHO, maxiter=600)
+    assert laminate_result_is_feasible(s, cfg("slsqp"))
+    assert i.converged
+    assert laminate_result_is_feasible(i, cfg("ipopt"))
+    assert i.mass_kg <= s.mass_kg * 1.02

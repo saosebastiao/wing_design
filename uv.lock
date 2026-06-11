@@ -287,6 +287,15 @@ wheels = [
 ]
 
 [[package]]
+name = "cyipopt"
+version = "1.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/7b/263178f3eb8a893e2697d7e20658c8a475520382a4288d107d49265e1ee2/cyipopt-1.7.0.tar.gz", hash = "sha256:527eab917415af8808df05ab1899df12bde6e95e5c5d32644b59a69e18561471", size = 70296, upload-time = "2026-04-20T03:55:42.951Z" }
+
+[[package]]
 name = "dataclasses-json"
 version = "0.6.7"
 source = { registry = "https://pypi.org/simple" }
@@ -1542,6 +1551,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aerosandbox" },
     { name = "build123d" },
+    { name = "cyipopt" },
     { name = "gmsh" },
     { name = "ocp-vscode" },
     { name = "ortools" },
@@ -1557,6 +1567,7 @@ dev = [
 requires-dist = [
     { name = "aerosandbox", specifier = ">=4.2.9" },
     { name = "build123d", specifier = ">=0.10.0" },
+    { name = "cyipopt", specifier = ">=1.7.0" },
     { name = "gmsh", specifier = ">=4.15.2" },
     { name = "ocp-vscode", specifier = ">=3.4.0" },
     { name = "ortools", specifier = ">=9.15.6755" },

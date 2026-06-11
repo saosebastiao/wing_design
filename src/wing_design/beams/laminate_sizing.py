@@ -89,6 +89,11 @@ class LaminateSizingConfig:
     # the sandwich factor; wrinkling + crimping checks gate the credit).
     core: CoreMaterial | None = None
     t_core_max: float = 0.06
+    # Optimizer backend: "slsqp" (scipy, default) or "ipopt" (cyipopt; the
+    # documented Toolbox #4 fallback — interior-point handles the large design
+    # migrations SLSQP's active set stalls on, e.g. the P.3 skin->core shift).
+    # Shadow prices are SLSQP-only for now (IPOPT multiplier signs unwired).
+    optimizer: str = "slsqp"
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -1059,11 +1064,23 @@ def size_beam_shell_laminate(
                                         tube_mono_jac if config.use_analytic_jacobian else None))
     constraints = [s.scipy_dict() for s in specs]
 
-    res = minimize(
-        mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": maxiter, "ftol": ftol},
-    )
+    if config.optimizer == "ipopt":
+        from cyipopt import minimize_ipopt
+        res = minimize_ipopt(
+            mass, x0, jac=mass_grad, bounds=bounds, constraints=constraints,
+            options={"max_iter": int(maxiter), "tol": float(ftol),
+                     "hessian_approximation": "limited-memory",
+                     "mu_strategy": "adaptive", "print_level": 0,
+                     "sb": "yes"},
+        )
+    elif config.optimizer == "slsqp":
+        res = minimize(
+            mass, x0, jac=mass_grad, method="SLSQP", bounds=bounds,
+            constraints=constraints,
+            options={"maxiter": maxiter, "ftol": ftol},
+        )
+    else:
+        raise ValueError(f"unknown optimizer: {config.optimizer!r}")
 
     shadow = shadow_prices_from_specs(
         getattr(res, "multipliers", None), specs, m_ref=m_ref)
@@ -1103,7 +1120,7 @@ def size_beam_shell_laminate(
                  + (float(config.core.rho * np.sum(x[dv.slice("t_core")] * band_area))
                     if sandwich else 0.0)),
         beam_mass_kg=bm, skin_mass_kg=sm,
-        converged=bool(res.success), n_iter=int(res.nit),
+        converged=bool(res.success), n_iter=int(getattr(res, "nit", -1)),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
         tip_defl_m=float(d), tip_twist_deg=float(t),
         max_beam_buckling_util=float(bbu),
