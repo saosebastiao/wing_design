@@ -6,8 +6,10 @@ M#4 path classification)
 
 ## Measured basis
 
-- P.1 verdict: a centroidal tube has no leverage inside the OML monocoque — the
-  hollow lever must act on the form beams themselves (beam-buck SF +514 kg/SF).
+- P.1 corrected verdict (bonds fixed): the core tube earns −8.3% as a TORSION
+  spine (twist un-binds) while staying minimal — centroidal BENDING leverage is
+  confirmed nil, so the hollow-section bending lever must act on the form beams
+  themselves (beam-buck SF +455 kg/SF on the new 2060.7 kg running best).
 - **Straightness probe (2026-06-10): all 16 medium form-beam paths deviate 0.0 mm
   from straight over the in-wing span (z ≈ 3.3 → 22 m, 18.7 m length)** — the
   linearly-tapered planform is a ruled surface, so fixed-arc-fraction beams are
