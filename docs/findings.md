@@ -1094,6 +1094,32 @@ flipped back to the beams (1095 kg, 65% of structure) → V.3c
 (beam-on-elastic-foundation length, +326 kg/SF evidence from the autopsy) is
 now the highest-leverage open item.** Running best: **1679.3 kg**.
 
+**V.3c foundation buckling model done (2026-06-11) — NEW RUNNING BEST: 1108.5 kg,
+converged + feasible, eigen λ 3.61 (−34.0% in one step; −50.7% vs the V.6
+baseline); the spokes alternative loses decisively.** Implementation (committed,
+FD-audited end-to-end through the live KS closures): in-wing form beams checked
+as stringers on the bonded-skin elastic foundation, Pcr = 2√(k·EI) with
+k = 3·D22_chord·(1/w_l³ + 1/w_r³) from the adjacent strip widths and the band
+laminate's chord-direction D (sandwich φ included); transition + tube elements
+keep element Euler (their restraint spacing IS the node spacing); design chains
+EI(r, t_hollow) and k(t_band, f0, f45, t_core) — the optimizer can now buy beam
+capacity by stiffening the skin, pricing the bracing the structure physically
+has. **Measurement (running-best config, warm from 1679.3, IPOPT+KS, 773 iters,
+2093 s): 1108.5 kg — beams 1095 → 559 kg, skin 469 + core 75 (t_core grew to
+5.4 mm partly to feed k), tube 5 kg; wrinkle 0.29 / crimp 0.59; eigen λ 3.61.**
+**Spokes variant (IsoTruss-literal: bonds to every beam at every level +
+element-Euler now physically justified): NOT competitive** — wandered to
+3416.8 kg unconverged in 1728 iters (4706 s): 16 rigid bonds per level act as
+hub diaphragms that restructure every load path, and the variant retains the
+element-length artifact the foundation model removes. **Caveat (recorded):** the
+foundation formula governs a sub-element mode the current mesh cannot audit by
+eigen (same epistemic class as the V.3b strip formula): conservative-leaning by
+construction (continuous-mode minimum; soft-direction k only; in-plane
+restraint is membrane-stiff and ignored), but a chordwise-enriched eigen audit
+is the eventual validator for both. Cumulative harvest: **2248.0 → 1108.5 kg
+(−50.7%), every claim converged + feasible + eigen-verified.**
+(2093 s + 4706 s measured.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1132,6 +1158,7 @@ now the highest-leverage open item.** Running best: **1679.3 kg**.
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |
 | P.3 KS+IPOPT breakthrough (2026-06-11) | KS smoothing merged (8 active constraints → smooth scalars; FD-audited through the live scipy closures). First feasible sandwich design in six attempts: **1685.0 kg, eigen λ 3.49** — t_core 4 mm / faces 2.1 mm, skin+core 617 kg vs 1246 monolithic. Upper bound (unconverged); polish leg running. Confirms the argmax-kink diagnosis. |
 | Beam autopsy / IsoTruss (2026-06-11) | No eigen-visible beam mode; beam-only Kσ λ = 2.54 = full λ0 (stiffened-panel mode, 69% margin). The +326 kg/SF closed-form price targets a mesh-artifact sub-element length; physical model = beam-on-elastic-foundation (continuously bonded skin = the "helicals"). Ties SHELVED (F.2-consistent); **V.3c foundation-length check queued**; re-check ties at the thin-skin sandwich endgame. |
