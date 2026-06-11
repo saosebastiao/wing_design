@@ -957,6 +957,32 @@ diagnostic hints at lighter basins reachable only infeasibly — continuation/
 multistart later; wrapped-joint stiffness idealized (M#5). (Control 1049 s +
 warm 1128 s + variants 1358/1393 s + eigen seconds; analytic Jacobian.)
 
+**P.4 n_beams sweep done (2026-06-10) — 16 beams is the measured optimum; above
+it the design goes EIGEN-limited (n=24 is closed-form-feasible but eigen-REJECTED
+at λ 1.22), a result the legacy panel model could never have shown.**
+`examples/52_nbeams_sweep.py`: n ∈ {12, 16, 20, 24, 28} at the running-best
+config (medium 16×8-levels, V.6 standard + core tube + hollow form beams), five
+parallel processes, each point running the full protocol (tube-only cold →
+tube+hollow warm with solid-equivalent walls → eigen verification).
+**Valid points: n=16 1924.6 kg (λ 2.54, the control, bit-exact) and n=20
+1972.6 kg (+2.5%, λ 1.51 — at the floor).** n=24: 2123.0 kg closed-form
+converged+feasible but **eigen-rejected (λ 1.22 < 1.5)**. n=12 and n=28:
+diagnostics (unconverged/infeasible at one or both stages; n=28's 1425 kg is
+meaningless). **Why:** more, thinner beams do thin the skin exactly as the strip
+model predicts (skin 1246 → 1060 → 970 kg across 16/20/24) but beam mass grows
+faster (674 → 908 → 1148 kg) AND the eigen-visible coupled modes erode
+monotonically (λ 2.54 → 1.51 → 1.22): slender beams + narrow panels couple into
+global modes the closed-form per-member checks cannot see. **Implications:**
+(1) **n_beams = 16 stands** — the historical default is now a measured optimum
+under the honest model; P.4 closes; (2) the λ-vs-n trend says future levers that
+slim members should expect the EIGEN layer to become the active constraint —
+when a config walks toward λ = 1.5, the in-loop eigen constraint (clean gradient
+φᵀ(∂K + λ∂Kσ)φ, Toolbox #7) becomes the right investment; (3) per-point
+convergence robustness degrades away from n=16 (12/24/28 stage failures) —
+multistart/continuation needed if those counts ever matter. (Sweep wall 7719 s
+total = 2 h 09 m for 10 sizings + 3 eigen verifications across 5 processes;
+analytic Jacobian.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -995,6 +1021,7 @@ warm 1128 s + variants 1358/1393 s + eigen seconds; analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P.4 n_beams sweep (2026-06-10) | n ∈ {12…28} on the running-best config, full per-point protocol, parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5% at λ 1.51; **n=24 closed-form-feasible but eigen-REJECTED (λ 1.22)** — skin thins ∝n as predicted but beam mass grows faster and coupled eigen modes erode monotonically (2.54→1.51→1.22). P.4 closes; the historical 16 is now measured. When future levers slim members toward λ=1.5, move the eigen check in-loop (Toolbox #7 gradient). |
 | P#1b hollow form beams (2026-06-10) | Annular machinery generalized (r-col = existing radius group; t_hollow block per group). Hollow-only: +1.2% = NO win (axial-stiffness loss feeds the skin; twist binds without the tube). Tube+hollow warm-started: **1924.6 kg, eigen λ 2.54 — running best, −14.4% vs V.6**; beams 674 kg at ~1 mm walls (4 plies). Cold start was eigen-REJECTED at λ 0.91 (verification layer works). Levers are complementary: spine frees twist, hollow walls then harvest the beams. Next: P.4 n_beams sweep (user-requested) on this config. |
 | P.1 CORRECTION (2026-06-10) | Earlier negative INVALID — tube bonds never assembled in the sizer (user-caught). Bonded re-run: **2248.0 → 2060.7 kg (−8.3%), eigen λ 2.49** — the tube stays minimal (8 kg, r at the 20 mm bound) and acts as a **torsion spine**: twist constraint un-binds (−50.7 → 0 kg/deg), skin sheds 180 kg of torsion plies. Centroidal-bending uselessness confirmed; torsion value missed by the artifact. Running-best medium 2060.7 kg; beam-buck +455 kg/SF → P#1b next. Follow-ups: tube_r_min sweep, tube CAD export, M#5 joint model. |
 | P.1 core tube (2026-06-10) | Full annular-member machinery built + FD-validated (sections, fit-bounded r/t DV blocks, wall-crimping check w/ 0.65 knockdown, annulus ∂K through the adjoint). **NEGATIVE at medium scale: optimizer zeroes the tube** (r→20 mm bound, −0.0% mass, eigen 2.21 ✓) — a centroidal tube has no bending leverage inside a 0.5–1.9 m-deep monocoque. P#1a dead as a mass lever (kept as manufacturing aid); hollow lever redirects to **P#1b hollow form-beam segments** (OML leverage; beam-buck SF +514 kg/SF still dominant). Machinery reusable for P#1b. |

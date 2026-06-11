@@ -262,11 +262,12 @@ before the next lever starts.
 - **P.3 Sandwich (cored) skin.** Core multiplies panel D at ~5% of the monolithic mass
   cost; needs wrinkling/shear-crimping checks. Partially redundant with P.2 — measure
   which wins. (P#5)
-- **P.4 n_beams sweep.** Panel *width* is the proven currency; beam count has never
-  been varied. **Gated on V.3's panel-model verdict**: the current `b = √area` check
-  mis-scales with beam count (∝n vs ∝n² physically) and falsely credits length-cutting
-  members like rings, so sweeping before the fix would understate the win and mis-rank
-  rings vs beams. (P#4)
+- **P.4 n_beams sweep. — DONE (2026-06-10).** n ∈ {12…28} on the running-best
+  config (tube + hollow), full warm protocol + eigen verification per point,
+  parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5%
+  (λ 1.51); n=24 closed-form-feasible but **eigen-rejected (λ 1.22)** — above 16
+  the design is eigen-limited, not closed-form-limited. The historical default is
+  now a measured optimum. `examples/52_nbeams_sweep.py`. (P#4)
 - **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
   and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
 
