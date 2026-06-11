@@ -38,6 +38,9 @@ from .sensitivity import (
     DesignSens, grad_beam_buckling, grad_skin_vm,
     grad_panel_buckling, grad_skin_tsai_wu, grad_tip_defl, grad_tip_twist,
     grad_core_check, grad_tube_wall_one,
+    grad_ks_engine, ks_aggregate, ks_values_only,
+    provider_beam_buck, provider_core_check, provider_defl, provider_panel,
+    provider_skin_vm, provider_tube_wall, provider_twist,
     _active_beam_force, _annulus_props, _beam_vm_explicit_tube,
     adjoint_lambda, lambdaT_dK_x_cached, dkloc_annular, dkloc_dr,
 )
@@ -94,6 +97,13 @@ class LaminateSizingConfig:
     # migrations SLSQP's active set stalls on, e.g. the P.3 skin->core shift).
     # Shadow prices are SLSQP-only for now (IPOPT multiplier signs unwired).
     optimizer: str = "slsqp"
+    # V.0.3/P#7 KS smoothing: when set (e.g. 50.0), the active max-based
+    # constraints (panel/beam-Euler/tube-wall/wrinkle/crimp/skin-vM/defl/twist)
+    # each become ONE smooth KS scalar over (items x load combos) — removes the
+    # argmax Jacobian kinks that stall optimizers on large migrations.
+    # Conservative (KS >= max). Requires use_analytic_jacobian and the
+    # von-Mises skin path. Hard maxes still drive reporting/feasibility.
+    ks_rho: float | None = None
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -1062,6 +1072,53 @@ def size_beam_shell_laminate(
         if S > 1:
             specs.append(ConstraintSpec("tube_mono", tube_mono_con, S - 1,
                                         tube_mono_jac if config.use_analytic_jacobian else None))
+    if config.ks_rho is not None:
+        if not config.use_analytic_jacobian:
+            raise ValueError("ks_rho requires use_analytic_jacobian=True")
+        if config.skin_failure == "tsai_wu":
+            raise NotImplementedError("ks_rho with tsai_wu skin is not wired")
+        rho_ks = float(config.ks_rho)
+        sf_b = config.buckling_safety_factor
+        n_combos = len(load_arrays) * max(len(accels), 1)
+        n_acc_ks = max(len(accels), 1)
+        ks_providers = {
+            "defl": provider_defl(config.tip_defl_max_m, model.tip_nodes),
+            "twist": provider_twist(config.tip_twist_max_deg, model.tip_nodes),
+            "skin": [provider_skin_vm(
+                         config.sigma_allow_Pa,
+                         (lambda ci: qw2_cases[ci // n_acc_ks])
+                         if qw2_cases is not None else None)(ci)
+                     for ci in range(n_combos)],
+        }
+        if sf_b is not None:
+            ks_providers["panel_buck"] = provider_panel(config.panel_kc, sf_b, b2_panel)
+            ks_providers["beam_buck"] = provider_beam_buck(config.euler_K, sf_b)
+            if annular:
+                ks_providers["tube_wall"] = provider_tube_wall(sf_b, model.E_beam)
+            if sandwich:
+                ks_providers["core_wrinkle"] = provider_core_check("wrinkle", sf_b)
+                ks_providers["core_crimp"] = provider_core_check("crimp", sf_b)
+
+        def ks_pair(provider):
+            def fun(x):
+                facs, ds, _s, _cache, _dFs = _jac_lookup(x)
+                return np.array([ks_values_only(facs, ds, rho_ks, provider)])
+
+            def jac(x):
+                facs, ds, _s, cache, dFs = _jac_lookup(x)
+                _con, grad = grad_ks_engine(facs, ds, cache, dFs, rho_ks, provider)
+                return grad.reshape(1, nx)
+            return fun, jac
+
+        new_specs = []
+        for sp in specs:
+            if sp.name in ks_providers:
+                fun, jac = ks_pair(ks_providers[sp.name])
+                new_specs.append(ConstraintSpec(sp.name + "_ks", fun, 1, jac, sp.shadow))
+            else:
+                new_specs.append(sp)
+        specs = new_specs
+
     constraints = [s.scipy_dict() for s in specs]
 
     if config.optimizer == "ipopt":
@@ -1071,7 +1128,14 @@ def size_beam_shell_laminate(
             options={"max_iter": int(maxiter), "tol": float(ftol),
                      "hessian_approximation": "limited-memory",
                      "mu_strategy": "adaptive", "print_level": 0,
-                     "sb": "yes"},
+                     "sb": "yes",
+                     # honor x0: without these, the barrier init pushes the
+                     # iterate to the interior centre (= cold start)
+                     "warm_start_init_point": "yes",
+                     "mu_init": 1.0e-6,
+                     "warm_start_bound_push": 1.0e-8,
+                     "warm_start_mult_bound_push": 1.0e-8,
+                     "bound_push": 1.0e-8, "bound_frac": 1.0e-8},
         )
     elif config.optimizer == "slsqp":
         res = minimize(

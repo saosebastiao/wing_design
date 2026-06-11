@@ -1063,3 +1063,335 @@ def grad_tip_twist(factored, ds, cache: "SensCache | None" = None,
     if dF is not None:
         grad += lam @ dF
     return g, grad
+
+
+# --- V.0.3/P#7: KS (smooth-max) constraint aggregation ----------------------
+#
+# Every max-based constraint becomes one C-infinity scalar over (items x load
+# combos): KS = m + ln(sum exp(rho(g_i - m)))/rho >= max(g_i) (conservative).
+# This removes the argmax-switching Jacobian kinks that stall both SLSQP and
+# IPOPT on large design migrations (P.3 evidence, 2026-06-11). Engine cost:
+# one adjoint per load combo per constraint (the per-item dg/du rows combine
+# into a single weighted dg_du before the back-substitution).
+
+
+def ks_aggregate(vals, rho):
+    """(KS value, softmax weights w_i with sum w = 1) — numerically stable."""
+    v = np.asarray(vals, dtype=float)
+    m = float(v.max())
+    e = np.exp(rho * (v - m))
+    W = float(e.sum())
+    return m + np.log(W) / rho, e / W
+
+
+def grad_ks_engine(facs, ds, cache, dFs, rho, provider):
+    """con = 1 − KS(g) over all (items × combos); returns (con, grad (nx,)).
+
+    ``provider(fac, ds)`` yields per-combo lists: (vals (K,), dofs_list,
+    dgdu_local_list, explicit_list) where explicit_list[k] = [(col, dval), ...].
+    """
+    provs = (list(provider) if isinstance(provider, (list, tuple))
+             else [provider] * len(facs))
+    per_combo = [provs[ci](fac, ds) for ci, fac in enumerate(facs)]
+    all_vals = np.concatenate([pc[0] for pc in per_combo])
+    ks, w = ks_aggregate(all_vals, rho)
+    con = 1.0 - ks
+
+    grad = np.zeros(ds.nx)
+    pos = 0
+    for ci, (vals, dofs_list, dgdu_list, expl_list) in enumerate(per_combo):
+        K = len(vals)
+        wc = w[pos:pos + K]
+        pos += K
+        if wc.sum() < 1e-300:
+            continue
+        fac = facs[ci]
+        dg_du = np.zeros(fac.ndof)
+        for k in range(K):
+            if wc[k] == 0.0:
+                continue
+            dg_du[dofs_list[k]] += wc[k] * dgdu_list[k]
+            for col, dval in expl_list[k]:
+                grad[col] += wc[k] * dval
+        lam = adjoint_lambda(fac, dg_du)
+        du = -lambdaT_dK_x_cached(cache, lam, fac.u)
+        if dFs is not None and dFs[ci] is not None:
+            du += lam @ dFs[ci]
+        grad += du
+    return con, -grad
+
+
+def ks_values_only(facs, ds, rho, provider):
+    """KS constraint value without gradients (for the scipy fun closures)."""
+    provs = (list(provider) if isinstance(provider, (list, tuple))
+             else [provider] * len(facs))
+    all_vals = np.concatenate([provs[ci](fac, ds)[0] for ci, fac in enumerate(facs)])
+    ks, _w = ks_aggregate(all_vals, rho)
+    return 1.0 - ks
+
+
+# --- per-family providers (reuse the per-item formulas of the hard grads) ---
+
+
+def provider_panel(panel_kc, safety_factor, areas):
+    def p(fac, ds):
+        tris = ds.model.shell_tris
+        M = tris.shape[0]
+        sandwich = ds.core is not None
+        vals = np.empty(M)
+        dofs_l, dgdu_l, expl_l = [], [], []
+        for t in range(M):
+            s, eps, Gt, area, dofs, C_t = _active_tri_stress(fac, ds, t)
+            sxx, syy, sxy = s
+            mean = 0.5 * (sxx + syy)
+            R = np.sqrt(0.25 * (sxx - syy) ** 2 + sxy**2)
+            comp = max(0.0, -(mean - R))
+            tt = float(ds.t_tri[t]); Qeff00 = float(C_t[0, 0]); b2 = float(areas[t])
+            if sandwich:
+                cc = float(ds.c_tri[t])
+                sigma_cr = panel_kc * np.pi**2 * Qeff00 * sandwich_geom_factor(tt, cc) / (b2 * tt)
+            else:
+                sigma_cr = panel_kc * np.pi**2 * Qeff00 * tt**2 / (12.0 * b2)
+            util = comp * safety_factor / max(sigma_cr, 1e-30)
+            vals[t] = util
+            if comp == 0.0:
+                dofs_l.append(dofs); dgdu_l.append(np.zeros(18)); expl_l.append([])
+                continue
+            dR = (np.array([(sxx - syy) / (4.0 * R), -(sxx - syy) / (4.0 * R), sxy / R])
+                  if R > 0.0 else np.zeros(3))
+            dcomp_ds = dR - np.array([0.5, 0.5, 0.0])
+            dutil_ds = (safety_factor / sigma_cr) * dcomp_ds
+            dofs_l.append(dofs)
+            dgdu_l.append(dutil_ds @ (C_t @ Gt))
+            expl = []
+            b = int(ds.band_of_tri[t]); lg = int(ds.layup_group_of_band[b])
+            off = float(ds.offset_tri[t])
+            if sandwich:
+                cc = float(ds.c_tri[t]); h = cc + tt / 2.0
+                ratio = sandwich_geom_factor(tt, cc) / tt
+                expl.append((ds.G + b, -util * (tt / 24.0 + h / 4.0) / ratio))
+                expl.append((int(ds.core_col_of_tri[t]), -util * (h / 2.0) / ratio))
+            else:
+                expl.append((ds.G + b, -2.0 * util / tt))
+            for which, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
+                dQ = dQeff_df(ds.ply, which=which, offset_deg=off)
+                dcomp_df = float(dcomp_ds @ (dQ @ eps))
+                dsigcr_df = float(dQ[0, 0]) * (sigma_cr / Qeff00)
+                expl.append((base + lg, (safety_factor / sigma_cr) * dcomp_df
+                             - util * dsigcr_df / sigma_cr))
+            expl_l.append(expl)
+        return vals, dofs_l, dgdu_l, expl_l
+    return p
+
+
+def provider_beam_buck(euler_K, safety_factor):
+    def p(fac, ds):
+        be = fac.beam_elements
+        n = be.shape[0]
+        E = ds.model.E_beam
+        vals = np.empty(n)
+        dofs_l, dgdu_l, expl_l = [], [], []
+        for e in range(n):
+            floc, Mx, dofs = _active_beam_force(fac, e)
+            s_e = ds.tube_seg_of_element(e)
+            if s_e >= 0:
+                r = float(ds.tube_r[s_e])
+                _A, Iy, _J, _dA, dI, _dJ = _annulus_props(r, float(ds.tube_t[s_e]))
+            else:
+                r = float(ds.radii_full[e])
+                Iy = np.pi * r**4 / 4.0
+            L = float(ds.beam_lengths[e])
+            axial = floc[6]
+            comp = max(0.0, -axial)
+            Pcr = np.pi**2 * E * Iy / (euler_K * L) ** 2
+            util = comp * safety_factor / max(Pcr, 1e-30)
+            vals[e] = util
+            if comp == 0.0:
+                dofs_l.append(dofs); dgdu_l.append(np.zeros(12)); expl_l.append([])
+                continue
+            dutil_daxial = -safety_factor / Pcr
+            dofs_l.append(dofs)
+            dgdu_l.append(dutil_daxial * Mx[6, :])
+            expl = []
+            if s_e >= 0:
+                rt = float(ds.tube_r[s_e]); tt = float(ds.tube_t[s_e])
+                for k, wrt in enumerate(("r", "t")):
+                    dutil = -util * dI[k] / Iy
+                    dk = dkloc_annular(E, ds.model.G_beam, rt, tt, L, wrt=wrt)
+                    dutil += dutil_daxial * (dk @ fac.transforms[e] @ fac.u[dofs])[6]
+                    col = ds.tube_dv_r(s_e) if wrt == "r" else ds.tube_dv_t(s_e)
+                    expl.append((col, dutil))
+            else:
+                dutil_dr = -4.0 * util / r
+                dk_dr = dkloc_dr(E, ds.model.G_beam, r, L)
+                dutil_dr += dutil_daxial * (dk_dr @ fac.transforms[e] @ fac.u[dofs])[6]
+                expl.append((int(ds.group_of_element[e]), dutil_dr))
+            expl_l.append(expl)
+        return vals, dofs_l, dgdu_l, expl_l
+    return p
+
+
+def provider_defl(limit, tip_nodes):
+    def p(fac, ds):
+        u = fac.u.reshape(-1, 6)
+        K = len(tip_nodes)
+        vals = np.empty(K)
+        dofs_l, dgdu_l, expl_l = [], [], []
+        for k, node in enumerate(tip_nodes):
+            node = int(node)
+            g = float(np.linalg.norm(u[node, :3]))
+            vals[k] = g / limit
+            dofs = np.arange(6 * node, 6 * node + 3)
+            uhat = u[node, :3] / max(g, 1e-30)
+            dofs_l.append(dofs)
+            dgdu_l.append(uhat / limit)
+            expl_l.append([])
+        return vals, dofs_l, dgdu_l, expl_l
+    return p
+
+
+def provider_twist(limit_deg, tip_nodes):
+    def p(fac, ds):
+        u = fac.u.reshape(-1, 6)
+        K = len(tip_nodes)
+        vals = np.empty(K)
+        dofs_l, dgdu_l, expl_l = [], [], []
+        for k, node in enumerate(tip_nodes):
+            node = int(node)
+            tw = float(u[node, 5])
+            # twist limit compared in DEGREES like the hard path
+            vals[k] = abs(np.degrees(tw)) / limit_deg
+            sgn = np.sign(tw) or 1.0
+            dofs_l.append(np.array([6 * node + 5]))
+            dgdu_l.append(np.array([np.degrees(sgn) / limit_deg]))
+            expl_l.append([])
+        return vals, dofs_l, dgdu_l, expl_l
+    return p
+
+
+def provider_skin_vm(sigma_allow, qw2_of_combo=None):
+    """qw2_of_combo: callable ci -> (M,) 0.75*q*w^2 array or None (V.5 adder)."""
+    def make(ci):
+        def p(fac, ds):
+            tris = ds.model.shell_tris
+            M = tris.shape[0]
+            qw2 = qw2_of_combo(ci) if qw2_of_combo is not None else None
+            vals = np.empty(M)
+            dofs_l, dgdu_l, expl_l = [], [], []
+            for t in range(M):
+                s, eps, Gt, area, dofs, C_t = _active_tri_stress(fac, ds, t)
+                sxx, syy, sxy = s
+                vm = np.sqrt(sxx**2 - sxx * syy + syy**2 + 3.0 * sxy**2)
+                tt = float(ds.t_tri[t])
+                sb = float(qw2[t]) / tt**2 if qw2 is not None else 0.0
+                vals[t] = (vm + sb) / sigma_allow
+                if vm == 0.0:
+                    dofs_l.append(dofs); dgdu_l.append(np.zeros(18)); expl_l.append([])
+                    continue
+                dg_ds = np.array([(2.0 * sxx - syy) / (2.0 * vm),
+                                  (2.0 * syy - sxx) / (2.0 * vm),
+                                  3.0 * sxy / vm])
+                dofs_l.append(dofs)
+                dgdu_l.append((dg_ds @ (C_t @ Gt)) / sigma_allow)
+                expl = []
+                b = int(ds.band_of_tri[t]); lg = int(ds.layup_group_of_band[b])
+                off = float(ds.offset_tri[t])
+                if qw2 is not None and sb > 0.0:
+                    expl.append((ds.G + b, (-2.0 * float(qw2[t]) / tt**3) / sigma_allow))
+                for which, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
+                    dQ = dQeff_df(ds.ply, which=which, offset_deg=off)
+                    expl.append((base + lg, float(dg_ds @ (dQ @ eps)) / sigma_allow))
+                expl_l.append(expl)
+            return vals, dofs_l, dgdu_l, expl_l
+        return p
+    return make
+
+
+def provider_core_check(which, safety_factor):
+    from wing_design.materials.unidir import CORE_RAMP_M
+
+    def p(fac, ds):
+        tris = ds.model.shell_tris
+        M = tris.shape[0]
+        core = ds.core
+        vals = np.empty(M)
+        dofs_l, dgdu_l, expl_l = [], [], []
+        for t in range(M):
+            s, eps, Gt, area, dofs, C_t = _active_tri_stress(fac, ds, t)
+            sxx, syy, sxy = s
+            mean = 0.5 * (sxx + syy)
+            R = np.sqrt(0.25 * (sxx - syy) ** 2 + sxy**2)
+            comp = max(0.0, -(mean - R))
+            tt = float(ds.t_tri[t]); cc = float(ds.c_tri[t])
+            Qeff00 = float(C_t[0, 0])
+            if which == "wrinkle":
+                sig = 0.5 * (Qeff00 * core.E_c * core.G_c) ** (1.0 / 3.0)
+            else:
+                sig = core.G_c * (cc + tt) / tt
+            ramp = cc / (cc + CORE_RAMP_M)
+            util = comp * safety_factor / max(sig, 1e-30) * ramp
+            vals[t] = util
+            if comp == 0.0:
+                dofs_l.append(dofs); dgdu_l.append(np.zeros(18)); expl_l.append([])
+                continue
+            dR = (np.array([(sxx - syy) / (4.0 * R), -(sxx - syy) / (4.0 * R), sxy / R])
+                  if R > 0.0 else np.zeros(3))
+            dcomp_ds = dR - np.array([0.5, 0.5, 0.0])
+            dofs_l.append(dofs)
+            dgdu_l.append(((safety_factor * ramp / sig) * dcomp_ds) @ (C_t @ Gt))
+            expl = []
+            b = int(ds.band_of_tri[t]); lg = int(ds.layup_group_of_band[b])
+            off = float(ds.offset_tri[t])
+            for whichf, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
+                dQ = dQeff_df(ds.ply, which=whichf, offset_deg=off)
+                dutil_df = (safety_factor * ramp / sig) * float(dcomp_ds @ (dQ @ eps))
+                if which == "wrinkle":
+                    dutil_df += -util * (sig * float(dQ[0, 0]) / (3.0 * Qeff00)) / sig
+                expl.append((base + lg, dutil_df))
+            if which == "crimp":
+                expl.append((ds.G + b, -util * (-core.G_c * cc / tt**2) / sig))
+            dramp_dc = CORE_RAMP_M / (cc + CORE_RAMP_M) ** 2
+            dutil_dc = (comp * safety_factor / sig) * dramp_dc
+            if which == "crimp":
+                dutil_dc += -util * (core.G_c / tt) / sig
+            expl.append((int(ds.core_col_of_tri[t]), dutil_dc))
+            expl_l.append(expl)
+        return vals, dofs_l, dgdu_l, expl_l
+    return p
+
+
+def provider_tube_wall(safety_factor, E, knockdown=0.65):
+    def p(fac, ds):
+        Q = ds.S
+        vals = np.empty(Q)
+        dofs_l, dgdu_l, expl_l = [], [], []
+        c0 = knockdown * 0.605 * E
+        for s_i in range(Q):
+            e = int(ds.tube_elements[s_i])
+            floc, Mx, dofs = _active_beam_force(fac, e)
+            axial = floc[6]
+            r = float(ds.tube_r[s_i]); t = float(ds.tube_t[s_i])
+            A, _I, _J, dA, _dI, _dJ = _annulus_props(r, t)
+            sigma_cr = c0 * t / r
+            comp = max(0.0, -axial)
+            util = (comp / A) * safety_factor / sigma_cr
+            vals[s_i] = util
+            if comp == 0.0:
+                dofs_l.append(dofs); dgdu_l.append(np.zeros(12)); expl_l.append([])
+                continue
+            dutil_daxial = -safety_factor / (A * sigma_cr)
+            dofs_l.append(dofs)
+            dgdu_l.append(dutil_daxial * Mx[6, :])
+            K0 = safety_factor * comp / c0
+            dutil_dr = K0 * (A * t - r * t * dA[0]) / (A * t) ** 2
+            dutil_dt = K0 * (-r) * (dA[1] * t + A) / (A * t) ** 2
+            expl = []
+            for wrt, dutil in (("r", dutil_dr), ("t", dutil_dt)):
+                dk = dkloc_annular(ds.model.E_beam, ds.model.G_beam, r, t,
+                                   float(ds.beam_lengths[e]), wrt=wrt)
+                dutil += dutil_daxial * (dk @ fac.transforms[e] @ fac.u[dofs])[6]
+                col = ds.tube_dv_r(s_i) if wrt == "r" else ds.tube_dv_t(s_i)
+                expl.append((col, dutil))
+            expl_l.append(expl)
+        return vals, dofs_l, dgdu_l, expl_l
+    return p
