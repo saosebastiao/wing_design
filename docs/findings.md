@@ -1012,6 +1012,29 @@ IPOPT integration, then re-measure with the converged+feasible+eigen protocol;
 (3) running best REMAINS 1924.6 kg until then. (Leg walls 1342 s + 5662 s
 measured; analytic Jacobian.)
 
+**P.3 follow-up (2026-06-11) — IPOPT integrated and properly warm-started; STILL
+no convergence: the blocker is now isolated to formulation smoothness, and KS
+aggregation (P#7) becomes the gate for the sandwich lever.** The Toolbox #4
+fallback was wired (`LaminateSizingConfig.optimizer="ipopt"` via cyipopt 1.7.0 /
+brew Ipopt 3.14.19, identical closures + analytic Jacobians; small-problem
+equivalence test vs SLSQP passes). Medium cored runs, warm from the 1924.6 kg
+optimum: **(a) IPOPT default options: 2000 iters, infeasible, wandered to
+2080 kg** — interior-point barrier initialization re-centers the iterate,
+discarding the warm start; **(b) IPOPT with warm_start_init_point + small
+mu_init: 2000 iters, structurally coherent trajectory to 1249.2 kg (−35%),
+STILL unconverged/infeasible** (3861 s). Combined with SLSQP's four stalls, both
+optimizer families now fail the same migration for the same root cause: **every
+max-based constraint row selects its binding element/load-case by argmax, so the
+constraint Jacobians jump at switching points** — SLSQP's active set churns,
+IPOPT's C² convergence assumptions break. **Decision: P.3 is gated on P#7 KS
+aggregation** (smooth soft-max over elements AND load cases), which now carries
+two independent motivations: C^∞ Jacobians for the optimizer and collapsed
+adjoint back-substitutions. KS is conservative (over-estimates the max) —
+re-validate vs hard-max per the established pattern; ρ ≈ 50 on normalized
+constraints per the nlp-sizing conventions. Running best remains **1924.6 kg**;
+the sandwich prize (trajectory floor ~1032–1249 kg across five attempts) is
+real, large, and waiting on the smooth formulation. (5254 s + 3861 s measured.)
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1050,6 +1073,7 @@ measured; analytic Jacobian.)
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| P.3 + IPOPT follow-up (2026-06-11) | IPOPT backend merged (`optimizer="ipopt"`, cyipopt/brew Ipopt, equivalence-tested). Default options discard warm starts (barrier re-centering → 2080 kg wander); proper warm-start options give a coherent 1249 kg (−35%) trajectory but STILL no convergence at 2000 iters. Both optimizer families now fail the cored migration for the same root cause: **argmax-switching constraint Jacobians (piecewise smoothness)**. **P.3 gated on P#7 KS aggregation** (smooth max; doubly motivated: IPOPT smoothness + adjoint count). Running best stays 1924.6 kg. |
 | P.3 sandwich skin (2026-06-11, OPEN) | Machinery merged + FD-validated (φ(t,c) D-factor, wrinkle/crimp checks, core gravity, gradients). Measurement: SLSQP stalls unconverged across 4 warm legs while mass falls 1924.6 → 1032 kg (−46%, skin 1246→270 kg at 1 mm faces + 5 mm core) — **prize is large but no leg is a result**. IPOPT trigger formally met (119 DVs, persistent stalls): integrate IPOPT (needs `brew install ipopt` for cyipopt, or casadi-bundled via adapter), then re-measure. Running best stays **1924.6 kg**. |
 | P.4 n_beams sweep (2026-06-10) | n ∈ {12…28} on the running-best config, full per-point protocol, parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5% at λ 1.51; **n=24 closed-form-feasible but eigen-REJECTED (λ 1.22)** — skin thins ∝n as predicted but beam mass grows faster and coupled eigen modes erode monotonically (2.54→1.51→1.22). P.4 closes; the historical 16 is now measured. When future levers slim members toward λ=1.5, move the eigen check in-loop (Toolbox #7 gradient). |
 | P#1b hollow form beams (2026-06-10) | Annular machinery generalized (r-col = existing radius group; t_hollow block per group). Hollow-only: +1.2% = NO win (axial-stiffness loss feeds the skin; twist binds without the tube). Tube+hollow warm-started: **1924.6 kg, eigen λ 2.54 — running best, −14.4% vs V.6**; beams 674 kg at ~1 mm walls (4 plies). Cold start was eigen-REJECTED at λ 0.91 (verification layer works). Levers are complementary: spine frees twist, hollow walls then harvest the beams. Next: P.4 n_beams sweep (user-requested) on this config. |

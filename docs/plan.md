@@ -111,9 +111,12 @@ change) except KS, which is testable.
   post-fix profile shows no dominant wall (assembly 24%, shell recovery 17%, sensitivity
   10% of a small total). Re-profile before investing here (payoff returns if V.2 pushes
   n_levels up).
-- **V.0.3 KS aggregation of the vector beam constraints.** DEPRIORITIZED after the
-  V.0.1 fix: the n back-substitutions cost ~1.7 s per 10 medium iterations now.
-  Reconsider only if fine meshes (V.2) or DV growth (P.1/P.2) bring the wall back.
+- **V.0.3 KS aggregation of the vector beam constraints. — REACTIVATED
+  (2026-06-11) as the P.3 gate:** not for speed (the cache fix killed that wall)
+  but for **smoothness** — the argmax-switching Jacobians of the max-based
+  constraints stall both SLSQP and IPOPT on the sandwich migration. KS soft-max
+  over elements AND load cases; conservative (re-validate vs hard-max, ρ≈50 per
+  nlp-sizing conventions).
 - **V.0.4 Process-parallel multi-start and sweeps.** The multistart wrapper is
   "serial, parallel-ready"; V.2 and P.4 are embarrassingly parallel across points.
   A process pool gives near-linear core scaling with no numerical work.
@@ -263,9 +266,13 @@ before the next lever starts.
   φ(t,c) sandwich D + wrinkle/crimp checks merged & FD-validated; the measured
   migration trajectory falls to ~1032 kg (−46%) but **SLSQP stalls unconverged on
   every leg — the documented IPOPT trigger is met** (119 DVs, persistent stalls).
-  Next: IPOPT integration (cyipopt needs `brew install ipopt`; or casadi-bundled
-  adapter), then re-measure under the converged+feasible+eigen protocol. Running
-  best remains 1924.6 kg. (P#5; P.2 redundancy resolved — prestress is null.) (P#5)
+  IPOPT integrated (2026-06-11, `optimizer="ipopt"`) and properly warm-started —
+  still unconverged at 2000 iters (coherent −35% trajectory): both optimizer
+  families fail on the **argmax-switching constraint Jacobians**. **P.3 is gated
+  on V.0.3/P#7 KS aggregation** (smooth soft-max over elements + load cases;
+  doubly motivated now: C^∞ Jacobians AND collapsed back-substitutions;
+  conservative — re-validate vs hard-max, ρ≈50). Running best remains 1924.6 kg.
+  (P#5; P.2 redundancy resolved — prestress is null.) (P#5)
 - **P.4 n_beams sweep. — DONE (2026-06-10).** n ∈ {12…28} on the running-best
   config (tube + hollow), full warm protocol + eigen verification per point,
   parallel. **16 beams is the measured optimum** (1924.6 kg, λ 2.54); n=20 +2.5%
