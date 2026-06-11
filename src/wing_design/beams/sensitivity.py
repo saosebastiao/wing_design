@@ -91,6 +91,24 @@ def dAD_dt(Qeff, t):
     return Qeff, (t**2 / 4.0) * Qeff
 
 
+def dAD_dt_sandwich(Qeff, t, c):
+    """(∂A/∂t, ∂D/∂t) for the P.3 sandwich: A = t·Qeff (faces only),
+    D = Qeff·(t³/48 + (t/4)(c+t/2)²)  →  ∂D/∂t = Qeff·(t²/16 + (c+t/2)²/4
+    + t(c+t/2)/4). Degenerates to dAD_dt at c = 0."""
+    h = c + t / 2.0
+    return Qeff, (t**2 / 16.0 + h**2 / 4.0 + t * h / 4.0) * Qeff
+
+
+def dD_dc_sandwich(Qeff, t, c):
+    """∂D/∂c = Qeff·t·(c + t/2)/2 (membrane A is c-independent)."""
+    return (t * (c + t / 2.0) / 2.0) * Qeff
+
+
+def sandwich_geom_factor(t, c):
+    """D geometric factor t³/48 + (t/4)(c+t/2)²  (= t³/12 at c = 0)."""
+    return t**3 / 48.0 + (t / 4.0) * (c + t / 2.0) ** 2
+
+
 def dQeff_df(ply, *, which, offset_deg=0.0):
     """∂Qeff/∂f0 (which='f0') or ∂Qeff/∂f45 (which='f45'), with datum offset.
 
@@ -155,6 +173,11 @@ class DesignSens:
     tube_r_cols: np.ndarray = None    # (S,) absolute DV col of each r (None = legacy)
     tube_t_cols: np.ndarray = None    # (S,) absolute DV col of each t (None = legacy)
     nx_extra: int = None              # DV cols beyond G+B+2L (None = legacy 2*S)
+    # P.3 sandwich skin (optional): per-triangle core thickness + the absolute DV
+    # column of each triangle's t_core band variable. None = monolithic.
+    core: object = None               # CoreMaterial
+    c_tri: np.ndarray = None          # (M,)
+    core_col_of_tri: np.ndarray = None  # (M,) absolute DV columns
 
     @property
     def nx(self) -> int:
@@ -188,6 +211,9 @@ def adjoint_lambda(factored, dg_du):
 
 def lambdaT_dK_x(factored, ds, lam):
     """Vector (nx,) of λᵀ (∂K/∂x_i) u for every design variable i."""
+    if ds.core is not None:
+        raise NotImplementedError("sandwich skin requires the cached path "
+                                  "(prepare_sensitivity / lambdaT_dK_x_cached)")
     nx = ds.nx
     out = np.zeros(nx)
     u = factored.u
@@ -269,6 +295,9 @@ class SensCache:
     tube_dkg_t: list = None
     tube_dv_r: np.ndarray = None
     tube_dv_t: np.ndarray = None
+    # P.3 sandwich core entries (None = monolithic)
+    tri_dke_c: list = None
+    tri_dv_c: np.ndarray = None
 
 
 def prepare_sensitivity(ds, factored) -> "SensCache":
@@ -306,7 +335,9 @@ def prepare_sensitivity(ds, factored) -> "SensCache":
     beam_dv = np.asarray(beam_dv_list, dtype=int)
 
     tris = ds.model.shell_tris
+    sandwich = ds.core is not None
     tri_dofs, tri_dke_t, tri_dke_f0, tri_dke_f45 = [], [], [], []
+    tri_dke_c = [] if sandwich else None
     tri_dv_t = np.empty(tris.shape[0], dtype=int)
     tri_dv_f0 = np.empty(tris.shape[0], dtype=int)
     tri_dv_f45 = np.empty(tris.shape[0], dtype=int)
@@ -315,19 +346,35 @@ def prepare_sensitivity(ds, factored) -> "SensCache":
         p1, p2, p3 = ds.model.nodes[n0], ds.model.nodes[n1], ds.model.nodes[n2]
         tri_dofs.append(np.r_[6 * n0:6 * n0 + 6, 6 * n1:6 * n1 + 6, 6 * n2:6 * n2 + 6])
         tt = float(ds.t_tri[t]); off = float(ds.offset_tri[t]); Qe = ds.Qeff_tri[t]
-        dA, dD = dAD_dt(Qe, tt)
-        tri_dke_t.append(dke_dAD(p1, p2, p3, dA, dD, ds.drilling_factor))
-        dA0, dD0 = dAD_df(dQeff_df(ds.ply, which="f0", offset_deg=off), tt)
-        tri_dke_f0.append(dke_dAD(p1, p2, p3, dA0, dD0, ds.drilling_factor))
-        dA4, dD4 = dAD_df(dQeff_df(ds.ply, which="f45", offset_deg=off), tt)
-        tri_dke_f45.append(dke_dAD(p1, p2, p3, dA4, dD4, ds.drilling_factor))
+        if sandwich:
+            cc = float(ds.c_tri[t])
+            dA, dD = dAD_dt_sandwich(Qe, tt, cc)
+            tri_dke_t.append(dke_dAD(p1, p2, p3, dA, dD, ds.drilling_factor))
+            dDc = dD_dc_sandwich(Qe, tt, cc)
+            tri_dke_c.append(dke_dAD(p1, p2, p3, 0.0 * Qe, dDc, ds.drilling_factor))
+            geom = sandwich_geom_factor(tt, cc)
+            dA0, dD0 = dAD_df(dQeff_df(ds.ply, which="f0", offset_deg=off), tt)
+            tri_dke_f0.append(dke_dAD(p1, p2, p3, dA0, (12.0 * geom / tt**3) * dD0,
+                                      ds.drilling_factor))
+            dA4, dD4 = dAD_df(dQeff_df(ds.ply, which="f45", offset_deg=off), tt)
+            tri_dke_f45.append(dke_dAD(p1, p2, p3, dA4, (12.0 * geom / tt**3) * dD4,
+                                       ds.drilling_factor))
+        else:
+            dA, dD = dAD_dt(Qe, tt)
+            tri_dke_t.append(dke_dAD(p1, p2, p3, dA, dD, ds.drilling_factor))
+            dA0, dD0 = dAD_df(dQeff_df(ds.ply, which="f0", offset_deg=off), tt)
+            tri_dke_f0.append(dke_dAD(p1, p2, p3, dA0, dD0, ds.drilling_factor))
+            dA4, dD4 = dAD_df(dQeff_df(ds.ply, which="f45", offset_deg=off), tt)
+            tri_dke_f45.append(dke_dAD(p1, p2, p3, dA4, dD4, ds.drilling_factor))
         b = int(ds.band_of_tri[t]); lg = int(ds.layup_group_of_band[b])
         tri_dv_t[t] = G + b; tri_dv_f0[t] = G + B + lg; tri_dv_f45[t] = G + B + L + lg
     return SensCache(nx, beam_dofs, beam_dkg, beam_dv, tri_dofs, tri_dke_t,
                      tri_dke_f0, tri_dke_f45, tri_dv_t, tri_dv_f0, tri_dv_f45,
                      tube_dofs=tube_dofs, tube_dkg_r=tube_dkg_r, tube_dkg_t=tube_dkg_t,
                      tube_dv_r=np.asarray(tube_dv_r, dtype=int),
-                     tube_dv_t=np.asarray(tube_dv_t, dtype=int))
+                     tube_dv_t=np.asarray(tube_dv_t, dtype=int),
+                     tri_dke_c=tri_dke_c,
+                     tri_dv_c=(ds.core_col_of_tri if sandwich else None))
 
 
 def lambdaT_dK_x_cached(cache: "SensCache", lam, u) -> np.ndarray:
@@ -347,6 +394,8 @@ def lambdaT_dK_x_cached(cache: "SensCache", lam, u) -> np.ndarray:
         out[cache.tri_dv_t[t]] += le @ cache.tri_dke_t[t] @ ue
         out[cache.tri_dv_f0[t]] += le @ cache.tri_dke_f0[t] @ ue
         out[cache.tri_dv_f45[t]] += le @ cache.tri_dke_f45[t] @ ue
+        if cache.tri_dke_c is not None:
+            out[cache.tri_dv_c[t]] += le @ cache.tri_dke_c[t] @ ue
     return out
 
 
@@ -726,6 +775,7 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas,
     tris = ds.model.shell_tris
     M = tris.shape[0]
     SF = safety_factor
+    sandwich = ds.core is not None
     utils = np.empty(M)
     rows = []
     for t in range(M):
@@ -738,7 +788,12 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas,
         tt = float(ds.t_tri[t])
         Qeff00 = float(C_t[0, 0])
         b2 = float(areas[t])           # b² = area
-        sigma_cr = panel_kc * np.pi**2 * Qeff00 * tt**2 / (12.0 * b2)
+        if sandwich:
+            cc = float(ds.c_tri[t])
+            sigma_cr = (panel_kc * np.pi**2 * Qeff00
+                        * sandwich_geom_factor(tt, cc) / (b2 * tt))
+        else:
+            sigma_cr = panel_kc * np.pi**2 * Qeff00 * tt**2 / (12.0 * b2)
         util = comp * SF / max(sigma_cr, 1e-30)
         utils[t] = util
         rows.append((s, eps, Gt, area, dofs, C_t, comp, R, sigma_cr, util, tt, Qeff00))
@@ -774,9 +829,20 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas,
     if dF is not None:
         du_part += lam @ dF
 
-    # explicit t: util ∝ 1/σcr ∝ 1/t² ⇒ ∂util/∂t = −2·util/t
+    # explicit thickness/core terms via σcr
     b = int(ds.band_of_tri[t_star])
-    du_part[ds.G + b] += -2.0 * util / tt
+    if sandwich:
+        cc = float(ds.c_tri[t_star])
+        h = cc + tt / 2.0
+        # σcr ∝ geom/t, d/dt(geom/t) = t/24 + h/4; d/dc(geom/t) = h/2
+        gov_t = tt / 24.0 + h / 4.0
+        gov_c = h / 2.0
+        ratio = (sandwich_geom_factor(tt, cc) / tt)
+        du_part[ds.G + b] += -util * gov_t / ratio
+        du_part[int(ds.core_col_of_tri[t_star])] += -util * gov_c / ratio
+    else:
+        # util ∝ 1/σcr ∝ 1/t² ⇒ ∂util/∂t = −2·util/t (kept exact, ulp discipline)
+        du_part[ds.G + b] += -2.0 * util / tt
 
     # explicit f: util = comp(f)·SF/σcr(f); σcr ∝ Qeff00(f); comp via ∂s/∂f.
     lg = int(ds.layup_group_of_band[b])
@@ -791,6 +857,85 @@ def grad_panel_buckling(factored, ds, *, panel_kc, safety_factor, areas,
 
     grad = -du_part
     return con_value, grad
+
+
+def grad_core_check(factored, ds, *, which, safety_factor,
+                    cache: "SensCache | None" = None,
+                    dF: np.ndarray | None = None):
+    """P.3 core failure gradient: which='wrinkle' (Hoff) or 'crimp' (shear).
+
+    util = SF·comp/σ_allow(t,c,f) · s(c), s = c/(c+1mm) (smooth activation).
+    con = 1 − max util. Returns (con_value, grad (nx,)).
+    """
+    from wing_design.materials.unidir import CORE_RAMP_M
+    tris = ds.model.shell_tris
+    M = tris.shape[0]
+    SF = safety_factor
+    core = ds.core
+    utils = np.empty(M)
+    rows = []
+    for t in range(M):
+        s, eps, Gt, area, dofs, C_t = _active_tri_stress(factored, ds, t)
+        sxx, syy, sxy = s
+        mean = 0.5 * (sxx + syy)
+        R = np.sqrt(0.25 * (sxx - syy) ** 2 + sxy**2)
+        comp = max(0.0, -(mean - R))
+        tt = float(ds.t_tri[t]); cc = float(ds.c_tri[t])
+        Qeff00 = float(C_t[0, 0])
+        if which == "wrinkle":
+            sig = 0.5 * (Qeff00 * core.E_c * core.G_c) ** (1.0 / 3.0)
+        else:
+            sig = core.G_c * (cc + tt) / tt
+        ramp = cc / (cc + CORE_RAMP_M)
+        util = comp * SF / max(sig, 1e-30) * ramp
+        utils[t] = util
+        rows.append((s, eps, Gt, dofs, C_t, comp, R, sig, ramp, util, tt, cc, Qeff00))
+
+    t_star = int(np.argmax(utils))
+    (s, eps, Gt, dofs, C_t, comp, R, sig, ramp, util, tt, cc, Qeff00) = rows[t_star]
+    sxx, syy, sxy = s
+    con_value = 1.0 - util
+    if comp == 0.0 or ramp == 0.0:
+        return con_value, np.zeros(ds.nx)
+
+    dR = np.array([(sxx - syy) / (4.0 * R), -(sxx - syy) / (4.0 * R),
+                   sxy / R]) if R > 0.0 else np.zeros(3)
+    dcomp_ds = dR - np.array([0.5, 0.5, 0.0])
+    dutil_ds = (SF * ramp / sig) * dcomp_ds
+
+    dg_du = np.zeros(factored.ndof)
+    dg_du[dofs] = dutil_ds @ (C_t @ Gt)
+    lam = adjoint_lambda(factored, dg_du)
+    _cache = cache if cache is not None else prepare_sensitivity(ds, factored)
+    du_part = -lambdaT_dK_x_cached(_cache, lam, factored.u)
+    if dF is not None:
+        du_part += lam @ dF
+
+    b = int(ds.band_of_tri[t_star])
+    lg = int(ds.layup_group_of_band[b])
+    off = float(ds.offset_tri[t_star])
+    # explicit f: comp via ∂s/∂f, plus σ_wr ∝ Qeff00^(1/3) for wrinkle
+    for whichf, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
+        dQ = dQeff_df(ds.ply, which=whichf, offset_deg=off)
+        dcomp_df = float(dcomp_ds @ (dQ @ eps))
+        dutil_df = (SF * ramp / sig) * dcomp_df
+        if which == "wrinkle":
+            dsig_df = sig * float(dQ[0, 0]) / (3.0 * Qeff00)
+            dutil_df += -util * dsig_df / sig
+        du_part[base + lg] += dutil_df
+    # explicit t (crimp only: σ = G(c+t)/t → ∂σ/∂t = −G·c/t²)
+    if which == "crimp":
+        dsig_dt = -core.G_c * cc / tt**2
+        du_part[ds.G + b] += -util * dsig_dt / sig
+    # explicit c: ramp everywhere; crimp also via σ
+    dramp_dc = CORE_RAMP_M / (cc + CORE_RAMP_M) ** 2
+    dutil_dc = (comp * SF / sig) * dramp_dc
+    if which == "crimp":
+        dsig_dc = core.G_c / tt
+        dutil_dc += -util * dsig_dc / sig
+    du_part[int(ds.core_col_of_tri[t_star])] += dutil_dc
+
+    return con_value, -du_part
 
 
 def _Teps(theta_deg):

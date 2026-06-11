@@ -134,3 +134,47 @@ def laminate_stiffness_offset(
     A = thickness * Qeff
     D = (thickness**3 / 12.0) * Qeff
     return A, D, Qeff
+
+
+# --- P.3 sandwich (cored) skin helpers --------------------------------------
+
+
+@dataclass(frozen=True)
+class CoreMaterial:
+    """Structural core for the sandwich skin (P.3). Defaults ~PVC foam H80."""
+
+    E_c: float = 80.0e6     # through-thickness/compressive modulus [Pa]
+    G_c: float = 27.0e6     # shear modulus [Pa]
+    rho: float = 80.0       # [kg/m^3]
+
+
+PVC_H80 = CoreMaterial()
+
+# smooth activation ramp width for the core failure checks: the checks vanish
+# continuously as the core disappears (1 mm scale)
+CORE_RAMP_M = 1.0e-3
+
+
+def sandwich_D_factor(t: float | "np.ndarray", c: float | "np.ndarray"):
+    """phi(t, c): multiply the monolithic laminate D by this for a symmetric
+    sandwich with total face thickness t (split t/2 each side) and core c.
+
+    D_sand = Qeff*(t^3/48 + (t/4)(c + t/2)^2) = D_mono * phi,
+    phi = 1/4 + 3*(c/t + 1/2)^2;  phi(t, 0) = 1 exactly (monolithic recovered).
+    """
+    return 0.25 + 3.0 * (c / t + 0.5) ** 2
+
+
+def core_ramp(c):
+    """s(c) = c/(c + 1 mm): smooth 0-at-zero activation for core failure checks."""
+    return c / (c + CORE_RAMP_M)
+
+
+def wrinkling_stress(E_face: float | "np.ndarray", core: CoreMaterial):
+    """Hoff face-wrinkling allowable: 0.5*(E_f*E_c*G_c)^(1/3) [Pa]."""
+    return 0.5 * (E_face * core.E_c * core.G_c) ** (1.0 / 3.0)
+
+
+def crimping_stress(t, c, core: CoreMaterial):
+    """Shear-crimping allowable on the face membrane stress: G_c*(c + t)/t [Pa]."""
+    return core.G_c * (c + t) / t

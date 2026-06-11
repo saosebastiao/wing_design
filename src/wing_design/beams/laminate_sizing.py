@@ -25,7 +25,10 @@ import numpy as np
 from scipy.optimize import minimize
 
 from ..materials.failure import laminate_min_strength_ratio_batch
-from ..materials.unidir import UDPly, laminate_stiffness, laminate_stiffness_offset
+from ..materials.unidir import (
+    CORE_RAMP_M, CoreMaterial, UDPly, crimping_stress, laminate_stiffness,
+    laminate_stiffness_offset, sandwich_D_factor, wrinkling_stress,
+)
 from ..structural.beam_shell import (
     solve_beam_shell_laminate, solve_beam_shell_laminate_factored,
     _recover_beam_forces as _recover_beam_forces_local,
@@ -34,7 +37,8 @@ from ..structural.frame import FrameResult, _element_rotation
 from .sensitivity import (
     DesignSens, grad_beam_buckling, grad_skin_vm,
     grad_panel_buckling, grad_skin_tsai_wu, grad_tip_defl, grad_tip_twist,
-    grad_tube_wall_one, _active_beam_force, _annulus_props, _beam_vm_explicit_tube,
+    grad_core_check, grad_tube_wall_one,
+    _active_beam_force, _annulus_props, _beam_vm_explicit_tube,
     adjoint_lambda, lambdaT_dK_x_cached, dkloc_annular, dkloc_dr,
 )
 from ..structural.buckling import (
@@ -80,6 +84,11 @@ class LaminateSizingConfig:
     # P.1 core tube DV bounds (used when the model carries tube_elements).
     tube_r_min: float = 0.02
     tube_t_min: float = 0.001
+    # P.3 sandwich skin: set a CoreMaterial to enable per-band core-thickness DVs
+    # (faces = the existing laminate split symmetrically; A unchanged, D scaled by
+    # the sandwich factor; wrinkling + crimping checks gate the credit).
+    core: CoreMaterial | None = None
+    t_core_max: float = 0.06
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -124,6 +133,11 @@ class LaminateSizingResult:
     t_hollow: np.ndarray | None = None     # P#1b wall per hollow radius-group
     tube_mass_kg: float = 0.0
     max_tube_wall_util: float = 0.0        # over ALL annular elements (tube + hollow)
+    # P.3 sandwich skin
+    t_core: np.ndarray | None = None       # (B,) core thickness per band
+    core_mass_kg: float = 0.0
+    max_wrinkle_util: float = 0.0
+    max_crimp_util: float = 0.0
 
 
 def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
@@ -144,6 +158,9 @@ def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
         Hn = len({int(goe[e]) for e in model.hollow_elements})
         lo = np.concatenate([lo, np.full(Hn, config.tube_t_min)])
         hi = np.concatenate([hi, np.full(Hn, config.r_max)])
+    if config.core is not None:
+        lo = np.concatenate([lo, np.zeros(B)])
+        hi = np.concatenate([hi, np.full(B, config.t_core_max)])
     return lo, hi
 
 
@@ -170,6 +187,10 @@ def laminate_result_is_feasible(
         if result.max_panel_buckling_util > 1.0 + tol:
             return False
         if result.max_tube_wall_util > 1.0 + tol:
+            return False
+        if result.max_wrinkle_util > 1.0 + tol:
+            return False
+        if result.max_crimp_util > 1.0 + tol:
             return False
     return True
 
@@ -266,6 +287,9 @@ def size_beam_shell_laminate(
         blocks += [("r_tube", S), ("t_wall", S)]
     if hollow:
         blocks += [("t_hollow", H)]
+    sandwich = config.core is not None
+    if sandwich:
+        blocks += [("t_core", B)]
     dv = DesignVector(*blocks)
     nx = dv.nx
     f0_lo = dv.slice("f0").start
@@ -334,6 +358,8 @@ def size_beam_shell_laminate(
                                  np.full(S, 0.003)])
         if hollow:
             x0 = np.concatenate([x0, np.full(H, 0.003)])
+        if sandwich:
+            x0 = np.concatenate([x0, np.full(B, 0.005)])
     else:
         x0 = np.asarray(x0, dtype=float)
         if x0.shape != (nx,):
@@ -397,11 +423,16 @@ def size_beam_shell_laminate(
         # basins; see the P.0 ulp lesson).
         areas_e = (np.array([sec.A for sec in build_sections(x, radii)])
                    if annular else None)
+        extra = None
+        if sandwich:
+            extra = config.core.rho * np.asarray(
+                x[dv.slice("t_core")], dtype=float)[band_of_tri]
         out = []
         for lc in load_arrays:
             for acc in accels:
                 out.append(lc + body_load_vector(model, radii, t_tri, rho=rho,
-                                                 accel=acc, areas=areas_e))
+                                                 accel=acc, areas=areas_e,
+                                                 extra_skin_density=extra))
         return out
 
     def evaluate(x):
@@ -434,6 +465,11 @@ def size_beam_shell_laminate(
             A_arg = np.stack([m[0] for m in mats])
             D_arg = np.stack([m[1] for m in mats])
             C_arg = np.stack([m[2] for m in mats])
+        if sandwich:
+            c_band = np.asarray(x[dv.slice("t_core")], dtype=float)
+            c_tri_e = c_band[band_of_tri]
+            phi_tri = sandwich_D_factor(t_tri, c_tri_e)
+            D_arg = D_arg * phi_tri[:, None, None]
         D11 = D_arg[:, 0, 0]
         sections = build_sections(x, radii)
         areas_e = np.array([sec.A for sec in sections])
@@ -447,7 +483,13 @@ def size_beam_shell_laminate(
         mt = 0.0
         worst_beam_buck = 0.0
         worst_panel_buck = 0.0
+        worst_wrk = 0.0
+        worst_crp = 0.0
         worst_R = np.inf
+        if sandwich:
+            sig_wr = wrinkling_stress(C_arg[:, 0, 0], config.core)
+            sig_cp = crimping_stress(t_tri, c_tri_e, config.core)
+            ramp = c_tri_e / (c_tri_e + CORE_RAMP_M)
         n_acc = max(len(accels), 1)
         for ci, loads in enumerate(effective_loads(x, radii, t_tri)):
             qw2 = qw2_cases[ci // n_acc] if qw2_cases is not None else None
@@ -490,8 +532,16 @@ def size_beam_shell_laminate(
                                                 kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
+                if sandwich:
+                    sarr = np.asarray(skin_s)
+                    mean = 0.5 * (sarr[:, 0] + sarr[:, 1])
+                    rad = np.sqrt(0.25 * (sarr[:, 0] - sarr[:, 1])**2 + sarr[:, 2]**2)
+                    compp = np.maximum(0.0, -(mean - rad))
+                    sf = config.buckling_safety_factor
+                    worst_wrk = max(worst_wrk, float((compp * sf / sig_wr * ramp).max()))
+                    worst_crp = max(worst_crp, float((compp * sf / sig_cp * ramp).max()))
         out = (wb, ws, md, mt, worst_beam_buck, worst_panel_buck, worst_R,
-               tube_util if annular else None)
+               tube_util if annular else None, worst_wrk, worst_crp)
         cache[key] = out
         return out
 
@@ -515,6 +565,8 @@ def size_beam_shell_laminate(
             r_t, t_eff = decode_tube(x)
             ri = r_t - t_eff
             m += rho * np.sum(np.pi * (r_t**2 - ri**2) * Lb_tube)
+        if sandwich:
+            m += config.core.rho * np.sum(x[dv.slice("t_core")] * band_area)
         return m / m_ref
 
     def mass_grad(x):
@@ -539,6 +591,8 @@ def size_beam_shell_laminate(
             ri = r_t - t_eff
             g[dv.slice("r_tube")] = rho * 2.0 * np.pi * t_eff * Lb_tube / m_ref
             g[dv.slice("t_wall")] = rho * 2.0 * np.pi * ri * Lb_tube / m_ref
+        if sandwich:
+            g[dv.slice("t_core")] = config.core.rho * band_area / m_ref
         return g
 
     def beam_con(x):
@@ -617,6 +671,10 @@ def size_beam_shell_laminate(
                 D_arg = np.stack([m[1] for m in mats])
                 Qeff_tri = np.stack([m[2] for m in mats])
                 offset_tri = np.asarray(datum_offsets_deg, dtype=float)
+            if sandwich:
+                c_band_j = np.asarray(x[dv.slice("t_core")], dtype=float)
+                c_tri_j = c_band_j[band_of_tri]
+                D_arg = D_arg * sandwich_D_factor(t_tri, c_tri_j)[:, None, None]
 
             sections = build_sections(x, radii)
             loads_eff = effective_loads(x, radii, t_tri)
@@ -625,8 +683,13 @@ def size_beam_shell_laminate(
                 ann_el_j, ann_r_j, ann_t_j, ann_rc_j, ann_tc_j = annular_arrays(x, radii)
                 tube_kw = dict(S=len(ann_el_j), tube_elements=ann_el_j,
                                tube_r=ann_r_j, tube_t=ann_t_j,
-                               tube_r_cols=ann_rc_j, tube_t_cols=ann_tc_j,
-                               nx_extra=nx - (G + B + 2 * L))
+                               tube_r_cols=ann_rc_j, tube_t_cols=ann_tc_j)
+            if annular or sandwich:
+                tube_kw["nx_extra"] = nx - (G + B + 2 * L)
+            if sandwich:
+                tube_kw["core_rho"] = config.core.rho
+                tube_kw["core_col_of_tri"] = (dv.slice("t_core").start
+                                              + band_of_tri.astype(int))
             # V.4: one ∂f/∂x per accel vector (zero for pure aero); fac k pairs
             # with accel k % len(accels) by the effective_loads combo order.
             if accels:
@@ -682,6 +745,10 @@ def size_beam_shell_laminate(
                 tube_r_cols=(ann_rc_j if annular else None),
                 tube_t_cols=(ann_tc_j if annular else None),
                 nx_extra=(nx - (G + B + 2 * L)),
+                core=(config.core if sandwich else None),
+                c_tri=(c_tri_j if sandwich else None),
+                core_col_of_tri=((dv.slice("t_core").start
+                                  + band_of_tri.astype(int)) if sandwich else None),
             )
             # Design-only ∂K/∂x assembly, built ONCE per design point and reused
             # across every load case and every constraint-gradient call below.
@@ -851,6 +918,22 @@ def size_beam_shell_laminate(
                     Jrows[s_i] = row
                 return Jrows
             jacs["tube_wall"] = tube_wall_jac
+        if sandwich and config.buckling_safety_factor is not None:
+            def core_wrinkle_jac(x):
+                return _binding_grad(
+                    x, lambda fac, ds, cache, dF, ci: grad_core_check(
+                        fac, ds, which="wrinkle",
+                        safety_factor=config.buckling_safety_factor,
+                        cache=cache, dF=dF)).reshape(1, nx)
+
+            def core_crimp_jac(x):
+                return _binding_grad(
+                    x, lambda fac, ds, cache, dF, ci: grad_core_check(
+                        fac, ds, which="crimp",
+                        safety_factor=config.buckling_safety_factor,
+                        cache=cache, dF=dF)).reshape(1, nx)
+            jacs["core_wrinkle"] = core_wrinkle_jac
+            jacs["core_crimp"] = core_crimp_jac
         if config.buckling_safety_factor is not None:
             def beam_buck_con_jac(x):
                 return _binding_grad(
@@ -881,6 +964,13 @@ def size_beam_shell_laminate(
                 Jm[i, g] = 1.0
                 Jm[i, h_t0 + i] = -1.0
             return Jm
+
+    if sandwich:
+        def core_wrinkle_con(x):
+            return np.array([1.0 - evaluate(x)[8]])
+
+        def core_crimp_con(x):
+            return np.array([1.0 - evaluate(x)[9]])
 
     if annular:
         def tube_wall_con(x):
@@ -951,6 +1041,13 @@ def size_beam_shell_laminate(
             specs.append(ConstraintSpec(
                 "tube_wall", tube_wall_con, Q_ann, jacs.get("tube_wall"),
                 ("sf", "buckling_sf_tube_wall", config.buckling_safety_factor)))
+    if sandwich and config.buckling_safety_factor is not None:
+        specs += [
+            ConstraintSpec("core_wrinkle", core_wrinkle_con, 1, jacs.get("core_wrinkle"),
+                           ("sf", "buckling_sf_core_wrinkle", config.buckling_safety_factor)),
+            ConstraintSpec("core_crimp", core_crimp_con, 1, jacs.get("core_crimp"),
+                           ("sf", "buckling_sf_core_crimp", config.buckling_safety_factor)),
+        ]
     if hollow:
         specs.append(ConstraintSpec("hollow_validity", hollow_validity_con, H,
                                     hollow_validity_jac if config.use_analytic_jacobian else None))
@@ -980,7 +1077,7 @@ def size_beam_shell_laminate(
     scale = np.where(fg + hg > 1.0, fg + hg, 1.0)
     x[f0_lo:f0_lo + L] = fg / scale
     x[f45_lo:f45_lo + L] = hg / scale
-    wb, ws, d, t, bbu, pbu, worst_R, tube_util_vec = evaluate(x)
+    wb, ws, d, t, bbu, pbu, worst_R, tube_util_vec, worst_wrk, worst_crp = evaluate(x)
     radii = x[:G][group_of_element]
     t_bands = x[G:G + B].copy()
     t_tri = t_bands[band_of_tri]
@@ -1002,7 +1099,10 @@ def size_beam_shell_laminate(
         radii=radii, t_skin=t_skin_mean, t_bands=t_bands,
         f0=f0_mean, f45=f45_mean, f90=f90_mean,
         f0_bands=f0b, f45_bands=f45b, f90_bands=f90b,
-        mass_kg=bm + tm + sm, beam_mass_kg=bm, skin_mass_kg=sm,
+        mass_kg=(bm + tm + sm
+                 + (float(config.core.rho * np.sum(x[dv.slice("t_core")] * band_area))
+                    if sandwich else 0.0)),
+        beam_mass_kg=bm, skin_mass_kg=sm,
         converged=bool(res.success), n_iter=int(res.nit),
         max_beam_vm_Pa=float(wb.max()), max_skin_vm_Pa=float(ws),
         tip_defl_m=float(d), tip_twist_deg=float(t),
@@ -1015,6 +1115,11 @@ def size_beam_shell_laminate(
         t_hollow=(np.asarray(x[dv.slice("t_hollow")], dtype=float) if hollow else None),
         tube_mass_kg=tm,
         max_tube_wall_util=(float(tube_util_vec.max()) if annular else 0.0),
+        t_core=(np.asarray(x[dv.slice("t_core")], dtype=float) if sandwich else None),
+        core_mass_kg=(float(config.core.rho * np.sum(x[dv.slice("t_core")] * band_area))
+                      if sandwich else 0.0),
+        max_wrinkle_util=float(worst_wrk),
+        max_crimp_util=float(worst_crp),
     )
 
 

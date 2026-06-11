@@ -12,7 +12,8 @@ import numpy as np
 
 
 def body_load_vector(model, radii, t_tri, *, rho: float, accel,
-                     areas: np.ndarray | None = None) -> np.ndarray:
+                     areas: np.ndarray | None = None,
+                     extra_skin_density: np.ndarray | None = None) -> np.ndarray:
     """(N, 6) lumped nodal forces from structural mass under ``accel`` (m/s²).
 
     Beam element mass ρ·A·L lumps half to each end node (A = πr² from ``radii``,
@@ -45,6 +46,9 @@ def body_load_vector(model, radii, t_tri, *, rho: float, accel,
         v2 = nodes[n2] - nodes[n0]
         area = 0.5 * float(np.linalg.norm(np.cross(v1, v2)))
         m_third = rho * t[m] * area / 3.0
+        if extra_skin_density is not None:
+            # P.3 core surface density rho_c * c [kg/m^2]
+            m_third += float(extra_skin_density[m]) * area / 3.0
         for n in (n0, n1, n2):
             out[n, :3] += m_third * a
     return out
@@ -68,6 +72,8 @@ def body_load_jacobian(
     tube_r_cols: np.ndarray | None = None,
     tube_t_cols: np.ndarray | None = None,
     nx_extra: int | None = None,
+    core_rho: float | None = None,
+    core_col_of_tri: np.ndarray | None = None,
 ) -> np.ndarray:
     """∂f/∂x as a dense (ndof, nx) matrix,
     x = [r_group(G), t_band(B), f0(L), f45(L) | r_tube(S), t_wall(S)].
@@ -106,6 +112,13 @@ def body_load_jacobian(
     tris = model.shell_tris
     for m in range(tris.shape[0]):
         n0, n1, n2 = int(tris[m, 0]), int(tris[m, 1]), int(tris[m, 2])
+        if core_rho is not None:
+            v1c = nodes[n1] - nodes[n0]
+            v2c = nodes[n2] - nodes[n0]
+            area_c = 0.5 * float(np.linalg.norm(np.cross(v1c, v2c)))
+            dmc = core_rho * area_c / 3.0
+            for nn in (n0, n1, n2):
+                dF[6 * nn:6 * nn + 3, int(core_col_of_tri[m])] += dmc * a
         v1 = nodes[n1] - nodes[n0]
         v2 = nodes[n2] - nodes[n0]
         area = 0.5 * float(np.linalg.norm(np.cross(v1, v2)))
