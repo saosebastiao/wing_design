@@ -67,9 +67,12 @@ discussion, 2026-06-09):
 
 *Goal: the model behaves as close as possible to the real structure.*
 
-1. **Eigenvalue buckling (K + Kσ linear buckling solve). [?]** The single
+1. **Eigenvalue buckling (K + Kσ linear buckling solve). [?; DONE 2026-06-10 — see
+   findings; one premise corrected]** The single
    highest-leverage validity item: replaces/validates *both* binding closed-form checks
-   at once. Captures panel curvature (flat-plate kc=4 ignores it → conservative; any
+   at once. ~~Captures panel curvature~~ **(2026-06-10: it does NOT capture
+   inter-beam panel curvature — flat facets, no mid-panel nodes; see Performance #6
+   for the open curvature credit)**. Captures (flat-plate kc=4 ignores it → conservative; any
    recovered credit must still be taken with an imperfection knockdown, NASA
    SP-8007-style, since curved-shell buckling is imperfection-sensitive), combined
    membrane stress states, beam–panel mode interaction, and **global modes** (section
@@ -271,13 +274,26 @@ Ranked by expected leverage.*
    thickening. Build-compatible: wind inner skin → place core → wind outer skin.
    Needs core wrinkling/shear-crimping checks. Partially redundant with #2 (prestress)
    — measure which wins, probably don't need both at full strength.
-6. **Curvature + panel-width credit via the eigenvalue buckling solve. [↓]** Validity
+6. **Curvature + panel-width credit. [↓; width half DONE 2026-06-10]** Validity
    #1 doubles as a mass lever twice over: flat-plate kc=4 ignores curvature, and the
    `b = √area` level is ~3× conservative vs a width-based check on the long medium
    panels. Every recovered Pa of σcr converts directly to thinner skin in the
    constraint that sizes most of the structure — but take curved-shell credit with an
    imperfection knockdown (NASA SP-8007-style), and remember the soft edge restraint
    (flexible beams) claws some margin back.
+   **Status (2026-06-10): the WIDTH half is harvested** (V.3b strip check, −18.8%
+   medium, eigen-calibrated). **The CURVATURE half is still fully open, and the
+   original premise was wrong: the eigenvalue solve canNOT recover inter-beam panel
+   curvature on this mesh family** — the skin is flat CST/DKT facets with nodes only
+   on beam lines, so each strip is one flat facet across its width and the local
+   panel arch is invisible to K, Kσ, AND the eigen modes (V.3 finding). Remaining
+   path: (a) cheap closed-form upgrade in the V.3b pattern — curved-panel
+   σcr ≈ kc·π²·D/(w²·t) + γ·0.605·E·t/R_panel with the per-strip radius computed
+   from the section geometry like `skin_panel_widths` (design-independent →
+   gradients unchanged), γ = SP-8007 knockdown; (b) chordwise mesh enrichment
+   (mid-panel nodes) to let the eigen solve verify it. Same flat-facet caveat
+   applies to the V.5 pressure-bending strip term (flat strip = conservative, no
+   membrane shedding).
 7. **KS aggregation of the vector beam constraint. [enabler]** The ∂K caching is
    merged (1.58×→1.98× measured) — still far below the ~n_DV ceiling, which confirms
    the next wall: the vector-valued `beam_con` needs ~n adjoint back-substitutions per
