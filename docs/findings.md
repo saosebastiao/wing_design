@@ -1142,6 +1142,41 @@ inflated result masses — their saved designs recompute correctly. Lesson
 recorded: the objective and the reported mass must share one accounting path
 (they now do for new results; a regression test pins objective == reported).
 
+**Data loss + V#2 directional-coherence fix implemented (2026-06-11) — an
+unexpected machine reboot wiped /tmp, killing both in-flight runs (big-budget
+push, spacing re-test) and destroying every saved design array, including the
+V.3c running best and the whole warm-start chain; everything is being
+regenerated under a corrected panel model so the re-run happens once.**
+(1) **Loss + process fix:** code/findings/corrected masses were all committed
+and safe; only regenerable artifacts died. New convention: launcher scripts,
+design arrays (.npz) and logs go to the gitignored repo `runs/` dir
+(reboot-proof), each chain stage saves its design immediately on completion,
+and chains are resumable (existing stage file = skipped). (2) **Why V#2 now:**
+the V.3c optimum had moved the layup from 32/53/15 (span/±45/chord) to
+**0/100/0 — pure ±45** — directionality completely reorganized under the
+skin-as-bracing role, which makes the long-open V#2 mismatch load-bearing: the
+strip panel check used *triangle-local-frame* D11 (a mesh-dependent span/chord
+patchwork) while the foundation k uses datum-frame chord D22. (3) **The fix
+(implemented + FD-validated):** `panel_d_mode="datum_ortho"` (opt-in, KS-only,
+requires `ply_angle_datum`) replaces the local D11 in the strip σcr with the
+classical orthotropic long-SS-plate combination in the DATUM frame
+(`sensitivity.ortho_plate_Qstar`): N_cr = (2π²/b²)(√(D11·D22) + D12 + 2·D66),
+1 = span, 2 = chord — exactly kc = 4 for an isotropic laminate (unit-tested
+identity), so the model is unchanged for quasi-isotropic skins and only the
+directional bookkeeping is corrected. σcr keeps the same geom(t,c)/t sandwich
+factor (t/c gradient chains shared with the local path); new f0/f45 chains run
+through `dQstar_df` (FD-audited end-to-end through the live KS closures, with
+foundation on, alongside all 8 families). Demand stays the most-compressive
+principal stress (direction-agnostic, conservative-leaning — recorded caveat);
+wrinkling still uses local-frame Qeff00 (V#2-residual, smaller since Hoff goes
+as E_face^⅓ — recorded caveat). Plain path bit-exact (full suite green, 15:10
+wall). Warm-start helper `design_vector_from_result` added to the laminate path
+(was ad-hoc in the lost /tmp scripts) with a cross-config roundtrip test.
+**Measurement pending:** `runs/chain_rebuild.py` regenerates the full chain
+A tube+hollow → B sandwich → C foundation (V.3c reference) → D datum_ortho
+(the V#2 step measurement + does 0/100/0 survive coherent bookkeeping?), each
+stage warm-started, eigen-verified, and saved to `runs/chain_*.npz`.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1180,6 +1215,8 @@ recorded: the objective and the reported mass must share one accounting path
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| /tmp data loss + runs/ convention (2026-06-11) | Unexpected reboot wiped /tmp: both in-flight runs AND all saved design arrays lost (V.3c running best, warm chain). Code/ledger safe. New convention: scripts, .npz designs, logs → gitignored `runs/`; stage-level immediate saves; resumable chains (`runs/chain_rebuild.py`). Regeneration folded into the V#2 re-baseline so the chain re-runs once. |
+| V#2 CLOSED — implementation (2026-06-11) | `panel_d_mode="datum_ortho"` (opt-in, KS-only): strip σcr now uses the datum-frame orthotropic long-plate N_cr = (2π²/b²)(√(D11·D22)+D12+2·D66) instead of triangle-local D11; exact kc=4 isotropic identity (unit-tested); f-chains via `dQstar_df`, FD-audited live. Motivated by the V.3c layup regime change 32/53/15 → 0/100/0 (±45) making local-frame bookkeeping load-bearing. Caveats: demand stays principal compression; wrinkling still local-frame (V#2-residual). Measurement: chain stage D (pending). |
 | Incumbent guard + mass correction (2026-06-11) | Guard: best hard-feasible visited design always kept (never-worse-than-feasible-seed, tested). It exposed solid-vs-annular result accounting: **corrected ledger P#1b 1784.5 kg, V.3c running best 1095.3 kg (−51.3% vs V.6)**; optimization/eigen/feasibility were always correct — reporting only. |
 | V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |

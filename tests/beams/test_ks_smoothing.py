@@ -170,6 +170,90 @@ def test_foundation_requires_ks_and_datum():
         size_beam_shell_laminate(m, loads, bad, ply=T700_EPOXY, rho=RHO, maxiter=2)
 
 
+def test_panel_datum_ortho_requires_ks_and_datum():
+    import dataclasses
+    m, loads, cfg = _setup()
+    bad = dataclasses.replace(cfg, panel_d_mode="datum_ortho",
+                              ply_angle_datum=None)
+    with pytest.raises(ValueError, match="datum_ortho"):
+        size_beam_shell_laminate(m, loads, bad, ply=T700_EPOXY, rho=RHO, maxiter=2)
+
+
+def test_ortho_plate_qstar_isotropic_and_fd():
+    # V#2 unit checks: (1) quasi-isotropic fractions make the smeared Qeff
+    # isotropic, so Qstar = 2·Qeff00 exactly (the kc=4 long-plate identity:
+    # ½·Qstar stands in for Qeff00 with no model change for isotropic skins);
+    # (2) dQstar_df matches central-difference FD of Qstar over (f0, f45).
+    from wing_design.materials.unidir import laminate_stiffness
+    from wing_design.beams.sensitivity import (dQeff_df, dQstar_df,
+                                               ortho_plate_Qstar)
+    ply = T700_EPOXY
+    Qiso = laminate_stiffness(ply, f0=0.25, f45=0.5, f90=0.25, thickness=1.0)[2]
+    assert ortho_plate_Qstar(Qiso) == pytest.approx(2.0 * Qiso[0, 0], rel=1e-9)
+
+    def qstar(f0, f45):
+        Qd = laminate_stiffness(ply, f0=f0, f45=f45, f90=1.0 - f0 - f45,
+                                thickness=1.0)[2]
+        return ortho_plate_Qstar(Qd)
+
+    f0, f45, h = 0.32, 0.53, 1e-6
+    Qd = laminate_stiffness(ply, f0=f0, f45=f45, f90=1.0 - f0 - f45,
+                            thickness=1.0)[2]
+    for which, fd in (
+        ("f0", (qstar(f0 + h, f45) - qstar(f0 - h, f45)) / (2 * h)),
+        ("f45", (qstar(f0, f45 + h) - qstar(f0, f45 - h)) / (2 * h)),
+    ):
+        an = dQstar_df(Qd, dQeff_df(ply, which=which, offset_deg=0.0))
+        assert an == pytest.approx(fd, rel=1e-4)
+
+
+def test_ks_panel_datum_ortho_gradients_match_fd():
+    # V#2: datum-frame orthotropic strip σcr — FD-audit every KS closure with
+    # the mode on (panel f-chains now run through Qstar; t/c chains shared).
+    from scipy.optimize import approx_fprime
+    import dataclasses
+    import wing_design.beams.laminate_sizing as ls
+    m, loads, cfg = _setup(core=PVC_H80, tube=True)
+    cfg = dataclasses.replace(cfg, ply_angle_datum=(0.0, 0.0, 1.0),
+                              panel_d_mode="datum_ortho",
+                              beam_buckling_model="foundation")
+
+    captured = {}
+    orig = ls.minimize
+
+    def spy(fun, x0, jac=None, method=None, bounds=None, constraints=None, options=None):
+        captured["constraints"] = constraints
+        captured["x0"] = np.asarray(x0, dtype=float)
+
+        class R:
+            x = np.asarray(x0, dtype=float)
+            success = False
+            nit = 0
+        return R()
+
+    ls.minimize = spy
+    try:
+        size_beam_shell_laminate(m, loads, cfg, ply=T700_EPOXY, rho=RHO, maxiter=1)
+    finally:
+        ls.minimize = orig
+
+    x0 = captured["x0"] * 0.9 + 0.001
+    checked = 0
+    for con in captured["constraints"]:
+        if "jac" not in con:
+            continue
+        f = con["fun"]; J = con["jac"]
+        if np.atleast_1d(f(x0)).shape[0] != 1:
+            continue
+        g = np.atleast_2d(J(x0))[0]
+        fd = approx_fprime(x0, lambda x: float(np.atleast_1d(f(x))[0]), 1.5e-7)
+        scale = max(np.abs(fd).max(), 1e-12)
+        assert np.allclose(g, fd, rtol=5e-3, atol=5e-4 * scale), \
+            f"datum_ortho KS jac mismatch (max err {np.abs(g - fd).max():.3e})"
+        checked += 1
+    assert checked >= 7
+
+
 @pytest.mark.sizing
 def test_incumbent_guard_never_worse_than_feasible_seed():
     # The user-requested property: a run seeded with a feasible design can never

@@ -124,6 +124,24 @@ def dQeff_df(ply, *, which, offset_deg=0.0):
     raise ValueError(which)
 
 
+def ortho_plate_Qstar(Qd):
+    """Long-SS-plate orthotropic combination (V#2, datum frame).
+
+    Qstar = sqrt(Q11·Q22) + Q12 + 2·Q66 over the DATUM-frame effective Q
+    (1 = span, 2 = chord), so σcr = ½·kc·π²·Qstar·geom/(b²·t) is the classical
+    N_cr = (2π²/b²)(√(D11·D22) + D12 + 2·D66) long-plate result and reduces
+    exactly to kc·π²·D/(b²·t) with kc = 4 for an isotropic laminate.
+    """
+    return np.sqrt(Qd[0, 0] * Qd[1, 1]) + Qd[0, 1] + 2.0 * Qd[2, 2]
+
+
+def dQstar_df(Qd, dQ):
+    """∂(ortho_plate_Qstar)/∂f given Qd and dQ = dQeff_df(..., offset_deg=0)."""
+    s = np.sqrt(Qd[0, 0] * Qd[1, 1])
+    return ((dQ[0, 0] * Qd[1, 1] + Qd[0, 0] * dQ[1, 1]) / (2.0 * s)
+            + dQ[0, 1] + 2.0 * dQ[2, 2])
+
+
 def dAD_df(dQeff, t):
     """(∂A/∂f, ∂D/∂f) = (t·dQeff, (t³/12)·dQeff) for a given ∂Qeff/∂f."""
     return t * dQeff, (t**3 / 12.0) * dQeff
@@ -183,6 +201,12 @@ class DesignSens:
     found_k: np.ndarray = None        # (n_form,) [N/m^2]
     found_dk: list = None             # per form element: [(col, dk_dcol), ...]
     found_mask: np.ndarray = None     # (n_all,) bool: use foundation for element
+    # V#2 datum-frame orthotropic strip panel buckling (opt-in, KS-only):
+    # per-band Qstar = sqrt(Q11·Q22)+Q12+2·Q66 in the DATUM frame + f-chains.
+    # None = historical triangle-local-frame D11 path (bit-exact).
+    panel_Qstar: np.ndarray = None       # (B,)
+    panel_dQstar_df0: np.ndarray = None  # (B,)
+    panel_dQstar_df45: np.ndarray = None # (B,)
 
     @property
     def nx(self) -> int:
@@ -1152,7 +1176,18 @@ def provider_panel(panel_kc, safety_factor, areas):
             R = np.sqrt(0.25 * (sxx - syy) ** 2 + sxy**2)
             comp = max(0.0, -(mean - R))
             tt = float(ds.t_tri[t]); Qeff00 = float(C_t[0, 0]); b2 = float(areas[t])
-            if sandwich:
+            datum_ortho = ds.panel_Qstar is not None
+            if datum_ortho:
+                # V#2: σcr from the datum-frame long-plate combination, ½·Qstar
+                # standing in for the local Qeff00 (kc semantics preserved).
+                bq = int(ds.band_of_tri[t])
+                Qpb = 0.5 * float(ds.panel_Qstar[bq])
+                if sandwich:
+                    cc = float(ds.c_tri[t])
+                    sigma_cr = panel_kc * np.pi**2 * Qpb * sandwich_geom_factor(tt, cc) / (b2 * tt)
+                else:
+                    sigma_cr = panel_kc * np.pi**2 * Qpb * tt**2 / (12.0 * b2)
+            elif sandwich:
                 cc = float(ds.c_tri[t])
                 sigma_cr = panel_kc * np.pi**2 * Qeff00 * sandwich_geom_factor(tt, cc) / (b2 * tt)
             else:
@@ -1181,7 +1216,13 @@ def provider_panel(panel_kc, safety_factor, areas):
             for which, base in (("f0", ds.G + ds.B), ("f45", ds.G + ds.B + ds.L)):
                 dQ = dQeff_df(ds.ply, which=which, offset_deg=off)
                 dcomp_df = float(dcomp_ds @ (dQ @ eps))
-                dsigcr_df = float(dQ[0, 0]) * (sigma_cr / Qeff00)
+                if datum_ortho:
+                    # σcr ∝ ½·Qstar ⇒ dσcr/df = dQstar_df · σcr/Qstar
+                    dst = (ds.panel_dQstar_df0 if which == "f0"
+                           else ds.panel_dQstar_df45)
+                    dsigcr_df = float(dst[b]) * (sigma_cr / float(ds.panel_Qstar[b]))
+                else:
+                    dsigcr_df = float(dQ[0, 0]) * (sigma_cr / Qeff00)
                 expl.append((base + lg, (safety_factor / sigma_cr) * dcomp_df
                              - util * dsigcr_df / sigma_cr))
             expl_l.append(expl)

@@ -112,6 +112,13 @@ class LaminateSizingConfig:
     # the two adjacent strips). Requires ks_rho + ply_angle_datum (D22 needs a
     # coherent chord direction). Transition + tube elements keep element Euler.
     beam_buckling_model: str = "element"
+    # V#2 panel-buckling D: "local" (historical triangle-local-frame D11 — the
+    # local x-axis is a mesh-dependent span/chord patchwork) or "datum_ortho"
+    # (datum-frame long-plate combination D* = sqrt(D11·D22)+D12+2·D66, span =
+    # datum; exact kc=4 for isotropic laminates, directionally coherent with
+    # the V.3c foundation D22). Requires ks_rho + ply_angle_datum (KS-only,
+    # V.3c precedent). Demand stays the most-compressive principal stress.
+    panel_d_mode: str = "local"
     ply_angle_datum: tuple[float, float, float] | None = None
     n_skin_bands: int = 1
     skin_failure: str = "von_mises"          # "von_mises" (default) or "tsai_wu"
@@ -191,6 +198,50 @@ def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
         lo = np.concatenate([lo, np.zeros(B)])
         hi = np.concatenate([hi, np.full(B, config.t_core_max)])
     return lo, hi
+
+
+def design_vector_from_result(
+    model: BeamShellModel, config: LaminateSizingConfig, result: "LaminateSizingResult",
+) -> np.ndarray:
+    """Rebuild the optimizer design vector x from a prior result (warm starts).
+
+    House convention: sweeps/refinements/feature-chain stages seed from the
+    nearest prior optimum (``x0=``). Blocks the prior result lacks (e.g. t_core
+    when the new config adds the sandwich) fall back to the cold-start defaults;
+    blocks the new config lacks are dropped. The sizer clips to bounds and
+    re-projects layup fractions onto the simplex on entry.
+    """
+    goe, G = beam_radius_groups(model)
+    B = config.n_skin_bands
+    L = B if config.per_band_layup else 1
+    rg = np.empty(G)
+    for g in range(G):
+        rg[g] = float(np.asarray(result.radii, dtype=float)[np.argmax(goe == g)])
+    tb = np.resize(np.asarray(result.t_bands, dtype=float), B)
+    f0 = np.resize(np.asarray(result.f0_bands, dtype=float), L)
+    f45 = np.resize(np.asarray(result.f45_bands, dtype=float), L)
+    x = np.concatenate([rg, tb, f0, f45])
+    if getattr(model, "tube_elements", None) is not None:
+        S = len(model.tube_elements)
+        if result.r_tube is not None and len(result.r_tube) == S:
+            x = np.concatenate([x, np.asarray(result.r_tube, dtype=float),
+                                np.asarray(result.t_wall, dtype=float)])
+        else:
+            x = np.concatenate([x, 0.8 * np.asarray(model.tube_r_bounds, dtype=float),
+                                np.full(S, 0.003)])
+    if (getattr(model, "hollow_elements", None) is not None
+            and len(model.hollow_elements) > 0):
+        Hn = len({int(goe[e]) for e in model.hollow_elements})
+        if result.t_hollow is not None and len(result.t_hollow) == Hn:
+            x = np.concatenate([x, np.asarray(result.t_hollow, dtype=float)])
+        else:
+            x = np.concatenate([x, np.full(Hn, 0.003)])
+    if config.core is not None:
+        if result.t_core is not None and len(result.t_core) == B:
+            x = np.concatenate([x, np.asarray(result.t_core, dtype=float)])
+        else:
+            x = np.concatenate([x, np.full(B, 0.005)])
+    return x
 
 
 def laminate_result_is_feasible(
@@ -323,6 +374,29 @@ def size_beam_shell_laminate(
     foundation = config.beam_buckling_model == "foundation"
     if config.beam_buckling_model not in ("element", "foundation"):
         raise ValueError(f"unknown beam_buckling_model: {config.beam_buckling_model!r}")
+    panel_datum_ortho = config.panel_d_mode == "datum_ortho"
+    if config.panel_d_mode not in ("local", "datum_ortho"):
+        raise ValueError(f"unknown panel_d_mode: {config.panel_d_mode!r}")
+    if panel_datum_ortho and (config.ks_rho is None or config.ply_angle_datum is None):
+        raise ValueError("panel_d_mode='datum_ortho' requires ks_rho and ply_angle_datum")
+
+    def panel_qstar_bands(f0b, f45b, f90b):
+        """Per-band datum-frame (Qstar, dQstar_df0, dQstar_df45) for V#2.
+
+        Qeff is thickness-independent, so thickness=1 is arbitrary; the t/c
+        geometry enters via the same geom(t,c)/t factor as the local path.
+        """
+        from .sensitivity import dQeff_df, dQstar_df, ortho_plate_Qstar
+        qs = np.empty(B); d0 = np.empty(B); d45 = np.empty(B)
+        dQ0 = dQeff_df(ply, which="f0", offset_deg=0.0)
+        dQ45 = dQeff_df(ply, which="f45", offset_deg=0.0)
+        for b in range(B):
+            Qd = laminate_stiffness(ply, f0=float(f0b[b]), f45=float(f45b[b]),
+                                    f90=float(f90b[b]), thickness=1.0)[2]
+            qs[b] = ortho_plate_Qstar(Qd)
+            d0[b] = dQstar_df(Qd, dQ0)
+            d45[b] = dQstar_df(Qd, dQ45)
+        return qs, d0, d45
     if foundation:
         if config.ks_rho is None or config.ply_angle_datum is None:
             raise ValueError("beam_buckling_model='foundation' requires ks_rho "
@@ -564,6 +638,12 @@ def size_beam_shell_laminate(
             phi_tri = sandwich_D_factor(t_tri, c_tri_e)
             D_arg = D_arg * phi_tri[:, None, None]
         D11 = D_arg[:, 0, 0]
+        if panel_datum_ortho:
+            # V#2: σcr from ½·D* in place of the local D11 (same kc semantics).
+            qs_b, _d0, _d45 = panel_qstar_bands(f0b, f45b, f90b)
+            Dhalf_tri = 0.5 * qs_b[band_of_tri] * t_tri**3 / 12.0
+            if sandwich:
+                Dhalf_tri = Dhalf_tri * phi_tri
         sections = build_sections(x, radii)
         areas_e = np.array([sec.A for sec in sections])
         I_e = np.array([sec.Iy for sec in sections])
@@ -630,8 +710,12 @@ def size_beam_shell_laminate(
                     fm = found_mask_all[:model.n_form_elements]
                     bu = bu.copy()
                     bu[:model.n_form_elements][fm] = bu_f[fm]
-                pu = panel_buckling_utilization(skin_s, b2_panel, D11=D11, t=t_tri,
-                                                kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
+                if panel_datum_ortho:
+                    pu = panel_buckling_utilization(skin_s, b2_panel, D11=Dhalf_tri, t=t_tri,
+                                                    kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
+                else:
+                    pu = panel_buckling_utilization(skin_s, b2_panel, D11=D11, t=t_tri,
+                                                    kc=config.panel_kc, safety_factor=config.buckling_safety_factor)
                 worst_beam_buck = max(worst_beam_buck, float(bu.max()))
                 worst_panel_buck = max(worst_panel_buck, float(pu.max()))
                 if sandwich:
@@ -796,6 +880,8 @@ def size_beam_shell_laminate(
                 c_band_j = np.asarray(x[dv.slice("t_core")], dtype=float)
                 c_tri_j = c_band_j[band_of_tri]
                 D_arg = D_arg * sandwich_D_factor(t_tri, c_tri_j)[:, None, None]
+            if panel_datum_ortho:
+                pq_j, pd0_j, pd45_j = panel_qstar_bands(f0b, f45b, f90b)
 
             sections = build_sections(x, radii)
             loads_eff = effective_loads(x, radii, t_tri)
@@ -873,6 +959,9 @@ def size_beam_shell_laminate(
                 found_k=(foundation_k(x)[0] if foundation else None),
                 found_dk=(foundation_k(x)[1] if foundation else None),
                 found_mask=(found_mask_all if foundation else None),
+                panel_Qstar=(pq_j if panel_datum_ortho else None),
+                panel_dQstar_df0=(pd0_j if panel_datum_ortho else None),
+                panel_dQstar_df45=(pd45_j if panel_datum_ortho else None),
             )
             # Design-only ∂K/∂x assembly, built ONCE per design point and reused
             # across every load case and every constraint-gradient call below.
