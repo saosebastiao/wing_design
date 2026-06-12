@@ -1459,11 +1459,13 @@ def size_beam_shell_laminate_multistart(
     ftol: float = 1.0e-4,
     n_workers: int | None = None,
     panel_pressures: list[np.ndarray] | None = None,
+    x0: np.ndarray | None = None,
 ) -> MultiStartResult:
     """Run the sizer from ``n_starts`` initial guesses; return the best feasible result.
 
-    Start 0 is the sizer's default guess (so the result is never worse than a single
-    start); starts 1.. are uniform-random within the design bounds (per-group
+    Start 0 is the sizer's default guess, or ``x0`` when given (seed with a known
+    feasible design and, via the incumbent guard, the result can only improve on
+    it); starts 1.. are uniform-random within the design bounds (per-group
     simplex-projected), from a seeded RNG (deterministic for a given ``seed``). The
     start map is serial by default; ``n_workers > 1`` (V.0.4) fans the starts over a
     process pool — identical results to serial (starts are independent and the start
@@ -1481,7 +1483,7 @@ def size_beam_shell_laminate_multistart(
 
     def make_start(k):
         if k == 0:
-            return None
+            return None if x0 is None else np.asarray(x0, dtype=float)
         if model is None:
             # model is None only in tests with a stubbed sizer; return a non-None sentinel
             # so the stub receives a distinct x0 (the stub ignores it).

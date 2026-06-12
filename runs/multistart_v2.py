@@ -60,10 +60,17 @@ def main() -> None:
         core=PVC_H80, ks_rho=50.0, optimizer="ipopt",
         beam_buckling_model="foundation", panel_d_mode="datum_ortho")
 
+    # Seed start 0 with the chain's stage-D optimum (same model + config -> the
+    # saved x is directly usable); incumbent guard => never worse than 1094.2 kg.
+    d = np.load(RUNS / "chain_D_datum_ortho.npz", allow_pickle=False)
+    x0 = np.asarray(d["x"], dtype=float)
+    print(f"seeding start 0 from chain_D ({json.loads(str(d['meta']))['mass_kg']:.1f} kg)",
+          flush=True)
+
     t0 = time.perf_counter()
     ms = size_beam_shell_laminate_multistart(
         model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3,
-        n_starts=8, n_workers=2, maxiter=3000, panel_pressures=press)
+        n_starts=8, n_workers=2, maxiter=3000, panel_pressures=press, x0=x0)
     wall = time.perf_counter() - t0
     r = ms.best
     lam = eigen_worst(model, loads, r, P.rho_kgm3)
