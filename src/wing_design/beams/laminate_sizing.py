@@ -206,10 +206,15 @@ def design_vector_from_result(
     """Rebuild the optimizer design vector x from a prior result (warm starts).
 
     House convention: sweeps/refinements/feature-chain stages seed from the
-    nearest prior optimum (``x0=``). Blocks the prior result lacks (e.g. t_core
-    when the new config adds the sandwich) fall back to the cold-start defaults;
-    blocks the new config lacks are dropped. The sizer clips to bounds and
-    re-projects layup fractions onto the simplex on entry.
+    nearest prior optimum (``x0=``). Blocks the prior result lacks are padded
+    EQUIVALENCE-PRESERVING where the physics allows it, so the seed evaluates
+    identically to the prior optimum (hard-feasible -> incumbent-guarded):
+    t_hollow seeds at the group radius (clamps to solid) and t_core at 0
+    (phi(t,0)=1, monolithic exactly). A 3 mm t_hollow pad instead lost stage A
+    of the 2026-06-12 chain (seed infeasible, 500 iters no convergence). Tube
+    blocks have no "absent" equivalent; they keep the cold defaults. Blocks the
+    new config lacks are dropped. The sizer clips to bounds and re-projects
+    layup fractions onto the simplex on entry.
     """
     goe, G = beam_radius_groups(model)
     B = config.n_skin_bands
@@ -231,16 +236,17 @@ def design_vector_from_result(
                                 np.full(S, 0.003)])
     if (getattr(model, "hollow_elements", None) is not None
             and len(model.hollow_elements) > 0):
-        Hn = len({int(goe[e]) for e in model.hollow_elements})
-        if result.t_hollow is not None and len(result.t_hollow) == Hn:
+        hgroups = sorted({int(goe[e]) for e in model.hollow_elements})
+        if result.t_hollow is not None and len(result.t_hollow) == len(hgroups):
             x = np.concatenate([x, np.asarray(result.t_hollow, dtype=float)])
         else:
-            x = np.concatenate([x, np.full(Hn, 0.003)])
+            # solid-equivalent pad: t = group radius (decode clamps t <= r)
+            x = np.concatenate([x, rg[hgroups]])
     if config.core is not None:
         if result.t_core is not None and len(result.t_core) == B:
             x = np.concatenate([x, np.asarray(result.t_core, dtype=float)])
         else:
-            x = np.concatenate([x, np.full(B, 0.005)])
+            x = np.concatenate([x, np.zeros(B)])   # c=0: exactly monolithic
     return x
 
 
