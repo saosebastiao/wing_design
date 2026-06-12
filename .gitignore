@@ -7,7 +7,9 @@ dist/
 wheels/
 *.egg-info
 exports/
-runs/
+runs/*.npz
+runs/*.log
+runs/*.npy
 
 # Virtual environments
 .venv
