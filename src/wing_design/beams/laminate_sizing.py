@@ -161,6 +161,12 @@ class LaminateSizingResult:
     core_mass_kg: float = 0.0
     max_wrinkle_util: float = 0.0
     max_crimp_util: float = 0.0
+    # Incumbent guard: True when the returned design is the best hard-feasible
+    # iterate seen during the run rather than the optimizer's final iterate
+    # (the endpoint was heavier or infeasible). Feasible by construction;
+    # converged stays False in that case — it is a design, not a certified
+    # optimum. A feasible x0 therefore can never produce a worse result.
+    used_incumbent: bool = False
 
 
 def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
@@ -496,6 +502,7 @@ def size_beam_shell_laminate(
         return f0b, f45b, f90b
 
     cache: dict = {}
+    incumbent = {"mass": np.inf, "x": None}
 
     accels = [np.asarray(a, dtype=float) for a in config.accel_vectors]
 
@@ -638,6 +645,25 @@ def size_beam_shell_laminate(
         out = (wb, ws, md, mt, worst_beam_buck, worst_panel_buck, worst_R,
                tube_util if annular else None, worst_wrk, worst_crp)
         cache[key] = out
+        # incumbent guard: keep the lightest HARD-feasible design ever visited
+        tol = 1.0e-3
+        feas = float(wb.max()) <= config.sigma_allow_Pa * (1 + tol)
+        if config.skin_failure == "tsai_wu":
+            feas &= (worst_R >= config.tsai_wu_safety_factor * (1 - tol))
+        else:
+            feas &= ws <= config.sigma_allow_Pa * (1 + tol)
+        feas &= md <= config.tip_defl_max_m * (1 + tol)
+        feas &= mt <= config.tip_twist_max_deg * (1 + tol)
+        if config.buckling_safety_factor is not None:
+            feas &= worst_beam_buck <= 1 + tol and worst_panel_buck <= 1 + tol
+            if annular:
+                feas &= float(tube_util.max()) <= 1 + tol
+            feas &= worst_wrk <= 1 + tol and worst_crp <= 1 + tol
+        if feas:
+            m_now = mass(x) * m_ref
+            if m_now < incumbent["mass"]:
+                incumbent["mass"] = m_now
+                incumbent["x"] = np.asarray(x, dtype=float).copy()
         return out
 
     m_ref = beam_mass(model, np.full(n, config.r_max), rho=rho) + skin_mass(model, config.t_max, rho=rho)
@@ -1204,6 +1230,10 @@ def size_beam_shell_laminate(
 
     constraints = [s.scipy_dict() for s in specs]
 
+    # seed the incumbent guard with the exact x0 (the optimizer perturbs its
+    # start, so without this the seed itself might never enter the visited set)
+    evaluate(np.asarray(x0, dtype=float))
+
     if config.optimizer == "ipopt":
         from cyipopt import minimize_ipopt
         res = minimize_ipopt(
@@ -1235,6 +1265,14 @@ def size_beam_shell_laminate(
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
     x = np.clip(res.x, lo, hi)
+    used_incumbent = False
+    if incumbent["x"] is not None:
+        end_mass = mass(x) * m_ref
+        if incumbent["mass"] < end_mass - 1e-9 or not bool(res.success):
+            if incumbent["mass"] <= end_mass + 1e-9:
+                x_inc = np.clip(incumbent["x"], lo, hi)
+                used_incumbent = not np.allclose(x_inc, x)
+                x = x_inc
     # Per-group simplex re-projection: if f0_g + f45_g > 1, rescale that group.
     fg = x[f0_lo:f0_lo + L].copy()
     hg = x[f45_lo:f45_lo + L].copy()
@@ -1249,7 +1287,14 @@ def size_beam_shell_laminate(
     f0_tri = f0b[band_of_tri]
     f45_tri = f45b[band_of_tri]
     f90_tri = f90b[band_of_tri]
-    bm = float(rho * np.sum(np.pi * radii**2 * Lb_form))   # form beams only
+    if hollow:
+        area_res = np.pi * radii**2
+        t_eff_res = decode_hollow(x, radii)
+        rh = radii[hollow_el]
+        area_res[hollow_el] = np.pi * (rh**2 - (rh - t_eff_res)**2)
+        bm = float(rho * np.sum(area_res * Lb_form))
+    else:
+        bm = float(rho * np.sum(np.pi * radii**2 * Lb_form))   # form beams only
     tm = 0.0
     if tube:
         r_t_f, t_w_f = decode_tube(x)
@@ -1284,6 +1329,7 @@ def size_beam_shell_laminate(
                       if sandwich else 0.0),
         max_wrinkle_util=float(worst_wrk),
         max_crimp_util=float(worst_crp),
+        used_incumbent=used_incumbent,
     )
 
 

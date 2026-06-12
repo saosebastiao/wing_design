@@ -168,3 +168,29 @@ def test_foundation_requires_ks_and_datum():
                               ply_angle_datum=None)
     with pytest.raises(ValueError, match="foundation"):
         size_beam_shell_laminate(m, loads, bad, ply=T700_EPOXY, rho=RHO, maxiter=2)
+
+
+@pytest.mark.sizing
+def test_incumbent_guard_never_worse_than_feasible_seed():
+    # The user-requested property: a run seeded with a feasible design can never
+    # return anything worse — the best hard-feasible iterate is kept even when
+    # the optimizer's endpoint wanders or fails (tiny maxiter forces that here).
+    import dataclasses
+    m, loads, cfg = _setup(core=PVC_H80, tube=True)
+    good = size_beam_shell_laminate(m, loads, cfg, ply=T700_EPOXY, rho=RHO,
+                                    maxiter=300)
+    assert laminate_result_is_feasible(good, dataclasses.replace(cfg, ks_rho=None))
+    # reconstruct x0 from the optimum and rerun with a starved budget
+    from wing_design.beams.shell_sizing import beam_radius_groups
+    goe, G = beam_radius_groups(m)
+    rg = np.zeros(G); seen = set()
+    for e, g in enumerate(goe):
+        if g not in seen: rg[g] = good.radii[e]; seen.add(g)
+    hgroups = sorted({int(goe[e]) for e in m.hollow_elements})
+    x0 = np.concatenate([rg, np.asarray(good.t_bands, float),
+                         [float(good.f0_bands[0])], [float(good.f45_bands[0])],
+                         good.r_tube, good.t_wall, good.t_hollow, good.t_core])
+    starved = size_beam_shell_laminate(m, loads, cfg, ply=T700_EPOXY, rho=RHO,
+                                       maxiter=3, x0=x0)
+    assert laminate_result_is_feasible(starved, dataclasses.replace(cfg, ks_rho=None))
+    assert starved.mass_kg <= good.mass_kg * (1 + 1e-6)

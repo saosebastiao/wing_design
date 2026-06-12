@@ -1120,6 +1120,28 @@ is the eventual validator for both. Cumulative harvest: **2248.0 → 1108.5 kg
 (−50.7%), every claim converged + feasible + eigen-verified.**
 (2093 s + 4706 s measured.)
 
+**Incumbent guard + mass-accounting CORRECTION (2026-06-11) — optimizer runs can
+now never return worse than a feasible seed; implementing that exposed a
+reporting bug that overstated every hollow-beam mass since P#1b. Corrected
+running best: 1095.3 kg.** (1) **Incumbent guard** (user-requested): `evaluate()`
+now tracks the lightest HARD-feasible design at every visited point (including
+line-search trials and the explicitly pre-evaluated seed); if the optimizer's
+endpoint is heavier or the run fails, the incumbent is returned
+(`result.used_incumbent`, converged stays False — a design, not a certified
+optimum). Property test: a feasible seed can never produce a worse result —
+exact, backend-agnostic (it hooks evaluation, not the optimizer). (2) **The bug
+it caught:** the result's beam-mass term used the solid-rod formula for ALL form
+beams while the objective correctly used annular mass — reported masses for
+hollow designs were INFLATED (optimization itself was always correct; eigen and
+feasibility used correct sections). **Corrected from the saved designs (no
+re-sizing): P#1b 1924.6 → 1784.5 kg; V.3c 1108.5 → 1095.3 kg (the corrected
+running best; −51.3% vs the V.6 baseline).** P.3's 1679.3 was overstated by the
+same mechanism but its design arrays were overwritten by the spokes run
+(superseded; not recomputed). In-flight runs launched before the fix print
+inflated result masses — their saved designs recompute correctly. Lesson
+recorded: the objective and the reported mass must share one accounting path
+(they now do for new results; a regression test pins objective == reported).
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1158,6 +1180,7 @@ is the eventual validator for both. Cumulative harvest: **2248.0 → 1108.5 kg
 | Mirror-symmetric non-uniform spacing | `chord_symmetrize_weights` (max-of-mirror) → symmetric stress-weighted arc placement that keeps `beam_radius_groups` grouping (verified n_groups unchanged). **Negative for mass:** medium even 2264.6 → symmetric-weighted 2325.2 kg (+2.7%), both feasible; stress concentration 2.45 real, but clustering enlarges gap panels and the design is panel-buckling-governed → more material. Even spacing (minimizes max panel) is near-optimal; re-spacing counterproductive. Even stays default; helper kept. |
 | Phase-F.2 diagonal beams | Balanced both-hand grid-helix lattice on existing grid nodes (`beams.helix_elements`, no remesh), co-sized with one shared diagonal-radius DV in the SLSQP laminate loop; pitch chosen by principal-stress alignment (`recommend_pitch`, best pitch 2 @ align 0.68). **Strong negative result:** baseline 33.1 kg → diagonal 60.6 kg (+83%), diagonals add 20.8 kg at a buckling-forced 4.7 mm radius, twist rose 1.25°→1.58°. The design is buckling-governed with large twist slack, so long compression diagonals bloat mass without relieving a binding constraint. Lattice abandoned for this regime; twist (when binding) is killed far cheaper at the tip. Streamline-following (F.3) not recommended while buckling dominates. Implementation was a throwaway spike, NOT merged — only the finding is kept. |
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
+| Incumbent guard + mass correction (2026-06-11) | Guard: best hard-feasible visited design always kept (never-worse-than-feasible-seed, tested). It exposed solid-vs-annular result accounting: **corrected ledger P#1b 1784.5 kg, V.3c running best 1095.3 kg (−51.3% vs V.6)**; optimization/eigen/feasibility were always correct — reporting only. |
 | V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |
 | P.3 KS+IPOPT breakthrough (2026-06-11) | KS smoothing merged (8 active constraints → smooth scalars; FD-audited through the live scipy closures). First feasible sandwich design in six attempts: **1685.0 kg, eigen λ 3.49** — t_core 4 mm / faces 2.1 mm, skin+core 617 kg vs 1246 monolithic. Upper bound (unconverged); polish leg running. Confirms the argmax-kink diagnosis. |
