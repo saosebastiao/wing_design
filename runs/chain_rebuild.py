@@ -5,7 +5,10 @@ array (including the V.3c running best) were lost. This chain rebuilds them —
 and since everything re-runs anyway, it re-baselines with panel_d_mode=
 "datum_ortho" (V#2 close) as an attributed final stage:
 
-  A tube_hollow   SLSQP cold      (ex-51 reference: 1784.5 kg corrected)
+  A0 tube_only    SLSQP cold      (ex-50 reference: 2060.7 kg)
+  A tube_hollow   SLSQP warm A0   (ex-51 reference: 1784.5 kg corrected;
+                                   cold start is eigen-REJECTED at λ 0.91 —
+                                   P#1b record, reproduced 2026-06-11)
   B sandwich      IPOPT+KS warm A (P.3 reference:   ~1679 kg, arrays lost)
   C foundation    IPOPT+KS warm B (V.3c reference:  1095.3 kg corrected)
   D datum_ortho   IPOPT+KS warm C (V#2 measurement: new)
@@ -146,9 +149,13 @@ def main(smoke: bool = False) -> None:
     active = [ar for ar in envelope
               if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
 
-    model = build_beam_shell_model(spec, n_beams=16, n_levels=8, beam_radius=0.02,
-        material=P.material, knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso,
-        skin_thickness=P.skin_sizing.t_baseline_m, core_tube=True, hollow_beams=True)
+    mk = dict(n_beams=16, n_levels=8, beam_radius=0.02, material=P.material,
+              knockdown=P.material_iso.skin_E_knockdown, nu=P.nu_iso,
+              skin_thickness=P.skin_sizing.t_baseline_m)
+    model_t = build_beam_shell_model(spec, core_tube=True, hollow_beams=False, **mk)
+    model = build_beam_shell_model(spec, core_tube=True, hollow_beams=True, **mk)
+    # identical meshes (hollow is a section property) — loads shared
+    assert model_t.nodes.shape == model.nodes.shape
     loads = [project_panels_to_skin(model, ar.panels, safety_factor=ar.case.safety_factor)
              for ar in active]
     press = [panel_pressure_per_tri(model, ar.panels, safety_factor=ar.case.safety_factor)
@@ -159,22 +166,23 @@ def main(smoke: bool = False) -> None:
                 buckling_safety_factor=SF, use_analytic_jacobian=True,
                 panel_width_mode="strip", accel_vectors=ACCELS)
     stages = [
-        ("A_tube_hollow", LaminateSizingConfig(**base), "slsqp", 500),
-        ("B_sandwich", LaminateSizingConfig(**base, core=PVC_H80, ks_rho=50.0,
-                                            optimizer="ipopt"), "ipopt", 2000),
-        ("C_foundation", LaminateSizingConfig(**base, core=PVC_H80, ks_rho=50.0,
-                                              optimizer="ipopt",
-                                              beam_buckling_model="foundation"),
-         "ipopt", 2000),
-        ("D_datum_ortho", LaminateSizingConfig(**base, core=PVC_H80, ks_rho=50.0,
-                                               optimizer="ipopt",
-                                               beam_buckling_model="foundation",
-                                               panel_d_mode="datum_ortho"),
-         "ipopt", 2000),
+        ("A0_tube_only", model_t, LaminateSizingConfig(**base), 500),
+        ("A_tube_hollow", model, LaminateSizingConfig(**base), 500),
+        ("B_sandwich", model, LaminateSizingConfig(**base, core=PVC_H80, ks_rho=50.0,
+                                                   optimizer="ipopt"), 2000),
+        ("C_foundation", model, LaminateSizingConfig(**base, core=PVC_H80, ks_rho=50.0,
+                                                     optimizer="ipopt",
+                                                     beam_buckling_model="foundation"),
+         2000),
+        ("D_datum_ortho", model, LaminateSizingConfig(**base, core=PVC_H80, ks_rho=50.0,
+                                                      optimizer="ipopt",
+                                                      beam_buckling_model="foundation",
+                                                      panel_d_mode="datum_ortho"),
+         2000),
     ]
 
     prev = None
-    for tag, cfg, _opt, maxiter in stages:
+    for tag, m_st, cfg, maxiter in stages:
         if smoke:
             tag, maxiter = "smoke_" + tag, 3
         f = RUNS / f"chain_{tag}.npz"
@@ -191,15 +199,15 @@ def main(smoke: bool = False) -> None:
             for k in ("r_tube", "t_wall", "t_hollow", "t_core"):
                 setattr(prev, k, d[k] if k in d.files else None)
             continue
-        x0 = design_vector_from_result(model, cfg, prev) if prev is not None else None
+        x0 = design_vector_from_result(m_st, cfg, prev) if prev is not None else None
         t0 = time.perf_counter()
-        r = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY,
+        r = size_beam_shell_laminate(m_st, loads, cfg, ply=T700_EPOXY,
                                      rho=P.rho_kgm3, maxiter=maxiter,
                                      panel_pressures=press, x0=x0)
         wall = time.perf_counter() - t0
         feas = laminate_result_is_feasible(r, cfg)
-        lam = eigen_worst(model, loads, r, P.rho_kgm3)
-        x_saved = design_vector_from_result(model, cfg, r)
+        lam = eigen_worst(m_st, loads, r, P.rho_kgm3)
+        x_saved = design_vector_from_result(m_st, cfg, r)
         save_stage(tag, r, x_saved, wall, feas, lam)
         print(f"[{tag}] mass={r.mass_kg:8.1f} kg (beams {r.beam_mass_kg:.0f} + skin "
               f"{r.skin_mass_kg:.0f} + core {r.core_mass_kg:.0f} + tube "
