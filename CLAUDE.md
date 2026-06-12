@@ -16,6 +16,11 @@ load-bearing skin, sized FEA-in-the-loop. Scales 1 m drone wing → 100 m turbin
 - **Measure, never estimate, wall-clock.** Every FEA/sizing run is timed (`time` or
   Bash timing) and the measured duration recorded in the finding. Estimates have run
   ~10× off.
+- **Memory-budget parallel runs.** Sum of worker peak footprints ≤ ~half of machine
+  RAM (32 GiB here; an IPOPT medium-16×8 worker peaks ~9 GiB → max 2 workers), and
+  never stack independent heavy runs concurrently. Record `ru_maxrss` in run meta.
+  8-way multistart oversubscribed RAM and caused two watchdog kernel panics
+  (2026-06-11/12) — see findings.md.
 - **A sizing result counts only if converged AND feasible.** Check both before
   reporting any mass. Comparisons within ~2–3% are inside the ftol/basin noise floor —
   don't claim wins there.

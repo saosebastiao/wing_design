@@ -1177,6 +1177,29 @@ A tube+hollow → B sandwich → C foundation (V.3c reference) → D datum_ortho
 (the V#2 step measurement + does 0/100/0 survive coherent bookkeeping?), each
 stage warm-started, eigen-verified, and saved to `runs/chain_*.npz`.
 
+**Kernel-panic root cause = memory oversubscription by parallel sizing (2026-06-12)
+— NEGATIVE result for unbudgeted parallelism; memory-budget convention added.**
+Both "unexpected restarts" were full watchdog kernel panics, and our runs caused
+them. Evidence (`/Library/Logs/DiagnosticReports/`): panic #1 Jun 11 18:24:39
+("userspace watchdog timeout: no successful checkins from WindowServer in 120
+seconds") minutes after a 17:59–18:09 JetsamEvent storm whose top memory consumers
+were our 8 parallel python3.13 workers (~1.0–1.1 M pages each); panic #2 Jun 12
+02:05:54 (configd, 181 s) 45 min after the 01:02–01:19 storm — top consumers the
+`runs/multistart_v2.py` pool (8 IPOPT workers at ~2.05–2.23 M pages ≈ **~9 GiB
+peak each**) plus the chain (~2 GiB), i.e. ~70+ GiB of demand on the 32 GiB Mac
+Studio. Kill reason in every storm: `vm-compressor-space-shortage`; jetsam killed
+`configd` and starved WindowServer, whose missed watchdog checkins panic the
+kernel by design. **Why:** desktop macOS jetsam does not kill runaway user
+processes — it kills/starves daemons first, so memory oversubscription escalates
+to a kernel panic instead of an OOM kill of the offender. **Fix:** memory-budget
+convention (CLAUDE.md): sum of worker peak footprints ≤ ~½ RAM → `multistart_v2.py`
+capped at `n_workers=2`; heavy runs never stacked concurrently (chain completes,
+then multistart); `ru_maxrss` (self + children) now recorded in every run meta so
+the ~9 GiB/worker figure stays measured, not estimated. Diagnosis ~25 min wall (log
+forensics only, no sizing run). Caveat: per-worker peak is config-dependent (medium
+16×8, IPOPT+KS, foundation + datum_ortho) — re-measure before raising worker counts
+on other configs or scales.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1217,6 +1240,7 @@ stage warm-started, eigen-verified, and saved to `runs/chain_*.npz`.
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
 | /tmp data loss + runs/ convention (2026-06-11) | Unexpected reboot wiped /tmp: both in-flight runs AND all saved design arrays lost (V.3c running best, warm chain). Code/ledger safe. New convention: scripts, .npz designs, logs → gitignored `runs/`; stage-level immediate saves; resumable chains (`runs/chain_rebuild.py`). Regeneration folded into the V#2 re-baseline so the chain re-runs once. |
 | V#2 CLOSED — implementation (2026-06-11) | `panel_d_mode="datum_ortho"` (opt-in, KS-only): strip σcr now uses the datum-frame orthotropic long-plate N_cr = (2π²/b²)(√(D11·D22)+D12+2·D66) instead of triangle-local D11; exact kc=4 isotropic identity (unit-tested); f-chains via `dQstar_df`, FD-audited live. Motivated by the V.3c layup regime change 32/53/15 → 0/100/0 (±45) making local-frame bookkeeping load-bearing. Caveats: demand stays principal compression; wrinkling still local-frame (V#2-residual). Measurement: chain stage D (pending). |
+| Memory-budget for parallel runs (2026-06-12) | Both machine crashes were watchdog kernel panics caused by our parallel sizing oversubscribing RAM (8 IPOPT workers × ~9 GiB measured on 32 GiB → `vm-compressor-space-shortage` jetsam storms → configd/WindowServer starved → panic). Convention (CLAUDE.md): Σ worker peaks ≤ ~½ RAM (→ `n_workers=2` for medium IPOPT), never stack heavy runs concurrently, `ru_maxrss` recorded in every run meta. |
 | Incumbent guard + mass correction (2026-06-11) | Guard: best hard-feasible visited design always kept (never-worse-than-feasible-seed, tested). It exposed solid-vs-annular result accounting: **corrected ledger P#1b 1784.5 kg, V.3c running best 1095.3 kg (−51.3% vs V.6)**; optimization/eigen/feasibility were always correct — reporting only. |
 | V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |

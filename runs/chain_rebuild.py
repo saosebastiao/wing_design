@@ -20,6 +20,7 @@ measured per house rules.
 from __future__ import annotations
 
 import json
+import resource
 import time
 from pathlib import Path
 
@@ -135,7 +136,9 @@ def save_stage(tag, r, x, wall_s, feas, lam):
                 skin_mass_kg=r.skin_mass_kg, tube_mass_kg=r.tube_mass_kg,
                 core_mass_kg=r.core_mass_kg, converged=bool(r.converged),
                 used_incumbent=bool(r.used_incumbent), n_iter=int(r.n_iter),
-                wall_s=float(wall_s), feasible=bool(feas), eigen_lam=float(lam))
+                wall_s=float(wall_s), feasible=bool(feas), eigen_lam=float(lam),
+                # macOS ru_maxrss is bytes; memory budget rule: see multistart_v2
+                peak_rss_gib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**30)
     np.savez(RUNS / f"chain_{tag}.npz", x=x, meta=json.dumps(meta), **out)
     print(f"[{tag}] SAVED {meta}", flush=True)
 

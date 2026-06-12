@@ -6,6 +6,13 @@ a process pool, IPOPT+KS, foundation model. Complements runs/chain_rebuild.py
 (single warm trajectory): the chain regenerates/attributes, this hunts basins
 the warm path can't reach. Best design saved to runs/multistart_v2_best.npz;
 eigen-verified before any number is reported.
+
+MEMORY BUDGET (hard rule): each IPOPT worker peaks ~9 GiB on the medium 16x8
+model; 8 workers oversubscribed the 32 GiB machine and caused the 2026-06-11/12
+watchdog kernel panics (vm-compressor-space-shortage -> configd jetsam-killed
+-> watchdogd panic). n_workers must keep sum-of-peaks <= ~half of RAM, and this
+script must NOT run concurrently with chain_rebuild.py or any other sizing run.
+Peak RSS is recorded in the result meta so the budget stays measured.
 """
 from __future__ import annotations
 
@@ -56,7 +63,7 @@ def main() -> None:
     t0 = time.perf_counter()
     ms = size_beam_shell_laminate_multistart(
         model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3,
-        n_starts=8, n_workers=8, maxiter=3000, panel_pressures=press)
+        n_starts=8, n_workers=2, maxiter=3000, panel_pressures=press)
     wall = time.perf_counter() - t0
     r = ms.best
     lam = eigen_worst(model, loads, r, P.rho_kgm3)
@@ -67,12 +74,16 @@ def main() -> None:
         v = getattr(r, k)
         if v is not None:
             out[k] = v
+    import resource
     meta = dict(mass_kg=r.mass_kg, converged=bool(r.converged),
                 used_incumbent=bool(r.used_incumbent), n_iter=int(r.n_iter),
                 best_start=int(ms.best_start_index), n_feasible=int(ms.n_feasible),
                 start_masses=list(ms.start_masses),
                 start_feasible=list(ms.start_feasible),
-                wall_s=float(wall), eigen_lam=float(lam))
+                wall_s=float(wall), eigen_lam=float(lam),
+                # macOS ru_maxrss is bytes; CHILDREN = max over pool workers
+                peak_rss_self_gib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**30,
+                peak_rss_worker_gib=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 2**30)
     np.savez(RUNS / "multistart_v2_best.npz", x=x, meta=json.dumps(meta), **out)
     print(f"MULTISTART DONE {json.dumps(meta)}", flush=True)
 
