@@ -1257,8 +1257,14 @@ re-crashed the 32 GiB machine, and only non-coincident peaks saved this run.
 **Action:** for this medium IPOPT config the safe parallelism is **n_workers=1**;
 2 is over the edge. Caveat: the 1015.3 kg infeasible near-miss says there may be
 ~1% more if a feasibility-restoring polish from start 4's neighborhood converges
-— queued. Best design saved `runs/multistart_v2_best.npz`; milestone CAD/VTU
-export pending (`runs/export_best.py`).
+— queued. Best design saved `runs/multistart_v2_best.npz`. **Milestone artifacts
+exported + independently re-verified** (`runs/export_best.py`, 13.3 s): recomputed
+worst linear-buckling λ = 2.7637, matching the saved value to 0.00% (the design
+reproduces from the saved arrays) → `exports/best_medium_worst_mode.vtu` +
+`best_medium_beams.stl` (lens loft) + `best_medium_skin.stl`. Sized detail: beam
+radii 4.0–40.0 mm, single skin band 1.154 mm faces / 5.70 mm core, pure ±45,
+6 spar tubes ~1.0 mm wall + root tube 7.41 mm. Regenerate:
+`PYTHONPYCACHEPREFIX=$PWD/.pycache .venv/bin/python runs/export_best.py`.
 
 ## Decisions log
 
