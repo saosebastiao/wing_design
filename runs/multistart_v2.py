@@ -7,12 +7,14 @@ a process pool, IPOPT+KS, foundation model. Complements runs/chain_rebuild.py
 the warm path can't reach. Best design saved to runs/multistart_v2_best.npz;
 eigen-verified before any number is reported.
 
-MEMORY BUDGET (hard rule): each IPOPT worker peaks ~9 GiB on the medium 16x8
-model; 8 workers oversubscribed the 32 GiB machine and caused the 2026-06-11/12
-watchdog kernel panics (vm-compressor-space-shortage -> configd jetsam-killed
--> watchdogd panic). n_workers must keep sum-of-peaks <= ~half of RAM, and this
-script must NOT run concurrently with chain_rebuild.py or any other sizing run.
-Peak RSS is recorded in the result meta so the budget stays measured.
+MEMORY BUDGET (hard rule): each IPOPT worker peaks ~18 GiB on the medium 16x8
+model (MEASURED 2026-06-12: ru_maxrss 17.8 GiB, ~2x the first page-count
+estimate); 8 workers oversubscribed the 32 GiB machine and caused the
+2026-06-11/12 watchdog kernel panics (vm-compressor-space-shortage -> configd
+jetsam-killed -> watchdogd panic). On 32 GiB the safe cap is n_workers=1 (two
+coincident ~18 GiB peaks ~= 36 GiB > RAM); the 2-worker run survived only because
+peaks did not coincide. This script must NOT run concurrently with
+chain_rebuild.py or any other sizing run. Peak RSS recorded in the result meta.
 """
 from __future__ import annotations
 
@@ -70,7 +72,7 @@ def main() -> None:
     t0 = time.perf_counter()
     ms = size_beam_shell_laminate_multistart(
         model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3,
-        n_starts=8, n_workers=2, maxiter=3000, panel_pressures=press, x0=x0)
+        n_starts=8, n_workers=1, maxiter=3000, panel_pressures=press, x0=x0)
     wall = time.perf_counter() - t0
     r = ms.best
     lam = eigen_worst(model, loads, r, P.rho_kgm3)

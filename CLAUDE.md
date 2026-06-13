@@ -17,8 +17,10 @@ load-bearing skin, sized FEA-in-the-loop. Scales 1 m drone wing → 100 m turbin
   Bash timing) and the measured duration recorded in the finding. Estimates have run
   ~10× off.
 - **Memory-budget parallel runs.** Sum of worker peak footprints ≤ ~half of machine
-  RAM (32 GiB here; an IPOPT medium-16×8 worker peaks ~9 GiB → max 2 workers), and
-  never stack independent heavy runs concurrently. Record `ru_maxrss` in run meta.
+  RAM, and never stack independent heavy runs concurrently. Record `ru_maxrss`
+  (self + children) in run meta. **Measured:** an IPOPT medium-16×8 worker peaks
+  **~18 GiB** (not the ~9 GiB first estimated) → on this 32 GiB machine the safe
+  cap is **n_workers=1**; 2 is over the edge (two coincident peaks ≈ 36 GiB).
   8-way multistart oversubscribed RAM and caused two watchdog kernel panics
   (2026-06-11/12) — see findings.md.
 - **A sizing result counts only if converged AND feasible.** Check both before

@@ -27,11 +27,13 @@ Medium wingsail (22 m span; symmetric+monotonic radii, span datum, buckling SF 1
 | FD Jacobian (4-band) | 2316.6 kg | converged feasible, 1 h 22 m | `37_sized_export.py` |
 | Analytic Jacobian (free tip, 4-band) | 2264.6 kg | ~2% better basin than FD; legacy `b=√area` checks | `39_tip_gusset.py` |
 | **V.6 re-baseline (2026-06-10):** strip + gravity/heel + pressure, eigen-verified | **2248.0 kg** (1-band, λ_cr 2.26) | twist + beam + panel buckling | `49_rebaseline.py` |
-| **Chain re-baseline (2026-06-12):** + tube + hollow + sandwich + foundation + datum_ortho (V#2-coherent), IPOPT+KS, eigen-verified | **1094.2 kg** (λ_cr 3.61, converged feasible; **−51.3% vs V.6**) | KS buckling families | `runs/chain_rebuild.py` (stage D) |
+| Chain re-baseline (2026-06-12): + tube + hollow + sandwich + foundation + datum_ortho (V#2-coherent), IPOPT+KS, eigen-verified | 1094.2 kg (λ_cr 3.61, converged feasible; −51.3% vs V.6) | KS buckling families | `runs/chain_rebuild.py` (stage D) |
+| **Multistart re-baseline (2026-06-12):** same final config, 8 starts (D-seeded start 0), best feasible basin | **1021.6 kg** (λ_cr 2.76, converged feasible; **−54.5% vs V.6**) | KS buckling families | `runs/multistart_v2.py` |
 
-The chain stage-D number is the **current medium headline** (V.6 remains the
-lever-accounting baseline); pre-V.6 numbers are historical (legacy `b=√area`
-buckling, aero-only loads).
+The multistart number (**1021.6 kg**) is the **current medium headline** (V.6
+remains the lever-accounting baseline); the warm chain stage-D 1094.2 kg is the
+attributed-lineage figure that the cold multistart then improved on by escaping
+its basin. Pre-V.6 numbers are historical (legacy `b=√area` buckling, aero-only).
 
 ## The governing-physics picture (cross-cutting findings)
 
@@ -1232,6 +1234,32 @@ eigen-verified ≥ 1.5 and saved to `runs/chain_*.npz`. Follow-up in flight:
 stage-D design queued behind the multistart (memory budget) via the sized-export
 path; design regenerable from `runs/chain_D_datum_ortho.npz`.
 
+**Multistart escapes the warm-chain basin (2026-06-12) — 1021.6 kg converged
+feasible, −6.6% below stage D, NEW medium headline.** `runs/multistart_v2.py`:
+8 starts on the final config (sandwich + foundation + datum_ortho, IPOPT+KS,
+SF 1.5), 2 workers (memory-budgeted), maxiter 3000, start 0 seeded from chain
+stage D (1094.2 kg) via the new `size_beam_shell_laminate_multistart(x0=...)`
+param (incumbent guard ⇒ start 0 can only improve on the seed). Result: best
+feasible **1021.6 kg (start 3), CONVERGED (2252 iters), feasible, eigen λ 2.76**,
+layup still pure ±45. Start masses (feas): 1088.9✓ / 1091.8✓ / 1023.9✓ /
+**1021.6✓** / 1015.3✗ / 1093.3✓ / 1450.7✓ / 1090.9✓ — 7/8 feasible; the lightest
+overall (1015.3, start 4) was correctly EXCLUDED as infeasible. **Why it beats
+the chain:** the D-seeded start 0 stayed at 1088.9 kg (its warm basin), but three
+independent cold starts converged into a distinctly lighter basin clustered at
+1015–1024 kg — the warm chain had been trapped in a local optimum the cold
+restarts escaped (a textbook argument for multistart over pure warm-chaining at
+this problem's nonconvexity). The headline trades buckling margin for mass
+honestly: eigen λ 2.76 (vs D's 3.61) still clears the 1.5 requirement with 84%
+margin. Wall **9.7 h** (35,082 s) measured, 2 workers. **Memory (measured, not
+estimated):** worker peak RSS **17.8 GiB** — ~2× the page-count estimate behind
+the original n_workers=2 cap; two simultaneous peaks (35.6 GiB) would have
+re-crashed the 32 GiB machine, and only non-coincident peaks saved this run.
+**Action:** for this medium IPOPT config the safe parallelism is **n_workers=1**;
+2 is over the edge. Caveat: the 1015.3 kg infeasible near-miss says there may be
+~1% more if a feasibility-restoring polish from start 4's neighborhood converges
+— queued. Best design saved `runs/multistart_v2_best.npz`; milestone CAD/VTU
+export pending (`runs/export_best.py`).
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1273,7 +1301,8 @@ path; design regenerable from `runs/chain_D_datum_ortho.npz`.
 | /tmp data loss + runs/ convention (2026-06-11) | Unexpected reboot wiped /tmp: both in-flight runs AND all saved design arrays lost (V.3c running best, warm chain). Code/ledger safe. New convention: scripts, .npz designs, logs → gitignored `runs/`; stage-level immediate saves; resumable chains (`runs/chain_rebuild.py`). Regeneration folded into the V#2 re-baseline so the chain re-runs once. |
 | V#2 CLOSED — implementation (2026-06-11) | `panel_d_mode="datum_ortho"` (opt-in, KS-only): strip σcr now uses the datum-frame orthotropic long-plate N_cr = (2π²/b²)(√(D11·D22)+D12+2·D66) instead of triangle-local D11; exact kc=4 isotropic identity (unit-tested); f-chains via `dQstar_df`, FD-audited live. Motivated by the V.3c layup regime change 32/53/15 → 0/100/0 (±45) making local-frame bookkeeping load-bearing. Caveats: demand stays principal compression; wrinkling still local-frame (V#2-residual). Measurement: chain stage D (pending). |
 | Memory-budget for parallel runs (2026-06-12) | Both machine crashes were watchdog kernel panics caused by our parallel sizing oversubscribing RAM (8 IPOPT workers × ~9 GiB measured on 32 GiB → `vm-compressor-space-shortage` jetsam storms → configd/WindowServer starved → panic). Convention (CLAUDE.md): Σ worker peaks ≤ ~½ RAM (→ `n_workers=2` for medium IPOPT), never stack heavy runs concurrently, `ru_maxrss` recorded in every run meta. |
-| V#2 MEASURED — datum_ortho verdict (2026-06-12) | Chain stage D: **1094.2 kg converged feasible, λ 3.61 — new medium headline (−51.3% vs V.6)**; −0.1% vs the local-frame V.3c optimum (noise) → the directional-bookkeeping fix costs nothing and the **pure-±45 layup survives** = real physics, not artifact. `datum_ortho` becomes the standard P-phase panel mode (opt-in flag unchanged). B/C rungs unconverged (upper bounds); wrinkling local-frame residual stays open. |
+| V#2 MEASURED — datum_ortho verdict (2026-06-12) | Chain stage D: **1094.2 kg converged feasible, λ 3.61 (−51.3% vs V.6)**; −0.1% vs the local-frame V.3c optimum (noise) → the directional-bookkeeping fix costs nothing and the **pure-±45 layup survives** = real physics, not artifact. `datum_ortho` becomes the standard P-phase panel mode (opt-in flag unchanged). B/C rungs unconverged (upper bounds); wrinkling local-frame residual stays open. |
+| Multistart headline (2026-06-12) | 8-start multistart (D-seeded start 0, `multistart x0=` param added) found a lighter basin the warm chain missed: **1021.6 kg converged feasible, λ 2.76 — new medium headline (−54.5% vs V.6, −6.6% vs chain D)**, layup ±45. Measured worker peak 17.8 GiB ⇒ **n_workers=1 is the safe cap for medium IPOPT** (2 was over the edge). Lightest start (1015.3) excluded as infeasible — feasibility-restoring polish queued. |
 | Incumbent guard + mass correction (2026-06-11) | Guard: best hard-feasible visited design always kept (never-worse-than-feasible-seed, tested). It exposed solid-vs-annular result accounting: **corrected ledger P#1b 1784.5 kg, V.3c running best 1095.3 kg (−51.3% vs V.6)**; optimization/eigen/feasibility were always correct — reporting only. |
 | V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |
