@@ -383,6 +383,7 @@ def size_beam_shell_laminate(
     if sandwich:
         blocks += [("t_core", B)]
     braced = getattr(model, "brace_elements", None) is not None
+    N_br = len(model.brace_elements) if braced else 0
     if braced:
         blocks += [("brace_radius", 1)]
     dv = DesignVector(*blocks)
@@ -503,6 +504,9 @@ def size_beam_shell_laminate(
         if tube:
             r_t, t_eff = decode_tube(x)
             secs += [BeamSection.annular(float(r_t[s]), float(t_eff[s])) for s in range(S)]
+        if braced:
+            r_br = float(x[dv.slice("brace_radius").start])
+            secs += [BeamSection.circular(r_br)] * N_br
         return secs
 
     def annular_arrays(x, radii_form):
@@ -541,6 +545,9 @@ def size_beam_shell_laminate(
             x0 = np.concatenate([x0, np.full(H, 0.003)])
         if sandwich:
             x0 = np.concatenate([x0, np.full(B, 0.005)])
+        if braced:
+            x0 = np.concatenate([x0, np.array([(config.brace_r_min + config.brace_r_max) / 2.0])])
+        assert x0.shape[0] == nx, f"cold-start x0 length {x0.shape[0]} != nx {nx}"
     else:
         x0 = np.asarray(x0, dtype=float)
         if x0.shape != (nx,):
@@ -767,7 +774,7 @@ def size_beam_shell_laminate(
 
     m_ref = beam_mass(model, np.full(n, config.r_max), rho=rho) + skin_mass(model, config.t_max, rho=rho)
 
-    Lb_form = Lb[:model.n_form_elements] if tube else Lb
+    Lb_form = Lb[:model.n_form_elements]
     Lb_tube = Lb[tube_el] if tube else None
 
     def mass(x):

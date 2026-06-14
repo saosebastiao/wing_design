@@ -140,6 +140,30 @@ def test_design_vector_from_result_roundtrip():
     assert r1.t_core is not None and r1.r_tube is not None
 
 
+def test_braced_cold_start_runs_without_length_mismatch():
+    # Smoke test: braced cold-start (x0=None) must not crash with a length mismatch.
+    # Uses small_wingsail + small_scenario() so it stays fast (~few seconds).
+    from wing_design.geometry import small_wingsail
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.fea_model import project_panels_to_skin
+    from wing_design.aero import build_airplane, sweep_envelope
+    from wing_design import small_scenario
+    from wing_design.beams.laminate_sizing import LaminateSizingConfig, size_beam_shell_laminate
+    P = small_scenario()
+    model = build_beam_shell_model(small_wingsail, n_beams=4, n_levels=3,
+                                   lateral_bracing=True)
+    ap = build_airplane(small_wingsail)
+    env = sweep_envelope(ap, P.load_cases, method="lifting_line",
+                         spanwise_resolution=P.aero.spanwise_resolution)
+    loads = [project_panels_to_skin(model, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in env if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
+    cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,
+                               tip_defl_max_m=0.05 * small_wingsail.span,
+                               tip_twist_max_deg=5.0)
+    r = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=2)
+    assert r is not None and np.isfinite(r.mass_kg)   # cold-start braced solve completes
+
+
 def test_brace_radius_block_present_and_bounded():
     import numpy as np
     from wing_design.geometry import medium_wingsail
