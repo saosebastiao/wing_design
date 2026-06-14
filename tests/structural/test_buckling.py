@@ -74,3 +74,12 @@ def test_k_ring_quartic_and_gradient_fd():
     fd = _central_diff(lambda rr: k_ring_stiffness(rr, E, L_ring, s, alpha), r, 1e-7)
     assert np.allclose(ana, fd, rtol=1e-6, atol=1e-6 * np.abs(fd).max())
     assert np.allclose(ana, 4.0 * k / r, rtol=1e-12)
+
+
+def test_k_ring_finite_at_degenerate_inputs():
+    import numpy as np
+    from wing_design.structural.buckling import k_ring_stiffness, dk_ring_dr
+    # zero radius / zero span must not produce nan/inf (bounded DV never hits 0, but
+    # boundary probes and degenerate mesh elements must stay finite for the optimizer)
+    assert np.isfinite(dk_ring_dr(0.0, 7e10, np.array([0.4]), np.array([0.9])))
+    assert np.isfinite(k_ring_stiffness(0.012, 7e10, np.array([0.0]), np.array([0.0]))).all()

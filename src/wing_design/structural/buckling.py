@@ -139,9 +139,10 @@ def k_ring_stiffness(r_brace, E, L_ring, s, alpha=3.0):
     smeared over the segment's spanwise length s -> k = spring / s. ``L_ring`` and ``s``
     may be arrays (per element); ``r_brace`` is the single shared DV (scalar)."""
     I = np.pi * r_brace**4 / 4.0
-    return alpha * E * I / (np.asarray(L_ring, float) ** 3 * np.asarray(s, float))
+    denom = np.maximum(np.asarray(L_ring, float) ** 3 * np.asarray(s, float), 1e-30)
+    return alpha * E * I / denom
 
 
 def dk_ring_dr(r_brace, E, L_ring, s, alpha=3.0):
     """d k_ring / d r_brace = 4 * k_ring / r_brace (quartic in r)."""
-    return 4.0 * k_ring_stiffness(r_brace, E, L_ring, s, alpha) / r_brace
+    return 4.0 * k_ring_stiffness(r_brace, E, L_ring, s, alpha) / np.maximum(r_brace, 1e-30)
