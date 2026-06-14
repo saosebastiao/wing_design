@@ -96,7 +96,7 @@ def build_beam_shell_model(
     hollow_beams: bool = False,
     straightness_tol_m: float = 1.0e-3,
     lateral_bracing: bool = False,
-    brace_stations: "str | tuple[int, ...]" = "interior",
+    brace_stations: str | tuple[int, ...] = "interior",
 ) -> BeamShellModel:
     """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing.
 
@@ -183,6 +183,9 @@ def build_beam_shell_model(
         if brace_stations == "interior":
             stations = list(range(1, n_levels - 1))
         elif brace_stations == "all":
+            # "all" includes k=0 (root) and k=n_levels-1 (tip), whose nodes
+            # coincide with fixed_nodes/tip_nodes — harmless but redundant
+            # constraints; "interior" is the intended default for that reason.
             stations = list(range(n_levels))
         else:
             stations = sorted(int(k) for k in brace_stations)

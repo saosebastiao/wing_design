@@ -111,3 +111,18 @@ def test_braced_segment_mask_interior():
     assert not per_beam[:, 0].any()
     assert not per_beam[:, -1].any()
     assert per_beam[:, 1:-1].all()
+
+
+def test_lateral_bracing_explicit_stations_tuple():
+    nb, nl = 8, 6
+    m = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl,
+                               lateral_bracing=True, brace_stations=(1, 3))
+    import numpy as np
+    assert np.array_equal(m.brace_stations, np.array([1, 3]))
+    assert m.brace_elements.shape[0] == 2 * nb          # two rings
+    # every brace element connects two nodes at z-level 1 or 3
+    zlev = m.nodes[:nl, 2]
+    for e in m.brace_elements:
+        a, b = m.beam_elements[e]
+        assert np.isclose(m.nodes[a, 2], m.nodes[b, 2])
+        assert np.isclose(m.nodes[a, 2], zlev[1]) or np.isclose(m.nodes[a, 2], zlev[3])
