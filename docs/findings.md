@@ -67,6 +67,17 @@ its basin. Pre-V.6 numbers are historical (legacy `b=√area` buckling, aero-onl
    scales make the QP ill-conditioned); it finds local optima (FD and analytic landed in
    basins ~2% apart), so same-config comparisons under ~2–3% are within noise; and
    wall-clock must be measured, not estimated (estimates ran up to ~10× off).
+9. **A chord-normal inertial (slam) load has no efficient load path in a pure
+   spanwise-cantilever topology.** At 3 g lateral the optimizer spent +53% mass and
+   still couldn't reach a stable structure (eigen λ 0.81); the beams carry spanwise
+   bending and the skin braces them, but nothing carries a large transverse inertial
+   load except added *lateral* bracing (cross-members / diagonals). The aero+gravity
+   envelope hid this because those loads are predominantly spanwise/chordwise in the
+   beams' strong planes. Survival-class slam is therefore a *topology* requirement,
+   not a sizing one — and it's where the shelved P.2/F.2 transverse-member levers
+   finally earn their place. Corollary: the closed-form/foundation beam-buckling
+   model is non-conservative under slam (reported feasible at true λ 0.81), so the
+   eigen check must be in-loop for any slam-sized result.
 
 ---
 
@@ -1266,6 +1277,37 @@ radii 4.0–40.0 mm, single skin band 1.154 mm faces / 5.70 mm core, pure ±45,
 6 spar tubes ~1.0 mm wall + root tube 7.41 mm. Regenerate:
 `PYTHONPYCACHEPREFIX=$PWD/.pycache .venv/bin/python runs/export_best.py`.
 
+**V#12 slam re-introduced at 3 g lateral (survival) — STRONG NEGATIVE + a model-
+validity finding: the current topology does NOT survive 3 g, and the closed-form
+beam-buckling model goes non-conservative under slam (2026-06-14).** User chose
+3 g lateral (survival) for the re-introduced slam envelope. `runs/slam_3g.py`
+added ±3 g lateral slam + gravity (4 accel cases: upright, 30° heel, ±3 g lateral,
+each combined with 1 g vertical) to the medium envelope, warm-started from the
+1021.6 kg headline, IPOPT+KS, single worker. **Result is a DIAGNOSTIC, not a
+feasible design:** mass drove to **1567.8 kg (+53.5% vs the headline)** and still
+**did not converge** (hit maxiter 3000, 6 h 16 m wall), and — decisively — the
+independent linear-buckling check gives **worst λ_cr = 0.81 < 1.0**, i.e. the
+structure *buckles under ~80% of the applied slam load*, far below the SF 1.5
+protocol. So 3 g lateral slam is **not survivable by the 16-beam form-beam +
+sandwich-skin topology** as sized. **Two findings:** (1) the survival envelope
+needs a topology change — added *lateral* bracing — not just more material; the
+optimizer poured +53% mass in and still couldn't reach a stable structure,
+because a cantilever wing has no efficient load path for a 3 g chord-normal
+inertial load without transverse members. This is the binding justification the
+shelved cross-member / IsoTruss-diagonal levers (P.2 / F.2, abandoned while
+buckling-under-aero governed) never had. (2) **The closed-form/foundation
+beam-buckling constraint is non-conservative under combined lateral slam:** it
+reported `beam_buckling` util 1.001 ("feasible") while the true eigenvalue was
+0.81 — the foundation formula, calibrated under aero + gravity, misses the
+slam-driven buckling mode. Until that gap is closed the closed-form model must
+not be trusted for the slam case; the eigen check has to move in-loop for any
+slam-sized result (Toolbox #7). Secondary observations: the layup reorganized
+**0/100/0 → 0/0.62/0.38** (chordwise 90° fibres reappear — lateral slam loads the
+chord), tip deflection nearly binds (0.96), twist stays slack (0.26). The +53%
+mass is reported only to show the optimizer's effort; it is **not** a survival
+mass (eigen-rejected). Measured 22,525 s wall, analytic Jacobian, peak RSS in
+meta. Saved `runs/slam_3g.npz`.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1309,6 +1351,7 @@ radii 4.0–40.0 mm, single skin band 1.154 mm faces / 5.70 mm core, pure ±45,
 | Memory-budget for parallel runs (2026-06-12) | Both machine crashes were watchdog kernel panics caused by our parallel sizing oversubscribing RAM (8 IPOPT workers × ~9 GiB measured on 32 GiB → `vm-compressor-space-shortage` jetsam storms → configd/WindowServer starved → panic). Convention (CLAUDE.md): Σ worker peaks ≤ ~½ RAM (→ `n_workers=2` for medium IPOPT), never stack heavy runs concurrently, `ru_maxrss` recorded in every run meta. |
 | V#2 MEASURED — datum_ortho verdict (2026-06-12) | Chain stage D: **1094.2 kg converged feasible, λ 3.61 (−51.3% vs V.6)**; −0.1% vs the local-frame V.3c optimum (noise) → the directional-bookkeeping fix costs nothing and the **pure-±45 layup survives** = real physics, not artifact. `datum_ortho` becomes the standard P-phase panel mode (opt-in flag unchanged). B/C rungs unconverged (upper bounds); wrinkling local-frame residual stays open. |
 | Multistart headline (2026-06-12) | 8-start multistart (D-seeded start 0, `multistart x0=` param added) found a lighter basin the warm chain missed: **1021.6 kg converged feasible, λ 2.76 — new medium headline (−54.5% vs V.6, −6.6% vs chain D)**, layup ±45. Measured worker peak 17.8 GiB ⇒ **n_workers=1 is the safe cap for medium IPOPT** (2 was over the edge). Lightest start (1015.3) excluded as infeasible — feasibility-restoring polish queued. |
+| V#12 slam @ 3 g lateral (2026-06-14) | User chose 3 g (survival). DIAGNOSTIC, not a design: drove to **1567.8 kg (+53.5%), unconverged (maxiter 3000), eigen-REJECTED λ 0.81 < 1.0** → current 16-beam topology does NOT survive 3 g lateral; needs **lateral bracing** (binding reason to revive P.2/F.2 cross-members). Also: closed-form beam-buckling went **non-conservative** (util 1.001 while eigen 0.81) → eigen check must move in-loop for slam-sized results. Layup 0/100/0→0/0.62/0.38, tip defl 0.96. |
 | Incumbent guard + mass correction (2026-06-11) | Guard: best hard-feasible visited design always kept (never-worse-than-feasible-seed, tested). It exposed solid-vs-annular result accounting: **corrected ledger P#1b 1784.5 kg, V.3c running best 1095.3 kg (−51.3% vs V.6)**; optimization/eigen/feasibility were always correct — reporting only. |
 | V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |
