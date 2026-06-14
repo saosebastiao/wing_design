@@ -67,6 +67,11 @@ class BeamShellModel:
     # hollow) sections — both endpoint levels in-wing AND the beam path measured
     # straight (the windability requirement; asserted at build).
     hollow_elements: np.ndarray | None = None      # (Hn,) indices into beam_elements
+    # task #22 lateral bracing: rows of `beam_elements` that are transverse ring
+    # members (sized by the brace_radius DV), and the spanwise stations carrying
+    # a ring (level indices into the z-grid).
+    brace_elements: np.ndarray | None = None      # (n_rings*n_beams,) indices into beam_elements
+    brace_stations: np.ndarray | None = None      # (n_rings,) level indices
 
     @property
     def n_form_elements(self) -> int:
@@ -90,6 +95,8 @@ def build_beam_shell_model(
     tube_bonds_per_level: int = 4,
     hollow_beams: bool = False,
     straightness_tol_m: float = 1.0e-3,
+    lateral_bracing: bool = False,
+    brace_stations: "str | tuple[int, ...]" = "interior",
 ) -> BeamShellModel:
     """Build a beam-shell model; ``arc_fractions`` (default None = even) gives non-uniform beam spacing.
 
@@ -171,6 +178,23 @@ def build_beam_shell_model(
         tube_bond_elements = np.asarray(bonds, dtype=int)
         fixed_nodes = np.append(fixed_nodes, tube_node(keel_k))
 
+    brace_elements = brace_stations_arr = None
+    if lateral_bracing:
+        if brace_stations == "interior":
+            stations = list(range(1, n_levels - 1))
+        elif brace_stations == "all":
+            stations = list(range(n_levels))
+        else:
+            stations = sorted(int(k) for k in brace_stations)
+        if not stations:
+            raise ValueError("lateral_bracing=True but no brace stations selected")
+        n0 = beam_elements.shape[0]
+        ring_rows = [(nid(b, k), nid((b + 1) % n_beams, k))
+                     for k in stations for b in range(n_beams)]
+        beam_elements = np.vstack([beam_elements, np.asarray(ring_rows, dtype=int)])
+        brace_elements = np.arange(n0, n0 + len(ring_rows), dtype=int)
+        brace_stations_arr = np.asarray(stations, dtype=int)
+
     return BeamShellModel(
         nodes=nodes,
         beam_elements=beam_elements,
@@ -191,6 +215,8 @@ def build_beam_shell_model(
         tube_r_bounds=tube_r_bounds,
         tube_bond_elements=tube_bond_elements,
         hollow_elements=hollow_elements,
+        brace_elements=brace_elements,
+        brace_stations=brace_stations_arr,
     )
 
 
@@ -293,3 +319,19 @@ def beam_adjacent_widths(model: BeamShellModel) -> "np.ndarray":
             out[e, 0] = width(b, (b - 1) % nb, k)
             out[e, 1] = width(b, (b + 1) % nb, k)
     return out
+
+
+def braced_segment_mask(model: BeamShellModel) -> np.ndarray:
+    """(n_form_elements,) bool: True where a form-beam SEGMENT has a ring at BOTH
+    of its end stations (so the ring shortens that segment's lateral buckling
+    length). Returns all-False when no bracing is present."""
+    nb, nl = model.n_beams, model.n_levels
+    mask = np.zeros(model.n_form_elements, dtype=bool)
+    if model.brace_stations is None:
+        return mask
+    braced = set(int(k) for k in model.brace_stations)
+    for b in range(nb):
+        for k in range(nl - 1):
+            if k in braced and (k + 1) in braced:
+                mask[b * (nl - 1) + k] = True
+    return mask

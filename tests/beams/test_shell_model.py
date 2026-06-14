@@ -1,12 +1,13 @@
 import numpy as np
 
-from wing_design.geometry import small_wingsail
+from wing_design.geometry import small_wingsail, medium_wingsail
 from wing_design.beams.fea_model import build_beam_frame, project_panels_to_beam_nodes, solve_beam_frame
 from wing_design.aero.loads import PanelLoads
 from wing_design.beams.shell_model import (
     skin_triangles,
     build_beam_shell_model,
     solve_beam_shell_model,
+    braced_segment_mask,
 )
 from wing_design.beams.layout import stress_weighted_targets
 
@@ -83,3 +84,30 @@ def test_nonuniform_model_solves():
     res = solve_beam_shell_model(model, loads)
     assert np.isfinite(res.displacements).all()
     assert np.allclose(res.displacements[model.fixed_nodes], 0.0)
+
+
+def test_lateral_bracing_adds_expected_ring_elements():
+    nb, nl = 8, 6
+    base = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl)
+    braced = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl,
+                                    lateral_bracing=True)  # default stations="interior"
+    n_rings = nl - 2
+    assert braced.brace_elements is not None
+    assert braced.brace_elements.shape[0] == n_rings * nb
+    assert braced.beam_elements.shape[0] == base.beam_elements.shape[0] + n_rings * nb
+    for e in braced.brace_elements:
+        a, b = braced.beam_elements[e]
+        assert np.isclose(braced.nodes[a, 2], braced.nodes[b, 2])
+    assert base.brace_elements is None
+
+
+def test_braced_segment_mask_interior():
+    nb, nl = 8, 6
+    m = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl,
+                               lateral_bracing=True)
+    mask = braced_segment_mask(m)
+    assert mask.shape == (m.n_form_elements,)
+    per_beam = mask.reshape(nb, nl - 1)
+    assert not per_beam[:, 0].any()
+    assert not per_beam[:, -1].any()
+    assert per_beam[:, 1:-1].all()
