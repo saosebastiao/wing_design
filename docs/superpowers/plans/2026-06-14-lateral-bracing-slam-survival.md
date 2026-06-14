@@ -43,8 +43,8 @@ from wing_design.beams.shell_model import build_beam_shell_model, braced_segment
 
 def test_lateral_bracing_adds_expected_ring_elements():
     nb, nl = 8, 6
-    base = build_beam_shell_model(medium_wingsail().geometry, n_beams=nb, n_levels=nl)
-    braced = build_beam_shell_model(medium_wingsail().geometry, n_beams=nb, n_levels=nl,
+    base = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl)
+    braced = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl,
                                     lateral_bracing=True)  # default stations="interior"
     # interior stations = 1..nl-2  -> (nl-2) rings, each nb closed-loop elements
     n_rings = nl - 2
@@ -62,7 +62,7 @@ def test_lateral_bracing_adds_expected_ring_elements():
 
 def test_braced_segment_mask_interior():
     nb, nl = 8, 6
-    m = build_beam_shell_model(medium_wingsail().geometry, n_beams=nb, n_levels=nl,
+    m = build_beam_shell_model(medium_wingsail, n_beams=nb, n_levels=nl,
                                lateral_bracing=True)
     mask = braced_segment_mask(m)            # (n_form_elements,) bool
     assert mask.shape == (m.n_form_elements,)
@@ -259,14 +259,14 @@ from wing_design.beams.laminate_sizing import LaminateSizingConfig, laminate_des
 
 
 def test_brace_radius_block_present_and_bounded():
-    m = build_beam_shell_model(medium_wingsail().geometry, n_beams=8, n_levels=6,
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=6,
                                lateral_bracing=True)
     cfg = LaminateSizingConfig(brace_r_min=0.002, brace_r_max=0.05)
     lo, hi = laminate_design_bounds(m, cfg)
     # exactly one brace_radius variable, bounded [brace_r_min, brace_r_max]
     assert lo[-1] == 0.002 and hi[-1] == 0.05
     # unbraced model has no extra var
-    m0 = build_beam_shell_model(medium_wingsail().geometry, n_beams=8, n_levels=6)
+    m0 = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=6)
     lo0, _ = laminate_design_bounds(m0, cfg)
     assert lo.size == lo0.size + 1
 ```
@@ -338,7 +338,7 @@ def test_brace_mass_and_objective_gradient_fd():
     from wing_design.beams.shell_model import build_beam_shell_model
     from wing_design.beams.laminate_sizing import (
         LaminateSizingConfig, laminate_design_bounds, _objective_and_grad_for_test)
-    m = build_beam_shell_model(medium_wingsail().geometry, n_beams=8, n_levels=5,
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=5,
                                lateral_bracing=True)
     cfg = LaminateSizingConfig(brace_r_min=0.002, brace_r_max=0.05)
     lo, hi = laminate_design_bounds(m, cfg)
@@ -422,7 +422,7 @@ def test_ks_beam_buck_brace_radius_gradient_matches_fd():
     from wing_design.beams.shell_model import build_beam_shell_model
     from wing_design.beams.laminate_sizing import LaminateSizingConfig
     from tests.beams._ks_fd_harness import beam_buck_ks_value_and_grad  # see note
-    m = build_beam_shell_model(medium_wingsail().geometry, n_beams=8, n_levels=5,
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=5,
                                core_tube=False, hollow_beams=False, lateral_bracing=True)
     cfg = LaminateSizingConfig(ply_angle_datum=(0, 0, 1), ks_rho=50.0,
                                buckling_safety_factor=1.5, use_analytic_jacobian=True,
@@ -505,7 +505,7 @@ def test_brace_vm_constraint_registered():
     from wing_design.geometry import medium_wingsail
     from wing_design.beams.shell_model import build_beam_shell_model
     from wing_design.beams.laminate_sizing import LaminateSizingConfig, _constraint_names_for_test
-    m = build_beam_shell_model(medium_wingsail().geometry, n_beams=8, n_levels=5,
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=5,
                                lateral_bracing=True)
     cfg = LaminateSizingConfig(ply_angle_datum=(0, 0, 1), ks_rho=50.0,
                                buckling_safety_factor=1.5, use_analytic_jacobian=True,
@@ -576,7 +576,7 @@ def test_design_vector_from_result_brace_roundtrip():
     from wing_design.beams.laminate_sizing import (
         LaminateSizingConfig, laminate_design_bounds, design_vector_from_result,
         _result_from_design_vector_for_test)
-    m = build_beam_shell_model(medium_wingsail().geometry, n_beams=8, n_levels=5,
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=5,
                                lateral_bracing=True)
     cfg = LaminateSizingConfig(brace_r_min=0.002, brace_r_max=0.05)
     lo, hi = laminate_design_bounds(m, cfg)
