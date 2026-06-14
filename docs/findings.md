@@ -1280,7 +1280,7 @@ radii 4.0–40.0 mm, single skin band 1.154 mm faces / 5.70 mm core, pure ±45,
 **V#12 slam re-introduced at 3 g lateral (survival) — STRONG NEGATIVE + a model-
 validity finding: the current topology does NOT survive 3 g, and the closed-form
 beam-buckling model goes non-conservative under slam (2026-06-14).** User chose
-3 g lateral (survival) for the re-introduced slam envelope. `runs/slam_3g.py`
+3 g lateral (survival) for the re-introduced slam envelope. `runs/slam.py 3`
 added ±3 g lateral slam + gravity (4 accel cases: upright, 30° heel, ±3 g lateral,
 each combined with 1 g vertical) to the medium envelope, warm-started from the
 1021.6 kg headline, IPOPT+KS, single worker. **Result is a DIAGNOSTIC, not a
