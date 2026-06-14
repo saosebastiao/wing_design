@@ -1308,6 +1308,31 @@ mass is reported only to show the optimizer's effort; it is **not** a survival
 mass (eigen-rejected). Measured 22,525 s wall, analytic Jacobian, peak RSS in
 meta. Saved `runs/slam_3g.npz`.
 
+**V#12 slam at 2 g lateral (2026-06-14) — also a NEGATIVE diagnostic, and a
+WORSE-converged one: the warm-from-headline IPOPT path stalls in restoration and
+never reaches feasibility for the slam problem.** `runs/slam.py 2`, identical
+setup to the 3 g run (same headline seed, same 4-case ±2 g envelope, IPOPT+KS,
+single worker, maxiter 3000, 5 h 56 m). Outcome: **unconverged, NOT feasible
+(no incumbent ever found), eigen λ_cr = 0.60**, ending at a meaningless 929.3 kg
+*infeasible* iterate with closed-form buckling violated (beam util 1.40, panel
+1.19) and tip deflection at 0.99. **This is NOT "2 g is lighter/worse than 3 g"**
+— it is a convergence failure: from the headline seed (feasible only under the
+no-slam envelope) IPOPT entered its feasibility-restoration phase and never
+escaped, drifting to a lighter constraint-violating point instead of building the
+structure up as the 3 g run happened to. So the 929.3 kg / λ 0.60 are an
+infeasible-iterate artifact, not a 2 g survival mass. **What it confirms /
+adds:** (1) the slam-loaded problem is not reliably solvable on the current
+topology from the headline seed — *neither* 2 g nor 3 g produced a stable design;
+(2) because this run never reached even closed-form feasibility, it is *less*
+conclusive than 3 g (which proved a closed-form-feasible-but-eigen-rejected point
+exists) — we therefore cannot yet say whether a 2 g-feasible design exists on this
+topology, only that it wasn't found from this seed; (3) the warm-from-headline +
+closed-form-foundation IPOPT recipe is the wrong solver strategy for slam (erratic
+restoration trajectories) — a cleaner 2 g read needs reseeding from the 3 g
+geometry (already in the lateral-loaded regime) or a feasibility-first formulation,
+and ultimately the lateral bracing + in-loop eigen of task #22. Measured 21,359 s
+wall, peak RSS in meta. Saved `runs/slam_2g.npz`.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1352,6 +1377,7 @@ meta. Saved `runs/slam_3g.npz`.
 | V#2 MEASURED — datum_ortho verdict (2026-06-12) | Chain stage D: **1094.2 kg converged feasible, λ 3.61 (−51.3% vs V.6)**; −0.1% vs the local-frame V.3c optimum (noise) → the directional-bookkeeping fix costs nothing and the **pure-±45 layup survives** = real physics, not artifact. `datum_ortho` becomes the standard P-phase panel mode (opt-in flag unchanged). B/C rungs unconverged (upper bounds); wrinkling local-frame residual stays open. |
 | Multistart headline (2026-06-12) | 8-start multistart (D-seeded start 0, `multistart x0=` param added) found a lighter basin the warm chain missed: **1021.6 kg converged feasible, λ 2.76 — new medium headline (−54.5% vs V.6, −6.6% vs chain D)**, layup ±45. Measured worker peak 17.8 GiB ⇒ **n_workers=1 is the safe cap for medium IPOPT** (2 was over the edge). Lightest start (1015.3) excluded as infeasible — feasibility-restoring polish queued. |
 | V#12 slam @ 3 g lateral (2026-06-14) | User chose 3 g (survival). DIAGNOSTIC, not a design: drove to **1567.8 kg (+53.5%), unconverged (maxiter 3000), eigen-REJECTED λ 0.81 < 1.0** → current 16-beam topology does NOT survive 3 g lateral; needs **lateral bracing** (binding reason to revive P.2/F.2 cross-members). Also: closed-form beam-buckling went **non-conservative** (util 1.001 while eigen 0.81) → eigen check must move in-loop for slam-sized results. Layup 0/100/0→0/0.62/0.38, tip defl 0.96. |
+| V#12 slam @ 2 g lateral (2026-06-14) | Same setup; WORSE-converged diagnostic: **unconverged, never feasible (no incumbent), eigen λ 0.60**, ended at a meaningless 929.3 kg infeasible iterate (buckling utils 1.40/1.19). NOT "lighter than 3 g" — IPOPT stalled in restoration from the no-slam headline seed and never reached feasibility. Confirms slam is unsolvable on this topology from this seed; inconclusive on whether 2 g is *physically* feasible. Next: reseed 2 g from the 3 g geometry, then task #22 (bracing + in-loop eigen). |
 | Incumbent guard + mass correction (2026-06-11) | Guard: best hard-feasible visited design always kept (never-worse-than-feasible-seed, tested). It exposed solid-vs-annular result accounting: **corrected ledger P#1b 1784.5 kg, V.3c running best 1095.3 kg (−51.3% vs V.6)**; optimization/eigen/feasibility were always correct — reporting only. |
 | V.3c CLOSED (2026-06-11) | Foundation model: **1108.5 kg running best, eigen λ 3.61** (−34% step; **−50.7% vs V.6**). Beams 559 kg; k-chains let skin DVs buy beam capacity (core grew to 5.4 mm partly for k). Spokes variant loses outright (3417 kg unconverged — hub diaphragms + retained element-length artifact). Sub-element caveat: foundation formula awaits a chordwise-enriched eigen audit (V.3b-class). |
 | P.3 CLOSED (2026-06-11) | Polish converged: **1679.3 kg, eigen λ 3.55 — new running best** (−25.3% vs V.6 baseline). t_core 4.3 mm / faces 1.91 mm; skin 519+61 kg vs 1246 monolithic. KS-conservative local optimum (small hard slack; multi-start unexplored). Beams now 65% of mass → **V.3c is the next lever**. Cumulative P.3 compute ≈ 6.1 h. |
