@@ -94,6 +94,9 @@ class LaminateSizingConfig:
     # the sandwich factor; wrinkling + crimping checks gate the credit).
     core: CoreMaterial | None = None
     t_core_max: float = 0.06
+    # P.2 lateral bracing ring radius DV bounds (used when model.brace_elements present).
+    brace_r_min: float = 0.002
+    brace_r_max: float = 0.05
     # Optimizer backend: "slsqp" (scipy, default) or "ipopt" (cyipopt; the
     # documented Toolbox #4 fallback — interior-point handles the large design
     # migrations SLSQP's active set stalls on, e.g. the P.3 skin->core shift).
@@ -197,6 +200,9 @@ def laminate_design_bounds(model: BeamShellModel, config: LaminateSizingConfig):
     if config.core is not None:
         lo = np.concatenate([lo, np.zeros(B)])
         hi = np.concatenate([hi, np.full(B, config.t_core_max)])
+    if getattr(model, "brace_elements", None) is not None:
+        lo = np.concatenate([lo, np.array([config.brace_r_min])])
+        hi = np.concatenate([hi, np.array([config.brace_r_max])])
     return lo, hi
 
 
@@ -376,6 +382,9 @@ def size_beam_shell_laminate(
     sandwich = config.core is not None
     if sandwich:
         blocks += [("t_core", B)]
+    braced = getattr(model, "brace_elements", None) is not None
+    if braced:
+        blocks += [("brace_radius", 1)]
     dv = DesignVector(*blocks)
     foundation = config.beam_buckling_model == "foundation"
     if config.beam_buckling_model not in ("element", "foundation"):

@@ -138,3 +138,20 @@ def test_design_vector_from_result_roundtrip():
     r1 = size_beam_shell_laminate(model1, [loads1], cfg1, ply=T700_EPOXY,
                                   rho=1550.0, maxiter=2, x0=x_up)
     assert r1.t_core is not None and r1.r_tube is not None
+
+
+def test_brace_radius_block_present_and_bounded():
+    import numpy as np
+    from wing_design.geometry import medium_wingsail
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.laminate_sizing import LaminateSizingConfig, laminate_design_bounds
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=6, lateral_bracing=True)
+    cfg = LaminateSizingConfig(
+        sigma_allow_Pa=2.0e8, tip_defl_max_m=0.5, tip_twist_max_deg=5.0,
+        brace_r_min=0.002, brace_r_max=0.05,
+    )
+    lo, hi = laminate_design_bounds(m, cfg)
+    assert lo[-1] == 0.002 and hi[-1] == 0.05          # brace_radius is the LAST var
+    m0 = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=6)   # unbraced
+    lo0, _ = laminate_design_bounds(m0, cfg)
+    assert lo.size == lo0.size + 1                      # exactly one extra var when braced
