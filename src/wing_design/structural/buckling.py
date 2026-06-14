@@ -127,3 +127,21 @@ def beam_foundation_utilization(
     comp = np.maximum(0.0, -np.asarray(axial_force, dtype=float))
     pcr = 2.0 * np.sqrt(np.asarray(k_found, dtype=float) * np.asarray(EI, dtype=float))
     return comp * safety_factor / np.maximum(pcr, 1e-30)
+
+
+def k_ring_stiffness(r_brace, E, L_ring, s, alpha=3.0):
+    """Distributed elastic-foundation stiffness (force / length / length) that a
+    transverse ring member of circular radius ``r_brace`` contributes to a braced
+    form-beam segment, smeared over the spanwise tributary length ``s``.
+
+    Model: the ring acts as a transverse spring of stiffness alpha*E*I_ring/L_ring^3
+    (I_ring = pi r^4 / 4, alpha = end-restraint constant, 3 = cantilever, conservative),
+    smeared over the segment's spanwise length s -> k = spring / s. ``L_ring`` and ``s``
+    may be arrays (per element); ``r_brace`` is the single shared DV (scalar)."""
+    I = np.pi * r_brace**4 / 4.0
+    return alpha * E * I / (np.asarray(L_ring, float) ** 3 * np.asarray(s, float))
+
+
+def dk_ring_dr(r_brace, E, L_ring, s, alpha=3.0):
+    """d k_ring / d r_brace = 4 * k_ring / r_brace (quartic in r)."""
+    return 4.0 * k_ring_stiffness(r_brace, E, L_ring, s, alpha) / r_brace

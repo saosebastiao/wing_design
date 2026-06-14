@@ -54,3 +54,23 @@ def test_tube_wall_utilization_scales():
     ut = tube_wall_utilization(np.array([+1.0e4]), np.array([0.05]), np.array([0.002]),
                                np.array([sec.A]), E=70e9)
     assert ut[0] == 0.0
+
+
+def _central_diff(f, x0, h):
+    return (f(x0 + h) - f(x0 - h)) / (2.0 * h)
+
+
+def test_k_ring_quartic_and_gradient_fd():
+    E = 7.0e10
+    L_ring = np.array([0.45, 0.50, 0.40])
+    s = np.array([0.9, 0.9, 1.1])
+    alpha = 3.0
+    r = 0.012
+    from wing_design.structural.buckling import k_ring_stiffness, dk_ring_dr
+    k = k_ring_stiffness(r, E, L_ring, s, alpha)
+    expect = alpha * E * (np.pi * r**4 / 4.0) / (L_ring**3 * s)
+    assert np.allclose(k, expect, rtol=1e-12)
+    ana = dk_ring_dr(r, E, L_ring, s, alpha)
+    fd = _central_diff(lambda rr: k_ring_stiffness(rr, E, L_ring, s, alpha), r, 1e-7)
+    assert np.allclose(ana, fd, rtol=1e-6, atol=1e-6 * np.abs(fd).max())
+    assert np.allclose(ana, 4.0 * k / r, rtol=1e-12)
