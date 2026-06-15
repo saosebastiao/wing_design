@@ -171,6 +171,8 @@ class LaminateSizingResult:
     core_mass_kg: float = 0.0
     max_wrinkle_util: float = 0.0
     max_crimp_util: float = 0.0
+    # P.2 lateral bracing mass
+    brace_mass_kg: float = 0.0
     # Incumbent guard: True when the returned design is the best hard-feasible
     # iterate seen during the run rather than the optimizer's final iterate
     # (the endpoint was heavier or infeasible). Feasible by construction;
@@ -387,6 +389,12 @@ def size_beam_shell_laminate(
     if braced:
         blocks += [("brace_radius", 1)]
     dv = DesignVector(*blocks)
+    # Precompute total brace length (constant; outside per-iter closures).
+    brace_len_total = 0.0
+    if braced:
+        be = model.beam_elements[model.brace_elements]
+        brace_len_total = float(np.sum(np.linalg.norm(
+            model.nodes[be[:, 0]] - model.nodes[be[:, 1]], axis=1)))
     foundation = config.beam_buckling_model == "foundation"
     if config.beam_buckling_model not in ("element", "foundation"):
         raise ValueError(f"unknown beam_buckling_model: {config.beam_buckling_model!r}")
@@ -794,6 +802,9 @@ def size_beam_shell_laminate(
             m += rho * np.sum(np.pi * (r_t**2 - ri**2) * Lb_tube)
         if sandwich:
             m += config.core.rho * np.sum(x[dv.slice("t_core")] * band_area)
+        if braced:
+            r_brace = float(x[dv.slice("brace_radius").start])
+            m += rho * np.pi * r_brace ** 2 * brace_len_total
         return m / m_ref
 
     def mass_grad(x):
@@ -820,6 +831,11 @@ def size_beam_shell_laminate(
             g[dv.slice("t_wall")] = rho * 2.0 * np.pi * ri * Lb_tube / m_ref
         if sandwich:
             g[dv.slice("t_core")] = config.core.rho * band_area / m_ref
+        if braced:
+            r_brace = float(x[dv.slice("brace_radius").start])
+            g[dv.slice("brace_radius").start] = (
+                rho * 2.0 * np.pi * r_brace * brace_len_total / m_ref
+            )
         return g
 
     def beam_con(x):
@@ -1411,6 +1427,10 @@ def size_beam_shell_laminate(
         r_t_f, t_w_f = decode_tube(x)
         tm = float(rho * np.sum(np.pi * (r_t_f**2 - (r_t_f - t_w_f)**2) * Lb_tube))
     sm = float(rho * np.sum(t_tri * Atri))
+    bracem = 0.0
+    if braced:
+        r_brace_f = float(x[dv.slice("brace_radius").start])
+        bracem = float(rho * np.pi * r_brace_f ** 2 * brace_len_total)
     t_skin_mean = float(np.sum(t_tri * Atri) / A_skin_area)
     f0_mean = float(np.sum(f0_tri * Atri) / A_skin_area)
     f45_mean = float(np.sum(f45_tri * Atri) / A_skin_area)
@@ -1419,7 +1439,7 @@ def size_beam_shell_laminate(
         radii=radii, t_skin=t_skin_mean, t_bands=t_bands,
         f0=f0_mean, f45=f45_mean, f90=f90_mean,
         f0_bands=f0b, f45_bands=f45b, f90_bands=f90b,
-        mass_kg=(bm + tm + sm
+        mass_kg=(bm + tm + sm + bracem
                  + (float(config.core.rho * np.sum(x[dv.slice("t_core")] * band_area))
                     if sandwich else 0.0)),
         beam_mass_kg=bm, skin_mass_kg=sm,
@@ -1440,8 +1460,120 @@ def size_beam_shell_laminate(
                       if sandwich else 0.0),
         max_wrinkle_util=float(worst_wrk),
         max_crimp_util=float(worst_crp),
+        brace_mass_kg=bracem,
         used_incumbent=used_incumbent,
     )
+
+
+def _objective_and_grad_for_test(
+    model: BeamShellModel,
+    config: LaminateSizingConfig,
+    x: np.ndarray,
+    *,
+    rho: float,
+    ply: UDPly | None = None,
+) -> tuple[float, np.ndarray]:
+    """Return (normalized_objective, gradient) at x WITHOUT running the optimizer.
+
+    Thin test hook exposing the mass / mass_grad closures used by
+    size_beam_shell_laminate.  The objective is the same normalized mass
+    minimized by SLSQP: mass(x) = total_mass_kg / m_ref.  Only the
+    mass/mass_grad machinery is reconstructed here; no FEA is performed, so
+    this is cheap and suitable for FD-validation tests.
+
+    Parameters
+    ----------
+    model, config, x
+        Same as the optimizer inputs.
+    rho
+        Structural density [kg/m³].
+    ply
+        Unused (kept for forward-compat); can be None.
+    """
+    n = model.beam_elements.shape[0]
+    B = config.n_skin_bands
+    L = B if config.per_band_layup else 1
+    group_of_element, G = beam_radius_groups(model)
+    Lb = beam_lengths(model)
+    Lb_form = Lb[:model.n_form_elements]
+    band_of_tri = skin_band_map(model, B)
+    band_area = skin_band_areas(model, band_of_tri, B)
+
+    tube = getattr(model, "tube_elements", None) is not None
+    hollow = (getattr(model, "hollow_elements", None) is not None
+              and len(model.hollow_elements) > 0)
+    sandwich = config.core is not None
+    braced = getattr(model, "brace_elements", None) is not None
+
+    blocks: list = [("r_group", G), ("t_band", B), ("f0", L), ("f45", L)]
+    if tube:
+        S = len(model.tube_elements)
+        blocks += [("r_tube", S), ("t_wall", S)]
+    else:
+        S = 0
+    if hollow:
+        hollow_el = np.asarray(model.hollow_elements, dtype=int)
+        H = len({int(group_of_element[e]) for e in hollow_el})
+        blocks += [("t_hollow", H)]
+    if sandwich:
+        blocks += [("t_core", B)]
+    if braced:
+        blocks += [("brace_radius", 1)]
+    dv = DesignVector(*blocks)
+
+    brace_len_total = 0.0
+    if braced:
+        be = model.beam_elements[model.brace_elements]
+        brace_len_total = float(np.sum(np.linalg.norm(
+            model.nodes[be[:, 0]] - model.nodes[be[:, 1]], axis=1)))
+
+    m_ref = beam_mass(model, np.full(n, config.r_max), rho=rho) + skin_mass(model, config.t_max, rho=rho)
+
+    nx = dv.nx
+    x = np.asarray(x, dtype=float)
+
+    def _mass(xv):
+        radii = xv[:G][group_of_element]
+        m = (rho * np.sum(np.pi * radii ** 2 * Lb_form)
+             + rho * np.sum(xv[G:G + B] * band_area))
+        if tube:
+            r_t = xv[dv.slice("r_tube")]
+            t_w = xv[dv.slice("t_wall")]
+            tube_elems = np.asarray(model.tube_elements, dtype=int)
+            Lb_tube = Lb[tube_elems]
+            ri = r_t - t_w
+            m += rho * np.sum(np.pi * (r_t ** 2 - ri ** 2) * Lb_tube)
+        if sandwich:
+            m += config.core.rho * np.sum(xv[dv.slice("t_core")] * band_area)
+        if braced:
+            r_brace = float(xv[dv.slice("brace_radius").start])
+            m += rho * np.pi * r_brace ** 2 * brace_len_total
+        return m / m_ref
+
+    def _mass_grad(xv):
+        g = np.zeros(nx)
+        radii = xv[:G][group_of_element]
+        per_elem = rho * 2.0 * np.pi * radii * Lb_form / m_ref
+        np.add.at(g, group_of_element, per_elem)
+        g[G:G + B] = rho * band_area / m_ref
+        if tube:
+            r_t = xv[dv.slice("r_tube")]
+            t_w = xv[dv.slice("t_wall")]
+            tube_elems = np.asarray(model.tube_elements, dtype=int)
+            Lb_tube = Lb[tube_elems]
+            ri = r_t - t_w
+            g[dv.slice("r_tube")] = rho * 2.0 * np.pi * t_w * Lb_tube / m_ref
+            g[dv.slice("t_wall")] = rho * 2.0 * np.pi * ri * Lb_tube / m_ref
+        if sandwich:
+            g[dv.slice("t_core")] = config.core.rho * band_area / m_ref
+        if braced:
+            r_brace = float(xv[dv.slice("brace_radius").start])
+            g[dv.slice("brace_radius").start] = (
+                rho * 2.0 * np.pi * r_brace * brace_len_total / m_ref
+            )
+        return g
+
+    return float(_mass(x)), _mass_grad(x)
 
 
 @dataclass(frozen=True)

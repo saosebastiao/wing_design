@@ -179,3 +179,24 @@ def test_brace_radius_block_present_and_bounded():
     m0 = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=6)   # unbraced
     lo0, _ = laminate_design_bounds(m0, cfg)
     assert lo.size == lo0.size + 1                      # exactly one extra var when braced
+
+
+def test_brace_mass_and_objective_gradient_fd():
+    import numpy as np
+    from wing_design.geometry import medium_wingsail
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.laminate_sizing import (
+        LaminateSizingConfig, laminate_design_bounds, _objective_and_grad_for_test)
+    P_rho = 1600.0
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=5, lateral_bracing=True)
+    cfg = LaminateSizingConfig(sigma_allow_Pa=6e8, tip_defl_max_m=0.4, tip_twist_max_deg=5.0,
+                               brace_r_min=0.002, brace_r_max=0.05)
+    lo, hi = laminate_design_bounds(m, cfg)
+    x = 0.5 * (lo + hi)
+    f0, g = _objective_and_grad_for_test(m, cfg, x, rho=P_rho)
+    e = np.zeros_like(x); e[-1] = 1.0
+    fp, _ = _objective_and_grad_for_test(m, cfg, x + 1e-7 * e, rho=P_rho)
+    fm, _ = _objective_and_grad_for_test(m, cfg, x - 1e-7 * e, rho=P_rho)
+    fd = (fp - fm) / 2e-7
+    assert abs(g[-1] - fd) <= 1e-5 * max(1.0, abs(fd))
+    assert g[-1] > 0.0     # heavier brace => heavier objective
