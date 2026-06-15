@@ -74,6 +74,7 @@ def body_load_jacobian(
     nx_extra: int | None = None,
     core_rho: float | None = None,
     core_col_of_tri: np.ndarray | None = None,
+    brace_elements: np.ndarray | None = None,
 ) -> np.ndarray:
     """∂f/∂x as a dense (ndof, nx) matrix,
     x = [r_group(G), t_band(B), f0(L), f45(L) | r_tube(S), t_wall(S)].
@@ -82,6 +83,9 @@ def body_load_jacobian(
     Tube segments (P.1, annulus A = π(2rt − t²)): ∂A/∂r = 2πt, ∂A/∂t = 2π(r−t).
     Thickness bands: ∂(ρtA)/∂t = ρA per triangle, a third per corner. Layup
     fractions: zero (mass is fraction-independent).
+    Brace elements (P.2 lateral rings): skipped — their radius is fixed in-loop
+    at config.brace_r_min, so ∂f/∂brace_radius is zero here; the mass gradient
+    w.r.t. brace_radius is handled separately in the mass objective.
     """
     a = np.asarray(accel, dtype=float)
     nodes = model.nodes
@@ -91,9 +95,13 @@ def body_load_jacobian(
     be = model.beam_elements
     r = np.asarray(radii, dtype=float)
     tube_seg = {int(e): s for s, e in enumerate(tube_elements)} if tube_elements is not None else {}
+    brace_set = (set(int(e) for e in brace_elements)
+                 if brace_elements is not None else set())
     for e in range(be.shape[0]):
         i, j = int(be[e, 0]), int(be[e, 1])
         Le = float(np.linalg.norm(nodes[j] - nodes[i]))
+        if e in brace_set:
+            continue  # brace radius fixed in-loop; gradient handled in mass objective
         if e in tube_seg:
             s = tube_seg[e]
             rt, tt = float(tube_r[s]), float(tube_t[s])

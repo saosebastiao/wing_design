@@ -989,6 +989,7 @@ def size_beam_shell_laminate(
                 dFs = [body_load_jacobian(
                            model, radii, group_of_element=group_of_element,
                            band_of_tri=band_of_tri, rho=rho, accel=acc, G=G, B=B, L=L,
+                           brace_elements=(model.brace_elements if braced else None),
                            **tube_kw)
                        for acc in accels]
                 dF_of_fac = [dFs[k % len(accels)] for k in range(len(loads_eff))]
