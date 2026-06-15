@@ -235,3 +235,24 @@ def test_brace_mass_and_objective_gradient_fd():
     fd = (fp - fm) / 2e-7
     assert abs(g[-1] - fd) <= 1e-5 * max(1.0, abs(fd))
     assert g[-1] > 0.0     # heavier brace => heavier objective
+
+
+def test_brace_vm_constraint_registered_and_feasible():
+    import numpy as np
+    from wing_design.geometry import small_wingsail
+    from wing_design import small_scenario
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.fea_model import project_panels_to_skin
+    from wing_design.aero import build_airplane, sweep_envelope
+    from wing_design.beams.laminate_sizing import (
+        LaminateSizingConfig, size_beam_shell_laminate, _constraint_names_for_test)
+    from wing_design.materials.unidir import T700_EPOXY
+    P = small_scenario()
+    model = build_beam_shell_model(small_wingsail, n_beams=6, n_levels=4, lateral_bracing=True)
+    cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,
+                               tip_defl_max_m=0.05 * small_wingsail.span, tip_twist_max_deg=5.0,
+                               ply_angle_datum=(0, 0, 1), ks_rho=50.0, buckling_safety_factor=1.5,
+                               use_analytic_jacobian=True, beam_buckling_model="foundation",
+                               panel_width_mode="strip")
+    names = _constraint_names_for_test(model, cfg)
+    assert "brace_vm_ks" in names, f"brace_vm_ks not in constraint names: {names}"
