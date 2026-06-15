@@ -199,6 +199,31 @@ trustworthy baseline, not the current one.
   price (+531 kg/SF) → P.1 hollow members is the right next lever. Artifacts
   exported (`examples/49_rebaseline.py`). All P-levers measure against these.
 
+- **V.7 Per-load-case constraint classes (serviceability vs ultimate). — TODO
+  (queued 2026-06-15).** The sizer currently applies ONE constraint set uniformly
+  across all aero×accel combos: `tip_defl`/`tip_twist` (serviceability) and
+  `stress`/`buckling`/`eigen` (ultimate) are all evaluated as the worst over every
+  combo, INCLUDING the slam accels (`evaluate(x)[2]` = max deflection over all
+  combos, `laminate_sizing.py:756`). That mis-sizes survival cases: a once-in-a-
+  lifetime 3 g wave slam is an ULTIMATE case where only failure (fracture/strength
+  + buckling collapse) matters — deflection/twist are operational serviceability
+  criteria and should NOT govern it — yet slam's huge tip deflection dominates the
+  deflection constraint and inflates mass (user-caught, 2026-06-15; it drove the
+  pinned 3 g run toward ~1.6 t). **Capability to add:** tag each load combo (or
+  accel vector) with a constraint class — `serviceability` (operational gravity/
+  heel: deflection + twist + strength + buckling) vs `ultimate` (slam: strength +
+  buckling + eigen only, with possibly a reduced SF and only a geometric-validity
+  deflection guardrail to keep the linear FEA valid). Route the `defl`/`twist`
+  providers + their KS aggregation over the serviceability combos only; route
+  strength/buckling over all. One run then yields the correctly mixed
+  serviceability/ultimate envelope. Needs an FD-validation pass on the
+  subset-aggregated `defl`/`twist` gradients (the KS combo-subset is the new bit).
+  **Interim workaround in use:** `runs/slam_survival.py` relaxes deflection to a
+  5 %-span guardrail + twist to 20° for the slam run, then envelopes (max) against
+  the operational 1021.6 kg headline — gives the right survival mass but as two
+  designs, not one native envelope. (V#12 slam load envelope; supersedes the
+  uniform-constraint assumption baked in since V.4.)
+
 Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
 Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built
 pass; root/bearing compliance → M.5. (V#6, V#7, V#10, V#11)
