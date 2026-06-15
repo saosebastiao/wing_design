@@ -242,6 +242,102 @@ def test_ks_beam_buck_brace_radius_gradient_matches_fd():
         f"fd={fd:.6e} rel={rel:.3e}")
 
 
+def _braced_ks_model_and_cfg():
+    """Small braced foundation+KS+strip model used by the brace-vm gradient tests."""
+    m = build_beam_shell_model(small_wingsail, n_beams=8, n_levels=5,
+                               core_tube=False, hollow_beams=False,
+                               lateral_bracing=True)
+    assert getattr(m, "brace_elements", None) is not None
+    l1 = np.zeros((m.nodes.shape[0], 6))
+    l1[m.tip_nodes, 2] = 800.0
+    l1[m.tip_nodes, 0] = 400.0
+    cfg = LaminateSizingConfig(
+        sigma_allow_Pa=6e8, tip_defl_max_m=0.4, tip_twist_max_deg=5.0,
+        ply_angle_datum=(0.0, 0.0, 1.0), ks_rho=50.0,
+        buckling_safety_factor=1.5, use_analytic_jacobian=True,
+        beam_buckling_model="foundation", panel_width_mode="strip",
+        brace_r_min=0.004, brace_r_max=0.05)
+    return m, [l1], cfg
+
+
+def test_beam_vm_gradient_on_brace_row_matches_fd():
+    # Regression for the brace IndexError bug: beam_con_jac loops over ALL
+    # elements (including the transverse brace rings) and must NOT crash, and
+    # the brace row's gradient w.r.t a structural DV (a t_band column) must
+    # match a central difference of beam_con's brace component. The brace
+    # element has a FIXED nominal radius (no radius-DV column), so its gradient
+    # flows only through the displacement adjoint w.r.t. the other DVs.
+    import wing_design.beams.laminate_sizing as ls
+    from wing_design.beams.shell_sizing import beam_radius_groups
+
+    m, loads, cfg = _braced_ks_model_and_cfg()
+
+    captured = {}
+    orig = ls.minimize
+
+    def spy(fun, x0, jac=None, method=None, bounds=None, constraints=None, options=None):
+        captured["constraints"] = constraints
+        captured["x0"] = np.asarray(x0, dtype=float)
+
+        class R:
+            x = np.asarray(x0, dtype=float)
+            success = False
+            nit = 0
+        return R()
+
+    ls.minimize = spy
+    try:
+        size_beam_shell_laminate(m, loads, cfg, ply=T700_EPOXY, rho=RHO, maxiter=1)
+    finally:
+        ls.minimize = orig
+
+    x0 = captured["x0"] * 0.9 + 0.001
+    n = int(m.beam_elements.shape[0])
+
+    # beam_vm is the constraint whose fun(x) returns a length-n vector (one row
+    # per beam element); it is NOT KS-aggregated, so it keeps the full vector.
+    beam_vm = None
+    for con in captured["constraints"]:
+        if "jac" not in con:
+            continue
+        f = con["fun"]
+        if np.atleast_1d(f(x0)).shape[0] == n:
+            beam_vm = (f, con["jac"])
+            break
+    assert beam_vm is not None, "no length-n (beam_vm) vector constraint found"
+    f, J = beam_vm
+
+    # This call exercises _beam_vm_grad_one on the brace rows — it must NOT raise.
+    Jrows = np.atleast_2d(J(x0))
+    assert Jrows.shape[0] == n
+
+    brace_row = int(m.brace_elements[0])
+    G = beam_radius_groups(m)[1]   # first t_band column = r_group block width G
+    t_band_col = G                  # FD a structural DV that the brace row sees
+
+    g = Jrows[brace_row, t_band_col]
+    h = 1e-7
+    xp = x0.copy(); xp[t_band_col] += h
+    xm = x0.copy(); xm[t_band_col] -= h
+    fp = float(np.atleast_1d(f(xp))[brace_row])
+    fm = float(np.atleast_1d(f(xm))[brace_row])
+    fd = (fp - fm) / (2.0 * h)
+    rel = abs(g - fd) / max(abs(fd), 1e-12)
+    assert rel <= 1e-4, (
+        f"brace-row beam_vm gradient mismatch: analytic={g:.6e} "
+        f"fd={fd:.6e} rel={rel:.3e}")
+
+
+def test_braced_solve_analytic_jac_runs():
+    # The whole point: a REAL braced solve with the analytic Jacobian must run
+    # SLSQP iterations over brace elements without crashing (the IndexError was
+    # on iteration 1). Asserts a finite mass comes back.
+    m, loads, cfg = _braced_ks_model_and_cfg()
+    res = size_beam_shell_laminate(m, loads, cfg, ply=T700_EPOXY, rho=RHO, maxiter=3)
+    assert np.isfinite(res.mass_kg)
+    assert res.mass_kg > 0.0
+
+
 def test_foundation_requires_ks_and_datum():
     import dataclasses
     m, loads, cfg = _setup()

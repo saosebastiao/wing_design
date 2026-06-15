@@ -39,7 +39,7 @@ from .sensitivity import (
     grad_panel_buckling, grad_skin_tsai_wu, grad_tip_defl, grad_tip_twist,
     grad_core_check, grad_tube_wall_one,
     grad_ks_engine, ks_aggregate, ks_values_only,
-    provider_beam_buck, provider_brace_vm, provider_core_check, provider_defl, provider_panel,
+    provider_beam_buck, provider_core_check, provider_defl, provider_panel,
     provider_skin_vm, provider_tube_wall, provider_twist,
     _active_beam_force, _annulus_props, _beam_vm_explicit_tube,
     adjoint_lambda, lambdaT_dK_x_cached, dkloc_annular, dkloc_dr,
@@ -879,13 +879,6 @@ def size_beam_shell_laminate(
     def beam_con(x):
         return 1.0 - evaluate(x)[0] / config.sigma_allow_Pa
 
-    if braced:
-        _brace_el_idx = np.asarray(model.brace_elements, dtype=int)
-
-        def brace_con(x):
-            wb = evaluate(x)[0]
-            return 1.0 - wb[_brace_el_idx] / config.sigma_allow_Pa
-
     def skin_con(x):
         out = evaluate(x)
         if config.skin_failure == "tsai_wu":
@@ -1128,6 +1121,8 @@ def size_beam_shell_laminate(
                     floc, dvm_dfloc, fac, ds, e_star, s_tube, sigma_n, tau, vm)
                 du_part[ds.tube_dv_r(s_tube)] += dvm_dr_t
                 du_part[ds.tube_dv_t(s_tube)] += dvm_dt_t
+            elif ds.brace_mask is not None and bool(ds.brace_mask[e_star]):
+                pass  # brace: fixed nominal radius, no explicit radius-DV column
             else:
                 dsigma_n_dr = -2.0 * abs(axial) / (np.pi * r**3) - 12.0 * Mres / (np.pi * r**4)
                 dtau_dr = -6.0 * abs(torsion) / (np.pi * r**4)
@@ -1152,59 +1147,6 @@ def size_beam_shell_laminate(
                 bi = int(binding[e])
                 Jrows[e] = _beam_vm_grad_one(facs[bi], ds, e, sens_cache, dF=dF_of_fac[bi])
             return Jrows
-
-        if braced:
-            def _brace_vm_grad_one(fac, ds, e_star, sens_cache, dF=None):
-                """∂(1 − vM_e/σ)/∂x for a brace element (fixed radius — no explicit DV term)."""
-                sa = config.sigma_allow_Pa
-                r_br = float(config.brace_r_min)
-                A_br = np.pi * r_br ** 2
-                Iz_br = np.pi * r_br ** 4 / 4.0
-                J_br = np.pi * r_br ** 4 / 2.0
-                floc, Mmat, dofs = _active_beam_force(fac, e_star)
-                axial = floc[6]; torsion = floc[9]
-                b0 = np.hypot(floc[4], floc[5]); b1 = np.hypot(floc[10], floc[11])
-                Mres = max(b0, b1)
-                sigma_n = abs(axial) / A_br + Mres * r_br / Iz_br
-                tau = abs(torsion) * r_br / J_br
-                vm = np.sqrt(sigma_n ** 2 + 3.0 * tau ** 2)
-                if vm == 0.0:
-                    return np.zeros(nx)
-                dvm_dfloc = np.zeros(12)
-                sgn_ax = np.sign(axial) if axial != 0.0 else 0.0
-                sgn_tor = np.sign(torsion) if torsion != 0.0 else 0.0
-                dvm_dfloc[6] = (sigma_n / vm) * sgn_ax / A_br
-                dvm_dfloc[9] = (3.0 * tau / vm) * sgn_tor * r_br / J_br
-                if Mres > 0.0:
-                    if b0 >= b1:
-                        fa, fb, ia, ib = floc[4], floc[5], 4, 5
-                    else:
-                        fa, fb, ia, ib = floc[10], floc[11], 10, 11
-                    coef = (sigma_n / vm) * (r_br / Iz_br)
-                    dvm_dfloc[ia] = coef * (fa / Mres)
-                    dvm_dfloc[ib] = coef * (fb / Mres)
-                dg_du = np.zeros(fac.ndof)
-                dg_du[dofs] = dvm_dfloc @ Mmat
-                lam = adjoint_lambda(fac, dg_du)
-                du_part = -lambdaT_dK_x_cached(sens_cache, lam, fac.u)
-                if dF is not None:
-                    du_part += lam @ dF
-                # No explicit radius-DV column: brace radius is FIXED, not a DV.
-                return -du_part / sa
-
-            def brace_con_jac(x):
-                """(N_br, nx) Jacobian for the brace von-Mises constraint."""
-                facs, ds, sections, sens_cache, dF_of_fac = _jac_lookup(x)
-                vm_lc = np.empty((len(facs), n))
-                for li, fac in enumerate(facs):
-                    vm_lc[li] = von_mises_per_element(fac.result, sections)
-                binding = np.argmax(vm_lc, axis=0)
-                Jrows = np.empty((N_br, nx))
-                for ki, e in enumerate(np.asarray(model.brace_elements, dtype=int)):
-                    bi = int(binding[e])
-                    Jrows[ki] = _brace_vm_grad_one(
-                        facs[bi], ds, int(e), sens_cache, dF=dF_of_fac[bi])
-                return Jrows
 
         def skin_con_jac(x):
             if config.skin_failure == "tsai_wu":
@@ -1249,8 +1191,6 @@ def size_beam_shell_laminate(
             "beam_vm": beam_con_jac, "skin": skin_con_jac, "defl": defl_con_jac,
             "twist": twist_con_jac, "frac": frac_con_jac, "mono": monotonic_con_jac,
         }
-        if braced:
-            jacs["brace_vm"] = brace_con_jac
         if annular and config.buckling_safety_factor is not None:
             def tube_wall_jac(x):
                 """(Q, nx): row q at its binding load combo (max wall util)."""
@@ -1405,10 +1345,6 @@ def size_beam_shell_laminate(
             ConstraintSpec("core_crimp", core_crimp_con, 1, jacs.get("core_crimp"),
                            ("sf", "buckling_sf_core_crimp", config.buckling_safety_factor)),
         ]
-    if braced:
-        specs.append(ConstraintSpec("brace_vm", brace_con, N_br,
-                                    jacs.get("brace_vm"),
-                                    ("limit", "sigma_allow_Pa", config.sigma_allow_Pa)))
     if hollow:
         specs.append(ConstraintSpec("hollow_validity", hollow_validity_con, H,
                                     hollow_validity_jac if config.use_analytic_jacobian else None))
@@ -1436,9 +1372,6 @@ def size_beam_shell_laminate(
                          if qw2_cases is not None else None)(ci)
                      for ci in range(n_combos)],
         }
-        if braced:
-            ks_providers["brace_vm"] = provider_brace_vm(
-                config.sigma_allow_Pa, config.brace_r_min, model.brace_elements)
         if sf_b is not None:
             ks_providers["panel_buck"] = provider_panel(config.panel_kc, sf_b, b2_panel)
             ks_providers["beam_buck"] = provider_beam_buck(config.euler_K, sf_b)
@@ -1712,7 +1645,7 @@ def _constraint_names_for_test(
     from wing_design.geometry import small_wingsail
 
     # Build a minimal load set from the small scenario so the sizer has valid
-    # FEA inputs (brace_vm depends on FEA forces so we need at least one load).
+    # FEA inputs (beam_vm depends on FEA forces so we need at least one load).
     P = small_scenario()
     ap = build_airplane(small_wingsail)
     env = sweep_envelope(ap, P.load_cases, method="lifting_line",
