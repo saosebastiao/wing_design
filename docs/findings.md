@@ -1368,6 +1368,33 @@ buckling becomes the active lever. Next strategy is a user decision (each retry
 is multi-hour). Measured 22,544 s wall, peak RSS ~12 GiB, saved
 `runs/slam_braced_3g.npz`.
 
+**RING BRACING WORKS — 3 g lateral slam IS survivable; the optimizer, not the
+physics, was the blocker (2026-06-15).** After four slam runs failed the same way
+(rings driven to the 2 mm floor, true eigen < 1), a direct post-hoc eigen sweep
+on the braced 3 g design settled it: **raising `brace_radius` rescues the true
+buckling eigenvalue dramatically.** Measured worst λ_cr over the full 3 g slam
+envelope vs ring radius (on the rung-1 design): 2 mm → 0.77, 10 mm → 1.10,
+12 mm → 1.42, 14 mm → 1.91, **20 mm → 3.16**, 50 mm → 11.7. So **~13–14 mm rings
+clear the 1.5 gate at 3 g**, and 20 mm rings give a 2× margin (λ 3.16). The rings
+are exactly the right fix and modest ones suffice. **Root cause of the failures
+(definitive):** the in-loop closed-form/foundation beam-buckling model is
+non-conservative under slam — at small rings it reports beam buckling satisfied
+(util ≤ 1) so the optimizer sees the rings as pure mass cost and minimizes them
+to the floor, even though the *true* eigenvalue of that mode is far below 1 and
+the rings would fix it. The `k_ring` foundation credit (FD-validated, working) is
+real but too weak relative to the model's under-stated demand to pull the rings
+in. This is the same non-conservatism flagged for the unbraced 3 g case, now
+proven to be the controlling defect. **Conclusion:** the bracing feature is
+correct and the architecture survives 3 g slam; to make the *sizer* find it
+automatically we must either (a) pin a ring-size floor (~15–20 mm — we now know
+the value) and let the other DVs size for deflection/panel, or (b) put the true
+eigenvalue in the loop (the deferred analytic-`dλ/dx` constraint, spec §fallback)
+so the optimizer optimizes the real buckling margin. The g-continuation run
+(g=1 from the feasible headline) confirmed the blindness is g-independent: even
+1 g drove rings to the floor (λ 0.331, 7.5 h, unconverged). Diagnostic sweep cost
+~minutes; the failed runs are recorded above. Next: a pinned-ring survival sizing
+to report the actual 3 g survival mass.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1408,6 +1435,7 @@ is multi-hour). Measured 22,544 s wall, peak RSS ~12 GiB, saved
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). |
 | /tmp data loss + runs/ convention (2026-06-11) | Unexpected reboot wiped /tmp: both in-flight runs AND all saved design arrays lost (V.3c running best, warm chain). Code/ledger safe. New convention: scripts, .npz designs, logs → gitignored `runs/`; stage-level immediate saves; resumable chains (`runs/chain_rebuild.py`). Regeneration folded into the V#2 re-baseline so the chain re-runs once. |
 | V#2 CLOSED — implementation (2026-06-11) | `panel_d_mode="datum_ortho"` (opt-in, KS-only): strip σcr now uses the datum-frame orthotropic long-plate N_cr = (2π²/b²)(√(D11·D22)+D12+2·D66) instead of triangle-local D11; exact kc=4 isotropic identity (unit-tested); f-chains via `dQstar_df`, FD-audited live. Motivated by the V.3c layup regime change 32/53/15 → 0/100/0 (±45) making local-frame bookkeeping load-bearing. Caveats: demand stays principal compression; wrinkling still local-frame (V#2-residual). Measurement: chain stage D (pending). |
+| Ring bracing survives 3 g slam (2026-06-15) | Post-hoc eigen sweep proves ~13–14 mm rings clear λ≥1.5 at 3 g (20 mm → λ 3.16). 3 g slam IS survivable with lateral ring bracing — the four failed runs were optimizer-blindness (closed-form non-conservative under slam → rings minimized to floor), not physics. Fix: pin a ring floor (~15–20 mm, known now) OR in-loop eigen. Pinned-ring survival sizing pending for the mass. |
 | Memory-budget for parallel runs (2026-06-12) | Both machine crashes were watchdog kernel panics caused by our parallel sizing oversubscribing RAM (8 IPOPT workers × ~9 GiB measured on 32 GiB → `vm-compressor-space-shortage` jetsam storms → configd/WindowServer starved → panic). Convention (CLAUDE.md): Σ worker peaks ≤ ~½ RAM (→ `n_workers=2` for medium IPOPT), never stack heavy runs concurrently, `ru_maxrss` recorded in every run meta. |
 | V#2 MEASURED — datum_ortho verdict (2026-06-12) | Chain stage D: **1094.2 kg converged feasible, λ 3.61 (−51.3% vs V.6)**; −0.1% vs the local-frame V.3c optimum (noise) → the directional-bookkeeping fix costs nothing and the **pure-±45 layup survives** = real physics, not artifact. `datum_ortho` becomes the standard P-phase panel mode (opt-in flag unchanged). B/C rungs unconverged (upper bounds); wrinkling local-frame residual stays open. |
 | Multistart headline (2026-06-12) | 8-start multistart (D-seeded start 0, `multistart x0=` param added) found a lighter basin the warm chain missed: **1021.6 kg converged feasible, λ 2.76 — new medium headline (−54.5% vs V.6, −6.6% vs chain D)**, layup ±45. Measured worker peak 17.8 GiB ⇒ **n_workers=1 is the safe cap for medium IPOPT** (2 was over the edge). Lightest start (1015.3) excluded as infeasible — feasibility-restoring polish queued. |
