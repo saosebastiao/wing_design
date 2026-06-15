@@ -1333,6 +1333,41 @@ geometry (already in the lateral-loaded regime) or a feasibility-first formulati
 and ultimately the lateral bracing + in-loop eigen of task #22. Measured 21,359 s
 wall, peak RSS in meta. Saved `runs/slam_2g.npz`.
 
+**Lateral ring-frame bracing BUILT; first 3 g braced run is an INCONCLUSIVE
+negative — rings are physically capable but the solver didn't engage them
+(2026-06-15).** Task #22 implemented per spec/plan (`feat/lateral-bracing-slam`,
+15 commits, merge-reviewed): transverse ring members (`lateral_bracing=True`),
+a `brace_radius` DV driving mass + an FD-validated elastic-foundation stiffness
+credit `k_eff = k_skin + k_ring(r_brace)` in-loop (in-loop FEA/body-loads use a
+fixed nominal radius → clean adjoint; post-hoc eigen rebuilds rings at the sized
+radius). Every new gradient FD-validated; unbraced byte-identical (200 tests).
+The two-stage subagent review caught **four pre-existing braced-path crashes**
+(cold-start x0 length, missing brace sections, the `beam_vm` Jacobian
+`group_of_element` overrun, the `body_load_jacobian` overrun) before they could
+bite a run. **First production run (`runs/slam_braced.py 3`, warm from the
+unbraced 3 g diagnostic, SF-ladder + eigen gate, single worker): rung 1 (SF 1.5)
+= 623.2 kg, UNCONVERGED (maxiter 3000, 6 h 16 m), INFEASIBLE, eigen λ 0.388, and
+`brace_radius` driven to 2.02 mm — the floor.** The optimizer *threw the rings
+away* despite starting them at 26 mm. **Diagnosis (measured):** the `k_ring`
+credit is substantial — at this medium design `r_brace` 20 mm → foundation
+`Pcr` ×1.84, 35 mm → ×4.8, 50 mm → ×9.7 — so rings CAN relieve beam buckling;
+the failure is a solver one. Seeded from the failed (unconverged, eigen-rejected)
+unbraced 3 g geometry, IPOPT entered deep feasibility-restoration in a region
+dominated by *multiple* violations (tip deflection 0.99, panel buckling), where
+beam buckling — the rings' only lever — is not the marginal constraint, so it
+minimized mass (rings included) instead of engaging them. The SF ladder
+compounded it (it bumps SF on an already-infeasible rung; higher SF is strictly
+harder), so the run was stopped after rung 1 rather than burn ~18 h on rungs
+2–4. **Conclusions:** (1) the bracing feature/machinery is correct and
+merge-worthy — this is a solve-strategy result, not a code defect; (2) the warm
+start must come from a FEASIBLE design (the 1021.6 kg headline), not a failed
+diagnostic; (3) the SF ladder must only bump on feasible-but-low-eigen rungs;
+(4) likely also needs a lower-g validation (1 g braced — confirm rings engage)
+and/or g-continuation (ramp 0→3 g) so the design stays near-feasible and beam
+buckling becomes the active lever. Next strategy is a user decision (each retry
+is multi-hour). Measured 22,544 s wall, peak RSS ~12 GiB, saved
+`runs/slam_braced_3g.npz`.
+
 ## Decisions log
 
 | Decision | Choice |
