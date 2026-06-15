@@ -164,6 +164,41 @@ def test_braced_cold_start_runs_without_length_mismatch():
     assert r is not None and np.isfinite(r.mass_kg)   # cold-start braced solve completes
 
 
+def test_braced_solve_includes_brace_mass_in_total():
+    # Production-path check: size_beam_shell_laminate (braced) must expose a positive
+    # brace_mass_kg that is genuinely included in the reported mass_kg.
+    # Uses the same tiny fixture as test_braced_cold_start_runs_without_length_mismatch
+    # so it stays fast (~seconds).
+    import numpy as np
+    from wing_design.geometry import small_wingsail
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.fea_model import project_panels_to_skin
+    from wing_design.aero import build_airplane, sweep_envelope
+    from wing_design import small_scenario
+    from wing_design.beams.laminate_sizing import LaminateSizingConfig, size_beam_shell_laminate
+    P = small_scenario()
+    model = build_beam_shell_model(small_wingsail, n_beams=4, n_levels=3,
+                                   lateral_bracing=True)
+    ap = build_airplane(small_wingsail)
+    env = sweep_envelope(ap, P.load_cases, method="lifting_line",
+                         spanwise_resolution=P.aero.spanwise_resolution)
+    loads = [project_panels_to_skin(model, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in env if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
+    cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,
+                               tip_defl_max_m=0.05 * small_wingsail.span,
+                               tip_twist_max_deg=5.0)
+    r = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=2)
+    assert r.brace_mass_kg > 0.0, (
+        f"brace_mass_kg should be positive for a braced model, got {r.brace_mass_kg}"
+    )
+    # brace mass must be genuinely included in the reported total (components sum to total)
+    parts = (r.beam_mass_kg + r.skin_mass_kg + r.tube_mass_kg
+             + r.core_mass_kg + r.brace_mass_kg)
+    assert abs(r.mass_kg - parts) <= 1e-6 * max(1.0, r.mass_kg), (
+        f"mass_kg={r.mass_kg} != sum of parts={parts}; brace not included in total?"
+    )
+
+
 def test_brace_radius_block_present_and_bounded():
     import numpy as np
     from wing_design.geometry import medium_wingsail
