@@ -19,6 +19,7 @@ from build123d import (
     Locations,
     Plane,
     Polyline,
+    Solid,
     loft,
     make_face,
 )
@@ -174,6 +175,44 @@ def build_sized_lens_beams(
             loft(ruled=True)
         beams.append(bp.part)
     return beams
+
+
+def build_sized_ring_braces(model, brace_radius: float) -> list:
+    """Build one circular-rod solid per transverse ring-brace element.
+
+    Each brace element is a straight circular rod of radius ``brace_radius``
+    connecting the two beam nodes given by ``model.brace_elements[i]``.
+    Degenerate (zero-length) segments are silently skipped.
+
+    Parameters
+    ----------
+    model:
+        A ``BeamShellModel`` whose ``brace_elements`` attribute is a 1-D array
+        of row-indices into ``model.beam_elements``.
+    brace_radius:
+        Circular cross-section radius (metres).
+
+    Returns
+    -------
+    list of build123d Solid objects, one per brace element (skipping degenerate ones).
+    """
+    if model.brace_elements is None or len(model.brace_elements) == 0:
+        return []
+    solids = []
+    for e in model.brace_elements:
+        pair = model.beam_elements[int(e)]
+        p0 = model.nodes[pair[0]]
+        p1 = model.nodes[pair[1]]
+        vec = p1 - p0
+        length = float(np.linalg.norm(vec))
+        if length < 1e-12:
+            continue
+        z_dir = vec / length
+        plane = Plane(origin=(float(p0[0]), float(p0[1]), float(p0[2])),
+                      z_dir=(float(z_dir[0]), float(z_dir[1]), float(z_dir[2])))
+        cyl = Solid.make_cylinder(float(brace_radius), length, plane)
+        solids.append(cyl)
+    return solids
 
 
 def resample_segment_radii(

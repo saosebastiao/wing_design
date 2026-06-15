@@ -9,6 +9,7 @@ from .build import (
     build_form_beams,
     build_sized_circular_beams,
     build_sized_lens_beams,
+    build_sized_ring_braces,
     build_skin_wrap,
     resample_segment_radii,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "build_form_beams",
     "build_sized_circular_beams",
     "build_sized_lens_beams",
+    "build_sized_ring_braces",
     "build_skin_wrap",
     "resample_segment_radii",
     "BeamFrame",

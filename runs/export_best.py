@@ -35,6 +35,7 @@ from wing_design.beams import (
     build_beam_shell_model,
     build_sized_circular_beams,
     build_sized_lens_beams,
+    build_sized_ring_braces,
     resample_segment_radii,
 )
 from wing_design.beams.body_loads import body_load_vector
@@ -190,7 +191,33 @@ def main() -> None:
     export_stl(comp, str(beams_path))
     print(f"wrote {beams_path} (beams, {kind})", flush=True)
 
-    # 5b. skin solid to STL (skip on failure — beams STL + VTU are the required ones)
+    # 5b. ring-brace solids to STL (only for braced designs; skipped if absent)
+    braces_path = out / "best_medium_braces.stl"
+    brace_radius_val = None
+    if getattr(model, "brace_elements", None) is not None:
+        # brace_radius may come from the npz meta (saved as brace_radius_mm / 1000)
+        # or as a top-level npz key, or from the reconstructed carrier r.
+        if "brace_radius" in d.files:
+            brace_radius_val = float(d["brace_radius"])
+        elif getattr(r, "brace_radius", None) is not None:
+            brace_radius_val = float(r.brace_radius)
+        else:
+            meta_br_mm = meta.get("brace_radius_mm")
+            if meta_br_mm is not None:
+                brace_radius_val = float(meta_br_mm) / 1e3
+    if brace_radius_val is not None and getattr(model, "brace_elements", None) is not None:
+        ring_solids = build_sized_ring_braces(model, brace_radius_val)
+        n_rings = len(ring_solids)
+        print(f"ring braces: {n_rings} solids, radius={brace_radius_val*1e3:.2f} mm",
+              flush=True)
+        if ring_solids:
+            ring_comp = Compound(label="best_medium_braces", children=ring_solids)
+            export_stl(ring_comp, str(braces_path))
+            print(f"wrote {braces_path} (ring braces)", flush=True)
+    else:
+        print("ring braces: not present in this design (unbraced path)", flush=True)
+
+    # 5d. skin solid to STL (skip on failure — beams STL + VTU are the required ones)
     skin_path = out / "best_medium_skin.stl"
     skin_ok = False
     try:
@@ -227,6 +254,8 @@ def main() -> None:
     print("files written:", flush=True)
     print(f"  {vtu_path}", flush=True)
     print(f"  {beams_path}  ({kind})", flush=True)
+    if brace_radius_val is not None and getattr(model, "brace_elements", None) is not None:
+        print(f"  {braces_path}  (ring braces, r={brace_radius_val*1e3:.2f} mm)", flush=True)
     print(f"  {skin_path}" + ("" if skin_ok else "  [SKIPPED]"), flush=True)
     print(f"total wall-clock: {wall:.1f}s", flush=True)
 
