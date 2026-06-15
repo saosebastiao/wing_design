@@ -436,12 +436,12 @@ def size_beam_shell_laminate(
         from ..structural.buckling import k_ring_stiffness, dk_ring_dr
         from .shell_model import braced_segment_mask
         braced_seg = braced_segment_mask(model)                  # (n_form,) bool
-        L_ring_e = adj_w.mean(axis=1)                            # (n_form,) ring spacing
+        L_ring_e = adj_w.mean(axis=1)                            # perimeter (adjacent-beam) spacing ≈ ring member length
         s_span_e = np.array([float(np.linalg.norm(
             model.nodes[model.beam_elements[e, 0]] - model.nodes[model.beam_elements[e, 1]]))
             for e in range(n_form_f)])                           # (n_form,) spanwise seg length
         brace_col = dv.slice("brace_radius").start if braced else None
-        brace_alpha = 3.0
+        brace_alpha = 3.0  # ring end-restraint constant; 3 = cantilever (conservative)
         z_lv = model.nodes[:model.n_levels, 2]
         seg_in_wing = np.array([(z_lv[k] >= -1e-9 and z_lv[k + 1] >= -1e-9)
                                 for k in range(model.n_levels - 1)])

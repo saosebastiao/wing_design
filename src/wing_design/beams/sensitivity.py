@@ -248,6 +248,10 @@ def lambdaT_dK_x(factored, ds, lam):
     if ds.core is not None:
         raise NotImplementedError("sandwich skin requires the cached path "
                                   "(prepare_sensitivity / lambdaT_dK_x_cached)")
+    if getattr(ds, "brace_mask", None) is not None:
+        raise NotImplementedError(
+            "lambdaT_dK_x (uncached) does not support braced models; "
+            "use the cached path (lambdaT_dK_x_cached)")
     nx = ds.nx
     out = np.zeros(nx)
     u = factored.u
