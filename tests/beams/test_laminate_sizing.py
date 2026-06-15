@@ -262,3 +262,30 @@ def test_no_separate_brace_vm_constraint():
     # the von-Mises constraint that covers braces is still there (vector form,
     # not KS-aggregated)
     assert "beam_vm" in names, f"beam_vm missing: {names}"
+
+
+def test_design_vector_from_result_brace_roundtrip():
+    import numpy as np
+    from wing_design.geometry import small_wingsail
+    from wing_design import small_scenario
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.fea_model import project_panels_to_skin
+    from wing_design.aero import build_airplane, sweep_envelope
+    from wing_design.beams.laminate_sizing import (
+        LaminateSizingConfig, size_beam_shell_laminate, design_vector_from_result,
+        laminate_design_bounds)
+    from wing_design.materials.unidir import T700_EPOXY
+    P = small_scenario()
+    model = build_beam_shell_model(small_wingsail, n_beams=6, n_levels=4, lateral_bracing=True)
+    env = sweep_envelope(build_airplane(small_wingsail), P.load_cases, method="lifting_line",
+                         spanwise_resolution=P.aero.spanwise_resolution)
+    loads = [project_panels_to_skin(model, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in env if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
+    cfg = LaminateSizingConfig(sigma_allow_Pa=P.sigma_allow_Pa,
+                               tip_defl_max_m=0.05 * small_wingsail.span, tip_twist_max_deg=5.0)
+    r = size_beam_shell_laminate(model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3, maxiter=2)
+    assert r.brace_radius is not None and r.brace_radius > 0.0
+    x = design_vector_from_result(model, cfg, r)
+    lo, hi = laminate_design_bounds(model, cfg)
+    assert x.shape == lo.shape                       # full-length vector (incl brace block)
+    assert np.isclose(x[-1], r.brace_radius)         # brace_radius round-trips as the last var

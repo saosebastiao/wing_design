@@ -175,8 +175,9 @@ class LaminateSizingResult:
     core_mass_kg: float = 0.0
     max_wrinkle_util: float = 0.0
     max_crimp_util: float = 0.0
-    # P.2 lateral bracing mass
+    # P.2 lateral bracing mass + solved radius
     brace_mass_kg: float = 0.0
+    brace_radius: float | None = None
     # Incumbent guard: True when the returned design is the best hard-feasible
     # iterate seen during the run rather than the optimizer's final iterate
     # (the endpoint was heavier or infeasible). Feasible by construction;
@@ -259,6 +260,10 @@ def design_vector_from_result(
             x = np.concatenate([x, np.asarray(result.t_core, dtype=float)])
         else:
             x = np.concatenate([x, np.zeros(B)])   # c=0: exactly monolithic
+    if getattr(model, "brace_elements", None) is not None:
+        rb = (float(result.brace_radius) if getattr(result, "brace_radius", None) is not None
+              else float(config.brace_r_min))
+        x = np.concatenate([x, np.array([rb])])
     return x
 
 
@@ -1511,6 +1516,7 @@ def size_beam_shell_laminate(
         max_wrinkle_util=float(worst_wrk),
         max_crimp_util=float(worst_crp),
         brace_mass_kg=bracem,
+        brace_radius=(float(x[dv.slice("brace_radius").start]) if braced else None),
         used_incumbent=used_incumbent,
     )
 
