@@ -252,8 +252,6 @@ def main(slam_g: float, smoke: bool = False) -> None:
     wall_total = time.perf_counter() - t_total
 
     # --- Save results ---
-    passed = (bool(final_r.converged) and bool(laminate_result_is_feasible(final_r, cfg_for(SF_STEPS[0])))
-              and final_lam >= GATE)
     # Use feasibility from the actual last cfg used
     last_cfg = cfg_for(history[-1]["sf"])
     feas_final = laminate_result_is_feasible(final_r, last_cfg)
@@ -287,6 +285,8 @@ def main(slam_g: float, smoke: bool = False) -> None:
         v = getattr(final_r, k)
         if v is not None:
             out[k] = v
+    if getattr(final_r, "brace_radius", None) is not None:
+        out["brace_radius"] = final_r.brace_radius
     x_saved = design_vector_from_result(model, last_cfg, final_r)
     np.savez(RUNS / f"{tag}.npz", x=x_saved, meta=json.dumps(meta), **out)
     print(f"\nSLAM_BRACED DONE [{slam_g:g}g] PASSED={passed} "

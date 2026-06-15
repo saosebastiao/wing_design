@@ -495,6 +495,9 @@ def grad_beam_vm(factored, ds, sigma_allow, cache: "SensCache | None" = None,
 
     con = 1 − max_e(vM_e)/σ_allow. Returns (con_value, grad (nx,)).
     """
+    if getattr(ds, "brace_mask", None) is not None:
+        raise NotImplementedError(
+            "grad_beam_vm does not support braced models; use the foundation+KS path")
     be = factored.beam_elements
     n = be.shape[0]
     # find active element (max vM) using the documented force recovery
@@ -590,6 +593,9 @@ def grad_beam_buckling(factored, ds, *, euler_K, safety_factor,
     con = 1 − max_e(util_e), util = comp·SF/Pcr, comp=max(0,−axial),
     Pcr = π²·E·Iy/(K·L)², Iy=πr⁴/4. Returns (con_value, grad (nx,)).
     """
+    if getattr(ds, "brace_mask", None) is not None:
+        raise NotImplementedError(
+            "grad_beam_buckling does not support braced models; use the foundation+KS path")
     be = factored.beam_elements
     n = be.shape[0]
     E = ds.model.E_beam

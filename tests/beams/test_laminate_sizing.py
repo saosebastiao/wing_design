@@ -289,3 +289,68 @@ def test_design_vector_from_result_brace_roundtrip():
     lo, hi = laminate_design_bounds(model, cfg)
     assert x.shape == lo.shape                       # full-length vector (incl brace block)
     assert np.isclose(x[-1], r.brace_radius)         # brace_radius round-trips as the last var
+
+
+def test_braced_production_config_smoke():
+    """Production-shaped braced config smoke test on a tiny mesh.
+
+    Exercises lateral_bracing=True + core_tube=True + hollow_beams=True +
+    sandwich core + accel_vectors + full production flags on a tiny mesh
+    (n_beams=6, n_levels=4, maxiter=2). This covers the bug class where code
+    iterating all beam_elements indexes form-only arrays (e.g. radii, areas).
+    """
+    import dataclasses
+    import numpy as np
+    from wing_design.geometry import small_wingsail
+    from wing_design import small_scenario
+    from wing_design.beams.shell_model import build_beam_shell_model
+    from wing_design.beams.fea_model import project_panels_to_skin, panel_pressure_per_tri
+    from wing_design.aero import build_airplane, sweep_envelope
+    from wing_design.beams.laminate_sizing import LaminateSizingConfig, size_beam_shell_laminate
+    from wing_design.materials.unidir import T700_EPOXY, PVC_H80
+
+    G0 = 9.81
+    # gravity + one lateral case (mimics slam_braced production accels)
+    accel_vectors = (
+        (0.0, 0.0, -G0),
+        (0.0, G0, -G0),
+    )
+
+    P = small_scenario()
+    model = build_beam_shell_model(
+        small_wingsail, n_beams=6, n_levels=4,
+        core_tube=True, hollow_beams=True, lateral_bracing=True,
+    )
+    env = sweep_envelope(
+        build_airplane(small_wingsail), P.load_cases,
+        method="lifting_line", spanwise_resolution=P.aero.spanwise_resolution,
+    )
+    active = [ar for ar in env
+              if ar.panels is not None and abs(ar.factored_normal_force_N) >= 1.0]
+    loads = [project_panels_to_skin(model, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in active]
+    press = [panel_pressure_per_tri(model, ar.panels, safety_factor=ar.case.safety_factor)
+             for ar in active]
+
+    cfg = LaminateSizingConfig(
+        sigma_allow_Pa=P.sigma_allow_Pa,
+        tip_defl_max_m=0.05 * small_wingsail.span,
+        tip_twist_max_deg=5.0,
+        core=PVC_H80,
+        ks_rho=50.0,
+        accel_vectors=accel_vectors,
+        beam_buckling_model="foundation",
+        panel_d_mode="datum_ortho",
+        panel_width_mode="strip",
+        use_analytic_jacobian=True,
+        buckling_safety_factor=1.5,
+        ply_angle_datum=(0.0, 0.0, 1.0),
+    )
+    r = size_beam_shell_laminate(
+        model, loads, cfg, ply=T700_EPOXY, rho=P.rho_kgm3,
+        maxiter=2, panel_pressures=press,
+    )
+    assert np.isfinite(r.mass_kg), f"mass_kg not finite: {r.mass_kg}"
+    assert r.brace_radius is not None and r.brace_radius > 0, (
+        f"brace_radius should be positive, got {r.brace_radius}"
+    )
