@@ -161,6 +161,87 @@ def test_ks_foundation_gradients_match_fd():
     assert checked >= 7
 
 
+def test_ks_beam_buck_brace_radius_gradient_matches_fd():
+    # Task 5 crux: lateral-bracing rings credit the in-loop sizing ONLY through
+    # the elastic-FOUNDATION stiffness (k_ring) augmentation. The analytic
+    # beam_buck KS Jacobian's brace_radius column (the LAST column) must be
+    # NONZERO (proves the optimizer now "sees" the rings) and match a central
+    # difference of the constraint value at that column.
+    import wing_design.beams.laminate_sizing as ls
+    from wing_design.geometry import medium_wingsail
+
+    m = build_beam_shell_model(medium_wingsail, n_beams=8, n_levels=5,
+                               core_tube=False, hollow_beams=False,
+                               lateral_bracing=True)
+    assert getattr(m, "brace_elements", None) is not None
+    l1 = np.zeros((m.nodes.shape[0], 6))
+    l1[m.tip_nodes, 2] = 800.0
+    l1[m.tip_nodes, 0] = 400.0
+    cfg = LaminateSizingConfig(
+        sigma_allow_Pa=6e8, tip_defl_max_m=0.4, tip_twist_max_deg=5.0,
+        ply_angle_datum=(0.0, 0.0, 1.0), ks_rho=50.0,
+        buckling_safety_factor=1.5, use_analytic_jacobian=True,
+        beam_buckling_model="foundation", panel_width_mode="strip",
+        brace_r_min=0.004, brace_r_max=0.05)
+
+    captured = {}
+    orig = ls.minimize
+
+    def spy(fun, x0, jac=None, method=None, bounds=None, constraints=None, options=None):
+        captured["constraints"] = constraints
+        captured["x0"] = np.asarray(x0, dtype=float)
+
+        class R:
+            x = np.asarray(x0, dtype=float)
+            success = False
+            nit = 0
+        return R()
+
+    ls.minimize = spy
+    try:
+        size_beam_shell_laminate(m, [l1], cfg, ply=T700_EPOXY, rho=RHO, maxiter=1)
+    finally:
+        ls.minimize = orig
+
+    x0 = captured["x0"] * 0.9 + 0.001
+    n_dv = x0.shape[0]
+
+    # Locate the beam_buck KS constraint (scalar-valued, has analytic jac).
+    beam_buck = None
+    for con in captured["constraints"]:
+        if "jac" not in con:
+            continue
+        f = con["fun"]; J = con["jac"]
+        if np.atleast_1d(f(x0)).shape[0] != 1:
+            continue
+        g = np.atleast_2d(J(x0))[0]
+        # The brace_radius DV is the LAST column; only the beam_buck KS closure
+        # depends on it (mass is a separate objective, not in `constraints`).
+        if abs(g[-1]) > 0.0:
+            beam_buck = (f, J)
+            break
+    assert beam_buck is not None, "no KS constraint had a nonzero brace_radius column"
+
+    f, J = beam_buck
+    g = np.atleast_2d(J(x0))[0]
+    brace_col = n_dv - 1
+    # NONZERO is essential: it proves the optimizer now sees the rings.
+    assert abs(g[brace_col]) > 1e-9, \
+        f"analytic brace_radius column is ~0 ({g[brace_col]:.3e}) — rings not credited"
+
+    # Central-difference the constraint value at the brace_radius column.
+    h = 1e-7
+    xp = x0.copy(); xp[brace_col] += h
+    xm = x0.copy(); xm[brace_col] -= h
+    fp = float(np.atleast_1d(f(xp))[0])
+    fm = float(np.atleast_1d(f(xm))[0])
+    fd = (fp - fm) / (2.0 * h)
+    rel = abs(g[brace_col] - fd) / max(abs(fd), 1e-12)
+    assert rel <= 1e-4, (
+        f"brace_radius FD-through-KS mismatch: analytic={g[brace_col]:.6e} "
+        f"fd={fd:.6e} rel={rel:.3e}")
+
+
 def test_foundation_requires_ks_and_datum():
     import dataclasses
     m, loads, cfg = _setup()

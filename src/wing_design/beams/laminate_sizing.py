@@ -386,7 +386,9 @@ def size_beam_shell_laminate(
         blocks += [("t_core", B)]
     braced = getattr(model, "brace_elements", None) is not None
     N_br = len(model.brace_elements) if braced else 0
+    brace_mask_all = np.zeros(n, dtype=bool)
     if braced:
+        brace_mask_all[np.asarray(model.brace_elements, dtype=int)] = True
         blocks += [("brace_radius", 1)]
     dv = DesignVector(*blocks)
     # Precompute total brace length (constant; outside per-iter closures).
@@ -428,6 +430,18 @@ def size_beam_shell_laminate(
         n_form_f = model.n_form_elements
         adj_w = beam_adjacent_widths(model)
         kgeo = 3.0 * (1.0 / adj_w[:, 0] ** 3 + 1.0 / adj_w[:, 1] ** 3)   # (n_form,)
+        # P.2 lateral-bracing: rings credit the in-loop sizing ONLY through the
+        # elastic-foundation stiffness (k_ring), not the FEA stiffness — so the
+        # analytic gradient w.r.t. brace_radius flows purely through this chain.
+        from ..structural.buckling import k_ring_stiffness, dk_ring_dr
+        from .shell_model import braced_segment_mask
+        braced_seg = braced_segment_mask(model)                  # (n_form,) bool
+        L_ring_e = adj_w.mean(axis=1)                            # (n_form,) ring spacing
+        s_span_e = np.array([float(np.linalg.norm(
+            model.nodes[model.beam_elements[e, 0]] - model.nodes[model.beam_elements[e, 1]]))
+            for e in range(n_form_f)])                           # (n_form,) spanwise seg length
+        brace_col = dv.slice("brace_radius").start if braced else None
+        brace_alpha = 3.0
         z_lv = model.nodes[:model.n_levels, 2]
         seg_in_wing = np.array([(z_lv[k] >= -1e-9 and z_lv[k + 1] >= -1e-9)
                                 for k in range(model.n_levels - 1)])
@@ -469,6 +483,10 @@ def size_beam_shell_laminate(
                 dD22_df0[b] = dQeff_df(ply, which="f0", offset_deg=0.0)[1, 1] * geom
                 dD22_df45[b] = dQeff_df(ply, which="f45", offset_deg=0.0)[1, 1] * geom
             k_e = kgeo * D22[band_of_elem]
+            if braced:
+                rb = float(x[brace_col])
+                kr = k_ring_stiffness(rb, model.E_beam, L_ring_e, s_span_e, brace_alpha)
+                k_e = k_e + np.where(braced_seg, kr, 0.0)
             chains = []
             lg_of_b = (np.arange(B) if config.per_band_layup else np.zeros(B, dtype=int))
             for e in range(n_form_f):
@@ -479,6 +497,10 @@ def size_beam_shell_laminate(
                       (f45_lo + lg, kgeo[e] * dD22_df45[b])]
                 if sandwich:
                     ch.append((dv.slice("t_core").start + b, kgeo[e] * dD22_dc[b]))
+                if braced and braced_seg[e]:
+                    dkr = dk_ring_dr(float(x[brace_col]), model.E_beam,
+                                     L_ring_e[e], s_span_e[e], brace_alpha)
+                    ch.append((brace_col, float(dkr)))
                 chains.append(ch)
             return k_e, chains
     nx = dv.nx
@@ -513,7 +535,12 @@ def size_beam_shell_laminate(
             r_t, t_eff = decode_tube(x)
             secs += [BeamSection.annular(float(r_t[s]), float(t_eff[s])) for s in range(S)]
         if braced:
-            r_br = float(x[dv.slice("brace_radius").start])
+            # In-loop FEA uses a FIXED nominal brace radius, NOT the DV: the
+            # rings' sizing benefit is modeled via the elastic-foundation credit
+            # (Task 5, k_ring), keeping the adjoint clean (∂K/∂brace_radius = 0
+            # in-loop). The post-hoc eigen check rebuilds rings at the sized
+            # radius. Brace MASS still scales with the DV (see mass()).
+            r_br = float(config.brace_r_min)
             secs += [BeamSection.circular(r_br)] * N_br
         return secs
 
@@ -729,7 +756,14 @@ def size_beam_shell_laminate(
                                                safety_factor=config.buckling_safety_factor)
                     tube_util = np.maximum(tube_util, tu)
                 else:
-                    bu = beam_euler_utilization(res.axial_force, radii, Lb, E=model.E_beam,
+                    # `radii` covers form elements only; when braced, the brace
+                    # (ring) elements append after them with the fixed nominal
+                    # radius (build_sections). Use full-length radii so the
+                    # Euler check aligns with res.axial_force/Lb (length n). The
+                    # unbraced path passes `radii` unchanged (bit-compat).
+                    radii_e = (np.array([sec.r for sec in sections]) if braced
+                               else radii)
+                    bu = beam_euler_utilization(res.axial_force, radii_e, Lb, E=model.E_beam,
                                                 K=config.euler_K, safety_factor=config.buckling_safety_factor)
                 if foundation:
                     k_e, _ch = foundation_k(x)
@@ -922,6 +956,11 @@ def size_beam_shell_laminate(
                 pq_j, pd0_j, pd45_j = panel_qstar_bands(f0b, f45b, f90b)
 
             sections = build_sections(x, radii)
+            # radii_full spans ALL beam elements (form + tube + brace); brace
+            # (ring) rows carry the fixed nominal radius (build_sections). `radii`
+            # is form-only, so derive the full-length array from the sections.
+            radii_full_arr = (np.array([sec.r for sec in sections]) if braced
+                              else radii)
             loads_eff = effective_loads(x, radii, t_tri)
             tube_kw = {}
             if annular:
@@ -974,7 +1013,8 @@ def size_beam_shell_laminate(
                 group_of_element=group_of_element,
                 band_of_tri=band_of_tri,
                 layup_group_of_band=layup_group_of_band,
-                radii_full=radii,
+                radii_full=radii_full_arr,
+                brace_mask=(brace_mask_all if braced else None),
                 beam_lengths=beam_lengths_e,
                 t_tri=t_tri,
                 Qeff_tri=Qeff_tri,

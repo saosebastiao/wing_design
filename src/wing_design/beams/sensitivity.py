@@ -201,6 +201,11 @@ class DesignSens:
     found_k: np.ndarray = None        # (n_form,) [N/m^2]
     found_dk: list = None             # per form element: [(col, dk_dcol), ...]
     found_mask: np.ndarray = None     # (n_all,) bool: use foundation for element
+    # P.2 lateral-bracing transverse ring members: rows of beam_elements that are
+    # brace (ring) elements. Their sections use a FIXED nominal radius (not a DV),
+    # so they contribute NO ∂K/∂x and get no Euler radius-gradient column. None =
+    # no bracing.
+    brace_mask: np.ndarray = None     # (n_all,) bool
     # V#2 datum-frame orthotropic strip panel buckling (opt-in, KS-only):
     # per-band Qstar = sqrt(Q11·Q22)+Q12+2·Q66 in the DATUM frame + f-chains.
     # None = historical triangle-local-frame D11 path (bit-exact).
@@ -353,6 +358,10 @@ def prepare_sensitivity(ds, factored) -> "SensCache":
             tube_dkg_t.append(T.T @ dk_t @ T)
             tube_dv_r.append(ds.tube_dv_r(s))
             tube_dv_t.append(ds.tube_dv_t(s))
+            continue
+        if ds.brace_mask is not None and bool(ds.brace_mask[e]):
+            # Brace (ring) elements use a FIXED nominal radius -> ∂K/∂x = 0;
+            # their sizing benefit enters only via the foundation k_ring credit.
             continue
         dk = dkloc_dr(
             ds.model.E_beam, ds.model.G_beam,
@@ -1278,6 +1287,12 @@ def provider_beam_buck(euler_K, safety_factor):
                     dutil += dutil_daxial * (dk @ fac.transforms[e] @ fac.u[dofs])[6]
                     col = ds.tube_dv_r(s_e) if wrt == "r" else ds.tube_dv_t(s_e)
                     expl.append((col, dutil))
+            elif ds.brace_mask is not None and bool(ds.brace_mask[e]):
+                # Brace (ring) element: FIXED nominal radius (not a DV) -> no
+                # radius-explicit gradient column. Its util enters only via the
+                # adjoint (dg/du); the ring's sizing benefit is the k_ring
+                # foundation credit on the form elements it restrains.
+                pass
             else:
                 if foundation:
                     # util ∝ 1/sqrt(EI): ∂util/∂r = −util·(dEI/dr)/(2EI)
