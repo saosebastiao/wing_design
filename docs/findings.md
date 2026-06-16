@@ -1563,6 +1563,31 @@ the governing converged slam buckling MODE (spanwise vs chordwise/local; does it
 ever plateau?) before resizing — the verification mesh itself is unsettled for the
 braced slam case. (~14 min eigen-only to n=48.)
 
+**Converged slam buckling MODE identified — a local wing-section mode (NOT the
+tube/rings), and it does not plateau (2026-06-16).** `runs/survival_mode_id.py`
+extracted the worst-combo buckling eigenvector at fine mesh: **100% of modal
+translation is in the wing-section grid nodes, 0% in the tube**, strongly LOCAL
+(participation ~8–10 of 400–950 nodes), peaked at **z ≈ 7.7–7.9 m (inner-mid
+span)**, identical mode at every mesh, driven by the **+3 g lateral slam** combo.
+Caveat: the form beams and skin SHARE these grid nodes, so node-energy can't cleanly
+separate a form-beam column buckle from a skin-panel buckle — but it is definitively
+a local inner-mid-span WING-SECTION mode, **not** the r/t≈79 tube transition, not a
+ring mode, not a global sway. It **does NOT plateau** (λ1 2.42→1.44→1.12 at
+n=24/40/56, ~−22%/refine, stopped at n=56). **Consequences:** (1) the fix is NOT
+bigger rings or thicker tube wall (tube carries zero modal energy) — it's
+stiffening the inner-mid-span wing section against this local mode; (2) the
+closed-form `beam_buckling_model="foundation"` is non-conservative for it (continuous
+bonded-skin Winkler restraint + element-length effective length overestimate
+capacity, and shrink the closed-form Pcr on refinement while the true mode buckles
+over a multi-element span); (3) the NO-PLATEAU means even the *verification* eigen
+isn't mesh-settled, so "true λ ≥ 1.5" is not yet well-defined for slam — the
+braced-slam buckling needs either a much finer converged mesh or a corrected
+local-buckling model. **Strategic upshot: the 3 g slam survival case genuinely
+needs V.9 (in-loop true-eigen) AND a settled verification mesh — it is a
+research-level open problem, not a quick resize.** The operational 1021.6 kg
+headline is unaffected (its mode plateaus, closed-form calibrated). (eigen-only;
+n24 32 s, n40 175 s, n56 497 s.)
+
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
 wrong) (2026-06-16).** `runs/slam_survival.py 3 20`: failure-only formulation
