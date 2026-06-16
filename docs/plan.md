@@ -331,14 +331,16 @@ before the next lever starts.
   now a measured optimum. `examples/52_nbeams_sweep.py`. (P#4)
 - **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
   and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
-- **P.6 Re-extract shadow prices on the 1021.6 kg optimum. — TODO (queued
-  2026-06-16).** The old "beam-buckling SF is the dominant lever" ranking
-  (V.6 / beam-autopsy) is SPENT — the foundation model harvested it. Re-pull
-  `result.shadow_prices` (or the `inspect_best.py` binding-constraint readout) on
-  the current multistart headline to find the genuinely-next lever before any more
-  P-phase work. Cheap (post-processing on the saved design). Reports the
-  next-cheapest kilograms in shadow-price terms under the foundation+sandwich+
-  datum_ortho regime.
+- **P.6 Re-extract shadow prices on the 1021.6 kg optimum. — DONE (2026-06-16).**
+  `runs/shadow_prices.py` (SLSQP warm from the IPOPT optimum, 104 s, reproduced
+  1021.6 kg). Result: **beam buckling is the SOLE binding lever, `buckling_sf_beam`
+  = +1030.8 kg/SF** (every other shadow price exactly 0). That is ~2× the old V.6
+  +531 kg/SF — the lighter foundation design is *more* buckling-critical. The cheap
+  STRUCTURAL beam-buckling levers (tube/hollow/foundation/rings) are all harvested;
+  the remaining harvest is the closed-form CONSERVATISM (meets SF 1.5 while true
+  eigen 2.76 = 1.84×) → only **V.9 in-loop eigen** recovers it. Prize being
+  measured by an SF-sweep (`runs/eigen_harvest.py`, mass vs true eigen). See
+  findings.md.
 
 ### Phase G — Filament-winding path planner
 

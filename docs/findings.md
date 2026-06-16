@@ -1443,6 +1443,28 @@ showed ~14 mm clears the gate → ~40 kg recoverable); SF 1.5 conservative for a
 ultimate case; 16×8 mesh (V.2 bias). Saved `runs/slam_survival_3g_20mm.npz`. CAD
 export (form beams + skin + 20 mm rings + worst-mode VTU) is the milestone artifact.
 
+**P.6 shadow prices on the 1021.6 kg headline — beam buckling is the SOLE lever
+at +1030.8 kg/SF; the remaining harvest is closed-form conservatism (→ V.9), not
+structure (2026-06-16).** `runs/shadow_prices.py` ran SLSQP warm from the IPOPT
+optimum (reproduced 1021.6 kg, converged feasible, 24 iters, 104 s) to recover the
+KKT multipliers (IPOPT signs unwired, so SLSQP is needed). **Only one nonzero
+shadow price: `buckling_sf_beam = +1030.8 kg per SF-unit`.** Every other
+constraint is exactly slack: σ_allow, tip deflection (util 0.57), tip twist
+(0.26), panel buckling (0.71), tube-wall, core wrinkle/crimp — all +0.000.
+Utilizations confirm: beam buckling 1.000 (binding), all else < 1. **vs the old
+V.6 ranking (+531 kg/SF on the 2248 kg design):** the marginal beam-buckling price
+nearly DOUBLED on the lighter foundation-model design — it is *more*
+buckling-critical, not less. **Interpretation (refines the audit's "lever spent"):
+beam buckling is STILL the only lever; what is spent is the cheap STRUCTURAL ways
+to buy buckling capacity** (core tube, hollow walls, foundation-length model,
+rings — all built). The remaining beam-buckling harvest is the **closed-form
+CONSERVATISM**: the design meets SF 1.5 while the true eigen is 2.76 (1.84×; the
+survival design is worse at 2.5×). That margin is recoverable only by sizing to
+the *true* buckling eigenvalue in the loop → **V.9 (analytic dλ/dx) is the clear
+highest-value next build**, justified by the +1030.8 kg/SF price. Prize to be
+measured by a buckling-SF sweep (mass vs true eigen) before committing to the V.9
+build. (SLSQP warm-settle breakdown: beams 522 + skin 314 + core 80 + tube 106 kg.)
+
 ## Decisions log
 
 | Decision | Choice |
