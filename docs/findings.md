@@ -1475,6 +1475,35 @@ absolute converged λ carries resampling-mapping noise (the non-monotonic
 1.24→1.39 at N12→N16 is likely mode-switching/mapping noise; ~1.3 is the signal);
 a true re-baseline will pin the magnitude and the corrected masses.
 
+**V.10 re-baseline attempt at n=12 — BLOCKED on a methodology problem; the eigen
+doesn't mesh-converge (2026-06-16).** `runs/mesh_rebaseline.py` re-sized the
+operational design at n_levels=12 with an SF ladder gated on the n=12 eigen.
+Two rungs (both ~3 h, both maxiter-UNCONVERGED): SF 1.5 → 687.7 kg, n=12 eigen
+1.457; **SF 1.65 → 704.1 kg, n=12 eigen 1.651 (clears 1.5), feasible.** Killed
+after rung 2 — three problems make this NOT a trustworthy corrected headline:
+(1) **Ladder logic flaw:** acceptance required `converged`, but IPOPT never
+converges these (maxiter, as on every slam run), so the ladder would have ground
+3 more rungs and saved the *most over-conservative* (SF 2.3) — fix: accept
+`feasible AND eigen ≥ gate` (incumbent guard + eigen gate IS the acceptance, per
+the slam-run lesson). (2) **Surprising direction:** n=12 sizing gives a ~31 %
+*LIGHTER* design (704 vs 1021.6 kg), not heavier — inverting the expectation. Most
+likely the finer mesh's extra radius DVs (x 126→206, finer beam tapering) + better
+load-path resolution let the optimizer shed material the coarse mesh forced;
+i.e. the 16×8 headline was *inefficient* (coarse tapering), not merely optimistic.
+But a 31 % drop from re-meshing is extraordinary and UNVERIFIED (could be the n=12
+sizer's closed-form being permissive, only partly caught by the eigen gate). (3)
+**THE BLOCKER — n=12 is not mesh-converged either:** the diagnostic eigen of the
+fixed headline was non-monotonic (2.76 @ n8 → 1.52 → 1.24 → 1.39 @ n16, no
+plateau), so gating at n=12 (λ 1.651) gives no guarantee at n≥16; there is no
+clean "converged mesh" to re-baseline at. The non-monotonicity is likely
+mesh-induced mode-switching (the k=1 lowest buckling mode is a *different* physical
+mode at different meshes) and/or diagnostic resampling noise — must be understood
+before any re-baseline number is trustworthy. **Next: a focused eigen-mesh-behavior
+diagnostic** (track k>1 modes across n=8…24, separate true mode-switching from
+resampling noise, find whether/where the worst λ plateaus) — the foundation for a
+defensible verification mesh. Until then both "headlines are optimistic" and the
+"704 kg re-baseline" are provisional.
+
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
 wrong) (2026-06-16).** `runs/slam_survival.py 3 20`: failure-only formulation
