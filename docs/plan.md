@@ -235,16 +235,19 @@ trustworthy baseline, not the current one.
   case. A 3 g run is in progress (`runs/slam_survival.py`); generalize via the V.7
   per-load-case constraint classes so one run yields the mixed serviceability/
   ultimate envelope natively. (V#12; depends on V.7.)
-- **V.9 In-loop eigenvalue constraint (analytic dλ/dx). — ELEVATED to near-term
-  (2026-06-16).** Previously a Toolbox #7 / Phase-H-class item; now near-term
-  because the foundation/closed-form beam-buckling model is **non-conservative
-  under slam** — it reported `beam_buckling` feasible (util ≈ 1.0) while the true
-  eigenvalue was < 1, and it let the optimizer drop the lateral rings to the floor
-  (2026-06-15). Any slam-sized result therefore needs the true eigenvalue in the
-  loop (clean gradient φᵀ(∂K + λ·∂Kσ)φ) — or, as the interim workaround, a pinned
-  ring-size floor (~15–20 mm, value now known from the post-hoc sweep). Cross-refs
-  V.7/V.8 (the slam envelope this guards) and the merged lateral-bracing work.
-  (Toolbox #7.)
+- **V.9 In-loop eigenvalue constraint (analytic dλ/dx). — DEMOTED back after the
+  prize was measured (2026-06-16).** Briefly elevated because the closed-form
+  beam-buckling model is non-conservative under slam (it let the optimizer drop
+  the rings while the true λ < 1). But `runs/eigen_harvest.py` measured the
+  performance prize: sizing to the *true* eigenvalue would save only **~14 %
+  (~145 kg)** on the headline, AND the true eigen is a **cliff** (a 17 % SF cut
+  crashed λ 2.76→0.83), so the SF-1.5 buffer is partly real protection and V.9
+  would size to the cliff edge. So V.9 is a **modest, risk-tradeoff lever, not an
+  obvious build.** Its remaining VALUE is correctness-for-slam (so the sizer can't
+  silently drop rings) rather than mass — and the **pinned ring-size floor is an
+  adequate interim workaround** for slam-sized runs. Build only if a future regime
+  makes the closed-form blindness bite again. Cross-refs V.7/V.8, the lateral-
+  bracing work, P.6. (Toolbox #7.)
 
 Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
 Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built

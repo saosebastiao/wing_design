@@ -1413,6 +1413,37 @@ so the optimizer optimizes the real buckling margin. The g-continuation run
 ~minutes; the failed runs are recorded above. Next: a pinned-ring survival sizing
 to report the actual 3 g survival mass.
 
+**V.9 prize MEASURED — in-loop eigen would harvest only ~14 %, and the true eigen
+is a cliff (2026-06-16).** `runs/eigen_harvest.py` re-sized the 1021.6 kg headline
+at decreasing closed-form buckling SF (warm-chained SLSQP, ~2 min/pt) measuring
+the POST-HOC true eigenvalue at each: SF 1.5 → 1021.6 kg / λ 2.76; **1.25 → 799.9
+kg / λ 0.83**; 1.0 → 659.0 / 0.59; 0.85 → 619.5 / 0.60; 0.70 → 577.4 / 0.55.
+Interpolating the valid crossing (true λ = 1.5) ⇒ **≈ 876 kg, so the V.9 in-loop-
+eigen prize ≈ 145 kg (14 %)**. Two takeaways that REVISE the P.6 read: (1) the
+prize is modest, NOT the large harvest the +1030.8 kg/SF *local* shadow price
+implied; (2) the true eigen is a **cliff** — a 17 % SF cut (1.5→1.25) crashed it
+2.76→0.83 (below 1, i.e. buckles), so the closed-form SF-1.5 buffer is partly
+REAL protection against a steep buckling response, and sizing to true-λ-1.5 (V.9)
+puts the design at the cliff edge with no margin. Net: **V.9 is a modest,
+risk-tradeoff lever, demoted from "obvious next build."** The value of measuring
+vs extrapolating the shadow price: the local rate (+1030.8 kg/SF) and the global
+response (cliff) tell opposite stories.
+
+**Brazier crush CHECKED on the survival tube — NOT a concern (6.58× margin)
+(2026-06-16).** The 3 g survival design grew the core tube into a large root
+bending spar (r 338–378 mm, ~0.7 m dia; the 666 kg cost) with a thin transition
+segment (r/t ≈ 79). The sizer checks tube WALL buckling but not Brazier
+ovalization, so `runs/brazier_diag.py` extracted the actual per-segment tube
+bending moment from the survival FEA under the 4-case slam envelope and compared
+to the classical Brazier `M_cr = (2√2/9)πEr t²/√(1−ν²)`. Worst segment = the thin
+transition (seg 4, r/t 79): M_demand 66.4 kN·m vs M_cr 437 kN·m = **margin 6.58×**;
+all other segments ≫ 38× (root segments carry more moment but M_cr ∝ r·t² so thick
+walls dominate); driver is the ±3 g lateral slam (confirmed). So Brazier does NOT
+govern this design and the sizer's omission isn't masking a failure. **Caveat:**
+the isotropic formula is approximate for a filament-wound CFRP tube (hoop modulus
+governs ovalization; a low-hoop-stiffness wound layup would reduce M_cr) — but
+6.58× leaves headroom for a plausible orthotropic correction. (~4 s wall.)
+
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
 wrong) (2026-06-16).** `runs/slam_survival.py 3 20`: failure-only formulation
