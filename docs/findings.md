@@ -30,7 +30,7 @@ Medium wingsail (22 m span; symmetric+monotonic radii, span datum, buckling SF 1
 | Chain re-baseline (2026-06-12): + tube + hollow + sandwich + foundation + datum_ortho (V#2-coherent), IPOPT+KS, eigen-verified | 1094.2 kg (λ_cr 3.61, converged feasible; −51.3% vs V.6) | KS buckling families | `runs/chain_rebuild.py` (stage D) |
 | **Multistart re-baseline (2026-06-12):** same final config, 8 starts (D-seeded start 0), best feasible basin | **1021.6 kg** (λ_cr 2.76, converged feasible; **−54.5% vs V.6**) | KS buckling families | `runs/multistart_v2.py` |
 
-| **3 g slam SURVIVAL rating (2026-06-16):** + ring bracing, failure-only envelope (deflection serviceability does NOT govern), rings 20 mm | **1575.3 kg** (λ_cr 3.77, converged feasible; +54 % vs the no-slam headline) | beam + panel buckling co-bind; tube → 666 kg bending spar | `runs/slam_survival.py 3 20` |
+| ~~3 g slam SURVIVAL rating (2026-06-16): rings 20 mm, failure-only~~ — **INVALID at converged mesh** | ~~1575.3 kg (λ_cr 3.77)~~ → converged λ ≤ 1.25 < 1.5 (n8 value was a ~3× artifact); **true survival mass is HEAVIER, TBD** | slam buckling under-resolved at n8; closed-form non-conservative for slam | `runs/slam_survival.py` (needs converged-mesh resize) |
 
 The multistart number (**1021.6 kg**) is the **current medium headline for the
 operational (no-slam) envelope** (V.6 remains the lever-accounting baseline); the
@@ -43,8 +43,10 @@ the design is sized to the well-calibrated closed-form SF 1.5; the **converged
 (n≥24) buckling margin of the 1021.6 kg headline is λ ≈ 1.5–1.6 — VALID**, sized
 right to its margin (NOT optimistic; an earlier "true margin ~1.3, masses heavier"
 read was the n=12 overshoot, since corrected). Buckling should be *verified* at
-n≥24 (cheap, eigen-only) on the cluster floor, not at 16×8. The 3 g survival
-1575.3 kg row's λ 3.77 is an n=8 value pending a converged re-check.
+n≥24 (cheap, eigen-only) on the cluster floor, not at 16×8. **The 3 g survival
+1575.3 kg row is INVALID** — its λ 3.77 was an n=8 artifact; converged λ ≤ 1.25
+< 1.5 (no plateau by n=48), so the real survival mass is heavier and TBD (the
+closed-form is non-conservative for slam; see the survival mesh-eigen finding).
 
 ## The governing-physics picture (cross-cutting findings)
 
@@ -1533,6 +1535,33 @@ at 1021.6 kg. FOLLOW-UPS: re-verify the 3 g survival design (1575.3 kg, its λ 3
 was an n=8 value — likely lower converged, quick braced eigen-only re-check at
 n≥24); and P.4b n_beams can now re-sweep with n=8 SIZING (closed-form is calibrated)
 + n≥24 VERIFICATION (cheap), not finer-mesh sizing.
+
+**3 g SURVIVAL design FAILS buckling at converged mesh — the 1575.3 kg rating is
+INVALID; closed-form is non-conservative for slam (2026-06-16).**
+`runs/survival_mesh_eigen.py` re-checked the braced survival design's worst
+SLAM-envelope buckling λ across spanwise mesh (k=5, rings 20 mm, reproduced n=8
+λ1 = 3.775 exactly): **3.78 (n8) → 3.58 (n12) → 2.42 (n24) → 1.77 (n32) → 1.59
+(n36) → 1.437 (n40) → 1.247 (n48, STILL falling ~10–13 %/refine, NO plateau).**
+Unlike the operational headline (which recovered to a converged floor ~1.5–1.6),
+the survival design **declines MONOTONICALLY and crosses below the 1.5 gate at
+n≈40** — so its converged worst-λ is ≤ 1.247 and unbounded below by the data.
+**Verdict: the 3 g survival rating does NOT hold as sized — the n=8 λ 3.77 was a
+~3× coarse-mesh artifact, and for the SLAM case the closed-form/foundation model
+(rings credited via k_ring) IS non-conservative at converged mesh** (it modeled a
+beam-column/foundation mode while the governing converged slam mode is something
+else — likely local: the thin r/t≈79 tube transition, or a ring/skin mode under
+lateral load — and spanwise-only refinement hasn't plateaued it, suggesting a
+chordwise/local mode the n_beams=16 mesh also limits). **Implications:** (1) the
+true 3 g survival mass is HEAVIER than 1575.3 kg (needs more buckling capacity —
+bigger rings/beams/tube, or a different fix for the actual mode); (2) the earlier
+"20 mm rings → λ 3.16 at 3 g" eigen-sweep was also an n=8 value, inflated; (3) for
+slam, V.9 (in-loop true-eigen) regains real value — the closed-form is genuinely
+non-conservative there, unlike the operational case. **Contrast is the key
+result:** operational closed-form well-calibrated (converged λ ≈ SF 1.5);
+slam/survival closed-form non-conservative (converged λ ≪ SF 1.5). NEXT: identify
+the governing converged slam buckling MODE (spanwise vs chordwise/local; does it
+ever plateau?) before resizing — the verification mesh itself is unsettled for the
+braced slam case. (~14 min eigen-only to n=48.)
 
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was

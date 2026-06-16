@@ -232,9 +232,15 @@ trustworthy baseline, not the current one.
   eigen govern, with tip deflection demoted to a geometric guardrail (linear-FEA
   validity) only — the slam masses to date were inflated by the 2%-span tip-
   deflection serviceability budget, which should NOT govern a survival/ultimate
-  case. A 3 g run is in progress (`runs/slam_survival.py`); generalize via the V.7
-  per-load-case constraint classes so one run yields the mixed serviceability/
-  ultimate envelope natively. (V#12; depends on V.7.)
+  case. The failure-only 3 g run (`runs/slam_survival.py`) gave 1575.3 kg — but
+  **that rating is now INVALID at converged mesh** (its λ 3.77 was an n=8 artifact;
+  converged worst slam λ ≤ 1.25 < 1.5, no plateau by n=48 — see the survival
+  mesh-eigen finding). So V.8 is NOT done: the failure-only formulation is right,
+  but the buckling must be gated at a CONVERGED mesh, and for slam the closed-form
+  is non-conservative → the survival design needs resizing and is HEAVIER (TBD).
+  Blocked on identifying the governing converged slam buckling mode first (task
+  #23) — spanwise vs chordwise/local — since the verification mesh hasn't settled.
+  Generalize via V.7. (V#12; depends on V.7, V.9, task #23.)
 - **V.9 In-loop eigenvalue constraint (analytic dλ/dx). — DEMOTED back after the
   prize was measured (2026-06-16).** Briefly elevated because the closed-form
   beam-buckling model is non-conservative under slam (it let the optimizer drop
