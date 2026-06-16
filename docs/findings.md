@@ -30,10 +30,14 @@ Medium wingsail (22 m span; symmetric+monotonic radii, span datum, buckling SF 1
 | Chain re-baseline (2026-06-12): + tube + hollow + sandwich + foundation + datum_ortho (V#2-coherent), IPOPT+KS, eigen-verified | 1094.2 kg (λ_cr 3.61, converged feasible; −51.3% vs V.6) | KS buckling families | `runs/chain_rebuild.py` (stage D) |
 | **Multistart re-baseline (2026-06-12):** same final config, 8 starts (D-seeded start 0), best feasible basin | **1021.6 kg** (λ_cr 2.76, converged feasible; **−54.5% vs V.6**) | KS buckling families | `runs/multistart_v2.py` |
 
-The multistart number (**1021.6 kg**) is the **current medium headline** (V.6
-remains the lever-accounting baseline); the warm chain stage-D 1094.2 kg is the
-attributed-lineage figure that the cold multistart then improved on by escaping
-its basin. Pre-V.6 numbers are historical (legacy `b=√area` buckling, aero-only).
+| **3 g slam SURVIVAL rating (2026-06-16):** + ring bracing, failure-only envelope (deflection serviceability does NOT govern), rings 20 mm | **1575.3 kg** (λ_cr 3.77, converged feasible; +54 % vs the no-slam headline) | beam + panel buckling co-bind; tube → 666 kg bending spar | `runs/slam_survival.py 3 20` |
+
+The multistart number (**1021.6 kg**) is the **current medium headline for the
+operational (no-slam) envelope** (V.6 remains the lever-accounting baseline); the
+warm chain stage-D 1094.2 kg is the attributed-lineage figure. The **1575.3 kg**
+row is the **3 g-slam-survival-rated** mass (buckling-governed; a single design
+that also satisfies the operational envelope). Pre-V.6 numbers are historical
+(legacy `b=√area` buckling, aero-only).
 
 ## The governing-physics picture (cross-cutting findings)
 
@@ -1409,6 +1413,36 @@ so the optimizer optimizes the real buckling margin. The g-continuation run
 ~minutes; the failed runs are recorded above. Next: a pinned-ring survival sizing
 to report the actual 3 g survival mass.
 
+**3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
+BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
+wrong) (2026-06-16).** `runs/slam_survival.py 3 20`: failure-only formulation
+(strength + buckling + eigen; deflection demoted to a 5 %-span geometric-validity
+guardrail, twist ≤ 20°), rings pinned at the 20 mm floor, warm from the 1021.6 kg
+headline. **First slam run to CONVERGE: 1575.3 kg, feasible, eigen λ_cr 3.77,
+tip deflection 0.42 m (1.9 % span), 3 h 47 m.** Breakdown: beams 568 + **tube 666**
++ skin 163 + core 95 + brace 83 kg. Binding: **beam buckling 1.001 + panel
+buckling 0.992 co-bind**; twist 0.099 and deflection (1.9 % span) both slack.
+**Key (corrective) finding:** relaxing deflection from 2 % to 5 % did NOT shed
+mass — the buckling-optimal design deflects only 1.9 % span, i.e. *just under* the
+old 2 % serviceability limit anyway. So under 3 g lateral slam the design is
+**buckling-governed, not deflection-governed**; the earlier "deflection-overstated,
+expect << 1.6 t" expectation (and the annotations flagging slam masses as
+deflection-inflated) was WRONG — deflection was never the binding driver, buckling
+was. The failure-only formulation is still correct in principle (deflection is
+serviceability), it just doesn't move this particular answer. **Structural story:**
+the central core tube re-tasks from a ~5 kg torsion spine (no-slam headline) to a
+**666 kg bending spar** — the dominant survival cost — to carry the 3 g lateral
+inertial bending of the 22 m cantilever; rings (83 kg) handle beam buckling,
+beams/skin grow for panel buckling. **3 g survival rating costs +54 % mass**
+(1021.6 → 1575.3 kg), and the single design satisfies BOTH envelopes (operational
+deflection 1.9 % < 2 % limit → no separate envelope needed). **Conservatism:** the
+closed-form buckling SF 1.5 binds (util 1.0) while the true eigen is 3.77 (~2.5×
+conservative, consistent with V.3) → 1575.3 kg is a CONSERVATIVE survival mass;
+in-loop eigen (V.9) would harvest it. Caveats: rings pinned at 20 mm (eigen sweep
+showed ~14 mm clears the gate → ~40 kg recoverable); SF 1.5 conservative for an
+ultimate case; 16×8 mesh (V.2 bias). Saved `runs/slam_survival_3g_20mm.npz`. CAD
+export (form beams + skin + 20 mm rings + worst-mode VTU) is the milestone artifact.
+
 ## Decisions log
 
 | Decision | Choice |
@@ -1449,6 +1483,7 @@ to report the actual 3 g survival mass.
 | Tip-coupling study | Hard tip joint (gusset) modeled as a stiff connector-beam clique tying the tip nodes (`beams.solve_beam_shell_tip_coupled`, tunable `gusset_radius`), reusing `solve_beam_shell` (no rigid MPC, no penalty hacks). Finding: barely redistributes BEAM stress (peak −2%, spread 3.75→3.38) — the skin already shares spanwise load — but near-eliminates **tip twist** (0.197°→0.004°, ~50×) and stiffens the tip (~14%), saturating at low gusset stiffness. Investigation only (no CAD / not in the sizing loop). Implication: the twist-governed design could be relaxed/lightened by a tip gusset (re-size-with-gusset = follow-up). **[Annotated 2026-06-16 — the +8.3% sizer verdict is AERO-regime (twist/stiffness aid, not a mass lever there); not the verdict under slam loading.]** |
 | /tmp data loss + runs/ convention (2026-06-11) | Unexpected reboot wiped /tmp: both in-flight runs AND all saved design arrays lost (V.3c running best, warm chain). Code/ledger safe. New convention: scripts, .npz designs, logs → gitignored `runs/`; stage-level immediate saves; resumable chains (`runs/chain_rebuild.py`). Regeneration folded into the V#2 re-baseline so the chain re-runs once. |
 | V#2 CLOSED — implementation (2026-06-11) | `panel_d_mode="datum_ortho"` (opt-in, KS-only): strip σcr now uses the datum-frame orthotropic long-plate N_cr = (2π²/b²)(√(D11·D22)+D12+2·D66) instead of triangle-local D11; exact kc=4 isotropic identity (unit-tested); f-chains via `dQstar_df`, FD-audited live. Motivated by the V.3c layup regime change 32/53/15 → 0/100/0 (±45) making local-frame bookkeeping load-bearing. Caveats: demand stays principal compression; wrinkling still local-frame (V#2-residual). Measurement: chain stage D (pending). |
+| 3 g slam survival measured (2026-06-16) | Failure-only formulation (deflection demoted to a geometric guardrail), rings pinned 20 mm: **1575.3 kg, CONVERGED, feasible, eigen 3.77** (first clean slam result; +54 % vs the 1021.6 kg headline). Slam is **buckling-governed, not deflection-governed** — relaxing deflection didn't shed mass (optimum deflects 1.9 % span anyway), so the "deflection-overstated" framing was wrong. Cost driver: the core tube re-tasks from ~5 kg torsion spine to a **666 kg bending spar**. Conservative (closed-form SF 1.5 binds while true eigen 3.77 → V.9 in-loop eigen would harvest). |
 | Ring bracing survives 3 g slam (2026-06-15) | Post-hoc eigen sweep proves ~13–14 mm rings clear λ≥1.5 at 3 g (20 mm → λ 3.16). 3 g slam IS survivable with lateral ring bracing — the four failed runs were optimizer-blindness (closed-form non-conservative under slam → rings minimized to floor), not physics. Fix: pin a ring floor (~15–20 mm, known now) OR in-loop eigen. Pinned-ring survival sizing pending for the mass. |
 | Memory-budget for parallel runs (2026-06-12) | Both machine crashes were watchdog kernel panics caused by our parallel sizing oversubscribing RAM (8 IPOPT workers × ~9 GiB measured on 32 GiB → `vm-compressor-space-shortage` jetsam storms → configd/WindowServer starved → panic). Convention (CLAUDE.md): Σ worker peaks ≤ ~½ RAM (→ `n_workers=2` for medium IPOPT), never stack heavy runs concurrently, `ru_maxrss` recorded in every run meta. **[Annotated 2026-06-16 — the n_workers=2 cap was later revised to n_workers=1 after the measured 17.8 GiB/worker peak (multistart-headline entry, 2026-06-12).]** |
 | V#2 MEASURED — datum_ortho verdict (2026-06-12) | Chain stage D: **1094.2 kg converged feasible, λ 3.61 (−51.3% vs V.6)**; −0.1% vs the local-frame V.3c optimum (noise) → the directional-bookkeeping fix costs nothing and the **pure-±45 layup survives** = real physics, not artifact. `datum_ortho` becomes the standard P-phase panel mode (opt-in flag unchanged). B/C rungs unconverged (upper bounds); wrinkling local-frame residual stays open. |
