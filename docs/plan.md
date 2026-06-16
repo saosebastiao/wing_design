@@ -226,6 +226,26 @@ trustworthy baseline, not the current one.
   designs, not one native envelope. (V#12 slam load envelope; supersedes the
   uniform-constraint assumption baked in since V.4.)
 
+- **V.8 Failure-only slam re-baseline. — IN PROGRESS (2026-06-16).** Supersede the
+  deflection-overstated slam numbers (V.4's +110% 1 g figure; V#12's +53.5% @ 3 g
+  and the 2 g diagnostic) with the failure-only envelope: strength + buckling +
+  eigen govern, with tip deflection demoted to a geometric guardrail (linear-FEA
+  validity) only — the slam masses to date were inflated by the 2%-span tip-
+  deflection serviceability budget, which should NOT govern a survival/ultimate
+  case. A 3 g run is in progress (`runs/slam_survival.py`); generalize via the V.7
+  per-load-case constraint classes so one run yields the mixed serviceability/
+  ultimate envelope natively. (V#12; depends on V.7.)
+- **V.9 In-loop eigenvalue constraint (analytic dλ/dx). — ELEVATED to near-term
+  (2026-06-16).** Previously a Toolbox #7 / Phase-H-class item; now near-term
+  because the foundation/closed-form beam-buckling model is **non-conservative
+  under slam** — it reported `beam_buckling` feasible (util ≈ 1.0) while the true
+  eigenvalue was < 1, and it let the optimizer drop the lateral rings to the floor
+  (2026-06-15). Any slam-sized result therefore needs the true eigenvalue in the
+  loop (clean gradient φᵀ(∂K + λ·∂Kσ)φ) — or, as the interim workaround, a pinned
+  ring-size floor (~15–20 mm, value now known from the post-hoc sweep). Cross-refs
+  V.7/V.8 (the slam envelope this guards) and the merged lateral-bracing work.
+  (Toolbox #7.)
+
 Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
 Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built
 pass; root/bearing compliance → M.5. (V#6, V#7, V#10, V#11)
@@ -289,6 +309,9 @@ before the next lever starts.
   direction-resolved (biaxial) buckling check — hoop pretension is transverse to the
   spanwise panel compression. Guard with a prestress-retention knockdown and
   strut-foot peel checks. (P#2, P#3)
+  **[Note 2026-06-16: for the SLAM role specifically, the merged lateral
+  ring-bracing work (2026-06-15) supersedes the P.2 compression-cross-member /
+  F.2 diagonal family — see V.8/V.9 and the ring-bracing findings.]**
 - **P.3 Sandwich (cored) skin. — MACHINERY DONE, LEVER OPEN (2026-06-11).**
   φ(t,c) sandwich D + wrinkle/crimp checks merged & FD-validated; the measured
   migration trajectory falls to ~1032 kg (−46%) but **SLSQP stalls unconverged on
@@ -308,6 +331,14 @@ before the next lever starts.
   now a measured optimum. `examples/52_nbeams_sweep.py`. (P#4)
 - **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
   and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
+- **P.6 Re-extract shadow prices on the 1021.6 kg optimum. — TODO (queued
+  2026-06-16).** The old "beam-buckling SF is the dominant lever" ranking
+  (V.6 / beam-autopsy) is SPENT — the foundation model harvested it. Re-pull
+  `result.shadow_prices` (or the `inspect_best.py` binding-constraint readout) on
+  the current multistart headline to find the genuinely-next lever before any more
+  P-phase work. Cheap (post-processing on the saved design). Reports the
+  next-cheapest kilograms in shadow-price terms under the foundation+sandwich+
+  datum_ortho regime.
 
 ### Phase G — Filament-winding path planner
 
