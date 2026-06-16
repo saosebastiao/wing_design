@@ -26,6 +26,13 @@ load-bearing skin, sized FEA-in-the-loop. Scales 1 m drone wing → 100 m turbin
 - **A sizing result counts only if converged AND feasible.** Check both before
   reporting any mass. Comparisons within ~2–3% are inside the ftol/basin noise floor —
   don't claim wins there.
+- **Verify buckling at a CONVERGED mesh (n_levels ≥ 24), not the 16×8 sizing mesh.**
+  The n=8 linear-buckling eigen is unconservatively overstiff (it can't resolve the
+  short-wavelength mode): it overshoots low at n≈12 then settles to a converged
+  cluster floor by n≥24. Judge feasibility on that floor over the lowest 2–3 modes
+  (eigen-only, ~15–40 s/mesh). The closed-form foundation model is well-calibrated
+  to the converged eigen for the OPERATIONAL envelope but NON-conservative for slam
+  (2026-06-16) — so slam-sized designs especially must be eigen-verified at n≥24.
 - **Negative results are findings too.** Record them with the same rigor (see the tip
   gusset / diagonal lattice entries in findings.md for the pattern).
 - **Milestones export CAD + analyses.** Any important optimization-progress milestone
