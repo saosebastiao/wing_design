@@ -1588,6 +1588,27 @@ research-level open problem, not a quick resize.** The operational 1021.6 kg
 headline is unaffected (its mode plateaus, closed-form calibrated). (eigen-only;
 n24 32 s, n40 175 s, n56 497 s.)
 
+**P.4b n_beams re-sweep ATTEMPTED — cold-chain-per-n_beams is too fragile;
+inconclusive, 16 stands, deferred (2026-06-16).** `runs/nbeams_resweep.py` (current
+foundation+sandwich+datum_ortho config, per-point warm chain, converged n≥24
+verification). First point n_beams=12 **cascaded infeasible through every stage** —
+A0 tube-only 2169.8 kg, A tube+hollow 1963.0, B sandwich 1364.6 — all unconverged
+(maxiter) + infeasible + NO feasible incumbent, despite healthy n8 eigen
+(2.48–3.79). For comparison n=16's chain converged feasible at every stage. So
+cold-chaining a *different* n_beams hits the same IPOPT/SLSQP restoration-stall
+that plagued the slam runs — the methodology can't cleanly compare n_beams.
+**Soft signal:** n=12's infeasibility is on a closed-form constraint (eigen is
+fine), most likely **panel buckling** — fewer beams ⇒ larger chordwise panels ⇒
+panel buckling (slack at n=16, util 0.71) becomes binding/violated, so reducing
+n_beams below 16 is NOT a win. This is consistent with the original P.4 verdict
+("16 optimal") and with the headline being beam-buckling-governed with only modest
+panel slack. But it is NOT rigorous (unconverged). **Conclusion:** the operational
+16-beam / 1021.6 kg headline stands as near-optimal; a *rigorous* re-sweep is
+DEFERRED and needs a chordwise warm-start (remap the 16-beam headline to each
+n_beams for a good x0 — a single IPOPT run/point instead of a fragile cold chain),
+not worth building now given the headline is valid and 16 is well-supported. Killed
+after the n=12 cascade (~2 h) rather than burn ~6 h more on unreliable points.
+
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
 wrong) (2026-06-16).** `runs/slam_survival.py 3 20`: failure-only formulation

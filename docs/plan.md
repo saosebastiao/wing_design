@@ -368,6 +368,14 @@ before the next lever starts.
   may move (converged eigen worse for all n ⇒ pushes toward fewer/heavier beams,
   while the survival design's co-binding panel buckling pushes toward more
   beams/smaller panels). (P#4, V.10.)
+  — **ATTEMPTED + DEFERRED (2026-06-16):** `runs/nbeams_resweep.py` cold-chained
+  each n_beams at the current config; n=12 cascaded infeasible through A0/A/B (all
+  unconverged, no incumbent, eigen fine) — the cold-chain-per-n_beams hits the same
+  restoration stall as the slam runs, so it can't cleanly compare n_beams. Soft
+  signal (n=12 infeasible on a closed-form constraint, likely panel buckling at the
+  larger panels) is consistent with 16 being near-optimal; the 1021.6 kg headline
+  stands. A rigorous re-sweep needs a **chordwise warm-start** (remap the 16-beam
+  headline to each n_beams) — deferred, low priority since the headline is valid.
 - **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
   and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
 - **P.6 Re-extract shadow prices on the 1021.6 kg optimum. — DONE (2026-06-16).**
