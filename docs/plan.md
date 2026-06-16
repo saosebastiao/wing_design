@@ -346,6 +346,20 @@ before the next lever starts.
   (λ 1.51); n=24 closed-form-feasible but **eigen-rejected (λ 1.22)** — above 16
   the design is eigen-limited, not closed-form-limited. The historical default is
   now a measured optimum. `examples/52_nbeams_sweep.py`. (P#4)
+- **P.4b n_beams RE-SWEEP. — QUEUED after V.10 (2026-06-16).** P.4's "16 optimal"
+  is stale on two axes: (1) regime — it ran pre-foundation / pre-sandwich /
+  pre-datum_ortho on the 1924.6 kg (pre-correction) design; (2) MESH — its verdict
+  rested on the per-point eigen verification (n=16 λ 2.54 / n=20 1.51 / n=24
+  eigen-rejected 1.22), and V.10 showed that coarse-mesh eigen is optimistic ~2×,
+  so those bounding thresholds were inflated (P.4's own note: "when future levers
+  slim members toward λ=1.5, move the eigen check in-loop" — this is that moment).
+  GATE: re-sweep only AFTER V.10 establishes the converged-mesh eigen gate, else
+  every n-point inherits the same ~2× optimistic bias and the comparison is
+  meaningless. Re-sweep n ∈ {12…24} at n_levels ≥ 12 on the current
+  foundation+sandwich+datum_ortho regime with the converged eigen gate; the optimum
+  may move (converged eigen worse for all n ⇒ pushes toward fewer/heavier beams,
+  while the survival design's co-binding panel buckling pushes toward more
+  beams/smaller panels). (P#4, V.10.)
 - **P.5 Cheap-iteration levers.** Once gradients are fast: multi-start at scale, more
   and chordwise thickness bands, per-band layup revisit. (P#9, P#10)
 - **P.6 Re-extract shadow prices on the 1021.6 kg optimum. — DONE (2026-06-16).**
