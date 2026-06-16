@@ -37,11 +37,14 @@ operational (no-slam) envelope** (V.6 remains the lever-accounting baseline); th
 warm chain stage-D 1094.2 kg is the attributed-lineage figure. The **1575.3 kg**
 row is the **3 g-slam-survival-rated** mass (buckling-governed; a single design
 that also satisfies the operational envelope). Pre-V.6 numbers are historical
-(legacy `b=√area` buckling, aero-only). **⚠ Mesh caveat (2026-06-16):** all these
-masses are at the 16×8 mesh, whose eigen verification is **unconservatively
-biased** — the headline's true converged buckling margin is ~1.3 (not the reported
-λ 2.76), *below* SF 1.5, so the mesh-converged masses are HEAVIER (a re-baseline is
-the priority validity item; see the mesh-convergence finding).
+(legacy `b=√area` buckling, aero-only). **Mesh note (2026-06-16, RESOLVED):** the
+n=8 eigen *verification* is mesh-sensitive (it overstiffens then overshoots), but
+the design is sized to the well-calibrated closed-form SF 1.5; the **converged
+(n≥24) buckling margin of the 1021.6 kg headline is λ ≈ 1.5–1.6 — VALID**, sized
+right to its margin (NOT optimistic; an earlier "true margin ~1.3, masses heavier"
+read was the n=12 overshoot, since corrected). Buckling should be *verified* at
+n≥24 (cheap, eigen-only) on the cluster floor, not at 16×8. The 3 g survival
+1575.3 kg row's λ 3.77 is an n=8 value pending a converged re-check.
 
 ## The governing-physics picture (cross-cutting findings)
 
@@ -1503,6 +1506,33 @@ diagnostic** (track k>1 modes across n=8…24, separate true mode-switching from
 resampling noise, find whether/where the worst λ plateaus) — the foundation for a
 defensible verification mesh. Until then both "headlines are optimistic" and the
 "704 kg re-baseline" are provisional.
+
+**RESOLVED — the eigen VERIFICATION mesh was the bug, not the design; the 1021.6 kg
+headline is VALID and the closed-form is well-calibrated (2026-06-16).**
+`runs/eigen_mesh_behavior.py` swept the k=5 lowest buckling modes of the fixed
+headline across n_levels 8→32. The non-monotonic λ1 (2.76→1.52→1.24→1.39→…) is
+**under-resolution → cluster convergence**, NOT mode-switching or resampling
+noise: the coarse n=8 mesh overstiffens the ENTIRE spectrum (all 5 modes 2.76–3.99
+— no low mode hidden), and as refinement resolves the short-wavelength modes the
+whole spectrum descends, OVERSHOOTS (λ1 bottoms at 1.24 @ n=12), then recovers to
+a **converged cluster floor λ1 ≈ 1.5–1.6 at n≥24** (1.587/1.629/1.512 at
+n=24/28/32; the ±7% jitter is near-degenerate cluster reordering, the band is
+converged). Eigen-only cost: ~15 s (n=24) … 40 s (n=32). **Corrections to the two
+findings above:** (1) the converged margin is **~1.5–1.6, not ~1.3** — the ~1.3
+was the n=12 OVERSHOOT misread as converged; the **1021.6 kg headline is VALID at
+converged mesh** (λ ≥ 1.5), sized right to its SF-1.5 margin, and the closed-form
+foundation model is **well-calibrated** (SF 1.5 ↔ converged true eigen ~1.5), NOT
+non-conservative — the apparent non-conservatism was a coarse-VERIFICATION
+artifact. (2) the **704 kg "31% lighter re-baseline" is INVALID and discarded** —
+it was gated to clear the n=12 overshoot, which isn't the converged truth; a
+lighter design's converged eigen would fall below 1.5. **The real fix is the
+VERIFICATION PROTOCOL, not a mass re-baseline:** verify buckling at **n≥24** and
+judge the converged cluster floor across the lowest 2–3 modes (all cheap,
+eigen-only), instead of a single coarse-mesh λ1. The operational headline stands
+at 1021.6 kg. FOLLOW-UPS: re-verify the 3 g survival design (1575.3 kg, its λ 3.77
+was an n=8 value — likely lower converged, quick braced eigen-only re-check at
+n≥24); and P.4b n_beams can now re-sweep with n=8 SIZING (closed-form is calibrated)
++ n≥24 VERIFICATION (cheap), not finer-mesh sizing.
 
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
