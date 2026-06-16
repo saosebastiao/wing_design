@@ -248,10 +248,24 @@ trustworthy baseline, not the current one.
   adequate interim workaround** for slam-sized runs. Build only if a future regime
   makes the closed-form blindness bite again. Cross-refs V.7/V.8, the lateral-
   bracing work, P.6. (Toolbox #7.)
+- **V.10 Mesh-converged re-baseline. — PRIORITY validity item (opened 2026-06-16).**
+  The mesh-convergence diagnostic (`runs/mesh_converge_diag.py`) showed the eigen
+  VERIFICATION is unconservatively mesh-biased: the 1021.6 kg headline's worst λ
+  falls 2.76 (N=8) → ~1.3 (N≥12), BELOW the SF 1.5 it was sized to — the coarse
+  7-segment beam mesh can't resolve the short-wavelength beam-column buckling mode
+  (the V.2 unconservative bias survives V.3b/V.3c for the verifier, not the sizer).
+  So every 16×8 headline (operational 1021.6, survival 1575.3) is optimistic and
+  the converged masses are heavier. **Do:** re-optimize at n_levels ≥ 12 (warm from
+  resampled 16×8 via the V.0.5 protocol; the sizer's strip/foundation constraints
+  + a mesh-converged eigen GATE), report the corrected operational + survival
+  headlines, and make N≥12 (or an eigen-gate-at-converged-mesh) the standard. Cost:
+  finer mesh ⇒ slower sizing — warm-start + the n_levels sweep keep it tractable.
+  Brackets Brazier (safe, 6.6×) but supersedes the absolute masses. (V#... mesh.)
 
 Deferred validity items: aeroelastic load feedback + divergence/flutter → Phase H;
-Brazier crush → with P.2 webs; environmental/fatigue knockdowns → with the M.4 as-built
-pass; root/bearing compliance → M.5. (V#6, V#7, V#10, V#11)
+Brazier crush → CHECKED 2026-06-16 (6.6× margin, not governing); environmental/
+fatigue knockdowns → with the M.4 as-built pass; root/bearing compliance → M.5.
+(V#6, V#7, V#10, V#11)
 
 ### Phase M — Manufacturability
 

@@ -37,7 +37,11 @@ operational (no-slam) envelope** (V.6 remains the lever-accounting baseline); th
 warm chain stage-D 1094.2 kg is the attributed-lineage figure. The **1575.3 kg**
 row is the **3 g-slam-survival-rated** mass (buckling-governed; a single design
 that also satisfies the operational envelope). Pre-V.6 numbers are historical
-(legacy `b=√area` buckling, aero-only).
+(legacy `b=√area` buckling, aero-only). **⚠ Mesh caveat (2026-06-16):** all these
+masses are at the 16×8 mesh, whose eigen verification is **unconservatively
+biased** — the headline's true converged buckling margin is ~1.3 (not the reported
+λ 2.76), *below* SF 1.5, so the mesh-converged masses are HEAVIER (a re-baseline is
+the priority validity item; see the mesh-convergence finding).
 
 ## The governing-physics picture (cross-cutting findings)
 
@@ -1443,6 +1447,33 @@ govern this design and the sizer's omission isn't masking a failure. **Caveat:**
 the isotropic formula is approximate for a filament-wound CFRP tube (hoop modulus
 governs ovalization; a low-hoop-stiffness wound layup would reduce M_cr) — but
 6.58× leaves headroom for a plausible orthotropic correction. (~4 s wall.)
+
+**Mesh convergence REVISITED — the eigen verification is UNCONSERVATIVELY
+mesh-biased; the 16×8 headlines are optimistic (2026-06-16).** Hypothesis (that
+the foundation+strip+eigen regime fixed V.2's unconservative bias) was REFUTED.
+`runs/mesh_converge_diag.py` re-evaluated the 1021.6 kg headline's worst
+linear-buckling λ at finer spanwise meshes (fixed design resampled via the V.0.5
+`resample_segment_radii`; band-based skin is mesh-independent): **λ = 2.76 (N=8,
+the headline mesh) → 1.52 (N=10) → 1.24 (N=12) → 1.39 (N=16)**, settling ~1.2–1.4
+for N ≥ 12 (N=8 reproduced 2.7637 exactly first). **The coarse N=8 λ 2.76 is the
+optimistic OUTLIER** — the true converged margin is ~1.3, *below* the SF 1.5 the
+sizer enforces. **Why:** the 7-spanwise-segment N=8 beam mesh cannot represent the
+short-wavelength beam-column buckling mode; finer meshes resolve it at a lower
+(truer) λ — the classic Euler beam-column DISCRETIZATION effect. The V.3b/V.3c
+regime change fixed the *sizer's closed-form* constraint mesh-dependence but NOT
+the *verifier's* discretized eigen-mode count, and V.3's "λ rises on finer meshes"
+was specific to the old V.6-era design's mode, not this one. **Implication
+(serious):** every eigen-verified headline (operational **1021.6 kg** and the 3 g
+survival **1575.3 kg**, all 16×8) is **unconservatively biased — its true
+converged buckling margin is below the 1.5 it was sized to**, so the
+mesh-converged designs are HEAVIER. The "−54.5% vs V.6" and the survival mass are
+partly coarse-mesh artifacts. **A mesh-converged RE-BASELINE (re-optimizing at
+N ≥ 12) is now the priority validity item** — and the eigen-verification protocol
+must run at a converged mesh, not 16×8. **Caveats:** this re-evaluates a
+*resampled fixed* design — the bias DIRECTION (down, large) is robust, but the
+absolute converged λ carries resampling-mapping noise (the non-monotonic
+1.24→1.39 at N12→N16 is likely mode-switching/mapping noise; ~1.3 is the signal);
+a true re-baseline will pin the magnitude and the corrected masses.
 
 **3 g slam survival MEASURED — 1575.3 kg, converged, eigen 3.77; slam is
 BUCKLING-governed, not deflection-governed (the deflection-overstated framing was
